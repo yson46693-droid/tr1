@@ -37,10 +37,12 @@
             e.stopPropagation();
             
             if (window.innerWidth <= 768) {
-                dashboardWrapper.classList.remove('sidebar-collapsed');
-            } else {
-                dashboardWrapper.classList.toggle('sidebar-collapsed');
+                dashboardWrapper.classList.remove('sidebar-open');
+                document.body.classList.remove('sidebar-open');
+                return;
             }
+            
+            dashboardWrapper.classList.toggle('sidebar-collapsed');
             
             // Save state to localStorage
             const isCollapsed = dashboardWrapper.classList.contains('sidebar-collapsed');
