@@ -431,7 +431,12 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 <?php 
                 $modulePath = __DIR__ . '/../modules/sales/customers.php';
                 if (file_exists($modulePath)) {
-                    include $modulePath;
+                    try {
+                        include $modulePath;
+                    } catch (Throwable $e) {
+                        error_log('Manager customers module error: ' . $e->getMessage());
+                        echo '<div class="alert alert-danger">حدث خطأ أثناء تحميل صفحة العملاء: ' . htmlspecialchars($e->getMessage()) . '</div>';
+                    }
                 } else {
                     echo '<div class="alert alert-warning">صفحة العملاء غير متاحة حالياً</div>';
                 }
