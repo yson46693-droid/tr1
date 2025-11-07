@@ -327,7 +327,8 @@ function restoreDatabase($backupId) {
         
         $connection->query('SET FOREIGN_KEY_CHECKS = 0');
         
-        foreach ($queries as $query) {
+        foreach ($queries as $rawQuery) {
+            $query = trim($rawQuery);
             if (empty($query) || preg_match('/^--/', $query)) {
                 continue;
             }
@@ -339,7 +340,13 @@ function restoreDatabase($backupId) {
                 if (strpos($lowerError, 'already exists') !== false && preg_match('/CREATE\s+TABLE\s+`?([a-z0-9_]+)`?/i', $query, $matches)) {
                     $tableName = $matches[1];
                     $connection->query("DROP TABLE IF EXISTS `$tableName`");
-                    $connection->query($query);
+                    if (!$connection->query($query)) {
+                        throw new Exception($connection->error ?: 'فشل إعادة إنشاء الجدول ' . $tableName);
+                    }
+                    continue;
+                }
+                
+                if (strpos($lowerError, 'already exists') !== false && preg_match('/ALTER\s+TABLE\s+`?([a-z0-9_]+)`?\s+ADD\s+(?:COLUMN\s+)?`?([a-z0-9_]+)`?/i', $query)) {
                     continue;
                 }
                 
