@@ -577,7 +577,7 @@ $currentUser = getCurrentUser();
                 <?php if (isLoggedIn()): ?>
                 <div class="topbar-dropdown">
                     <div class="topbar-user dropdown-toggle" id="userDropdown" data-bs-toggle="dropdown" role="button">
-                        <?php if (!empty($currentUser['profile_photo'])): ?>
+                        <?php if (isset($currentUser['profile_photo']) && !empty($currentUser['profile_photo'])): ?>
                             <img src="<?php echo htmlspecialchars($currentUser['profile_photo']); ?>" alt="Profile">
                         <?php else: ?>
                             <?php echo htmlspecialchars(mb_substr($currentUser['username'], 0, 1)); ?>

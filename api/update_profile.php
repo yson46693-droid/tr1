@@ -15,6 +15,16 @@ requireLogin();
 $currentUser = getCurrentUser();
 $db = db();
 
+$profilePhotoSupported = false;
+try {
+    $columnCheck = $db->queryOne("SHOW COLUMNS FROM users LIKE 'profile_photo'");
+    if (!empty($columnCheck)) {
+        $profilePhotoSupported = true;
+    }
+} catch (Exception $e) {
+    $profilePhotoSupported = false;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
@@ -28,29 +38,35 @@ if ($action === 'update_profile') {
     $email = trim($_POST['email'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $profilePhotoInput = trim($_POST['profile_photo'] ?? '');
-    $removePhoto = isset($_POST['remove_photo']) && $_POST['remove_photo'] === '1';
+    $removePhoto = false;
     $profilePhotoData = null;
     
-    if ($profilePhotoInput !== '') {
-        if (preg_match('/^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/i', $profilePhotoInput, $matches)) {
-            $decoded = base64_decode($matches[2], true);
-            if ($decoded === false) {
+    if ($profilePhotoSupported) {
+        $removePhoto = isset($_POST['remove_photo']) && $_POST['remove_photo'] === '1';
+        
+        if ($profilePhotoInput !== '') {
+            if (preg_match('/^data:image\/(png|jpe?g|gif|webp);base64,(.+)$/i', $profilePhotoInput, $matches)) {
+                $decoded = base64_decode($matches[2], true);
+                if ($decoded === false) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'صيغة الصورة غير صالحة']);
+                    exit;
+                }
+                if (strlen($decoded) > 2 * 1024 * 1024) {
+                    http_response_code(400);
+                    echo json_encode(['error' => 'حجم الصورة يجب ألا يتجاوز 2 ميجابايت']);
+                    exit;
+                }
+                $mimeSubtype = strtolower($matches[1]);
+                $mimeSubtype = $mimeSubtype === 'jpg' ? 'jpeg' : $mimeSubtype;
+                $mimeType = 'image/' . $mimeSubtype;
+                $profilePhotoData = 'data:' . $mimeType . ';base64,' . base64_encode($decoded);
+                $removePhoto = false;
+            } else {
                 http_response_code(400);
-                echo json_encode(['error' => 'صيغة الصورة غير صالحة']);
+                echo json_encode(['error' => 'نوع الصورة غير مدعوم']);
                 exit;
             }
-            if (strlen($decoded) > 2 * 1024 * 1024) {
-                http_response_code(400);
-                echo json_encode(['error' => 'حجم الصورة يجب ألا يتجاوز 2 ميجابايت']);
-                exit;
-            }
-            $mimeType = strtolower($matches[1]) === 'jpg' ? 'image/jpeg' : 'image/' . strtolower($matches[1]);
-            $profilePhotoData = 'data:' . $mimeType . ';base64,' . base64_encode($decoded);
-            $removePhoto = false;
-        } else {
-            http_response_code(400);
-            echo json_encode(['error' => 'نوع الصورة غير مدعوم']);
-            exit;
         }
     }
     
@@ -81,10 +97,10 @@ if ($action === 'update_profile') {
     // تحديث البيانات
     $updateFields = "full_name = ?, email = ?, phone = ?, updated_at = NOW()";
     $params = [$fullName, $email, $phone];
-    if ($profilePhotoData !== null) {
+    if ($profilePhotoSupported && $profilePhotoData !== null) {
         $updateFields .= ", profile_photo = ?";
         $params[] = $profilePhotoData;
-    } elseif ($removePhoto) {
+    } elseif ($profilePhotoSupported && $removePhoto) {
         $updateFields .= ", profile_photo = NULL";
     }
     $params[] = $currentUser['id'];

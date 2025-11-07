@@ -790,6 +790,12 @@ $lang = isset($translations) ? $translations : [];
         background: #f9fafb;
     }
     
+    .salary-row.total-row .salary-cell.value,
+    .salary-row.final-row .salary-cell.value {
+        border-top: none;
+        background: transparent;
+    }
+    
     .salary-amount {
         font-size: 16px;
     }

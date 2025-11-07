@@ -15,6 +15,16 @@ requireLogin();
 $currentUser = getCurrentUser();
 $db = db();
 
+$profilePhotoSupported = false;
+try {
+    $columnCheck = $db->queryOne("SHOW COLUMNS FROM users LIKE 'profile_photo'");
+    if (!empty($columnCheck)) {
+        $profilePhotoSupported = true;
+    }
+} catch (Exception $e) {
+    $profilePhotoSupported = false;
+}
+
 // استلام رسائل النجاح أو الخطأ من session (بعد redirect)
 $error = $_SESSION['error_message'] ?? '';
 $success = $_SESSION['success_message'] ?? '';
@@ -34,43 +44,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $currentPassword = $_POST['current_password'] ?? '';
         $newPassword = $_POST['new_password'] ?? '';
         $confirmPassword = $_POST['confirm_password'] ?? '';
-        $removePhoto = isset($_POST['remove_photo']) && $_POST['remove_photo'] === '1';
+        $removePhoto = false;
         $profilePhotoData = null;
-        
-        if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] !== UPLOAD_ERR_NO_FILE) {
-            if ($_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
-                $maxSize = 2 * 1024 * 1024;
-                if ($_FILES['profile_photo']['size'] > $maxSize) {
-                    $error = 'حجم الصورة يجب ألا يتجاوز 2 ميجابايت';
-                } else {
-                    $tmpPath = $_FILES['profile_photo']['tmp_name'];
-                    $mimeType = '';
-                    if (function_exists('mime_content_type')) {
-                        $mimeType = mime_content_type($tmpPath);
-                    }
-                    if (!$mimeType && class_exists('finfo')) {
-                        $mode = defined('FILEINFO_MIME_TYPE') ? FILEINFO_MIME_TYPE : 0;
-                        $finfo = finfo_open($mode);
-                        if ($finfo) {
-                            $mimeType = finfo_file($finfo, $tmpPath);
-                            finfo_close($finfo);
-                        }
-                    }
-                    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-                    if (!$mimeType || !in_array($mimeType, $allowedTypes, true)) {
-                        $error = 'نوع الصورة غير مدعوم';
+
+        if ($profilePhotoSupported) {
+            $removePhoto = isset($_POST['remove_photo']) && $_POST['remove_photo'] === '1';
+
+            if (isset($_FILES['profile_photo']) && $_FILES['profile_photo']['error'] !== UPLOAD_ERR_NO_FILE) {
+                if ($_FILES['profile_photo']['error'] === UPLOAD_ERR_OK) {
+                    $maxSize = 2 * 1024 * 1024;
+                    if ($_FILES['profile_photo']['size'] > $maxSize) {
+                        $error = 'حجم الصورة يجب ألا يتجاوز 2 ميجابايت';
                     } else {
-                        $imageData = file_get_contents($tmpPath);
-                        if ($imageData === false) {
-                            $error = 'تعذر قراءة الصورة';
+                        $tmpPath = $_FILES['profile_photo']['tmp_name'];
+                        $mimeType = '';
+                        if (function_exists('mime_content_type')) {
+                            $mimeType = mime_content_type($tmpPath);
+                        }
+                        if (!$mimeType && class_exists('finfo')) {
+                            $mode = defined('FILEINFO_MIME_TYPE') ? FILEINFO_MIME_TYPE : 0;
+                            $finfo = finfo_open($mode);
+                            if ($finfo) {
+                                $mimeType = finfo_file($finfo, $tmpPath);
+                                finfo_close($finfo);
+                            }
+                        }
+                        $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                        if (!$mimeType || !in_array($mimeType, $allowedTypes, true)) {
+                            $error = 'نوع الصورة غير مدعوم';
                         } else {
-                            $profilePhotoData = 'data:' . $mimeType . ';base64,' . base64_encode($imageData);
-                            $removePhoto = false;
+                            $imageData = file_get_contents($tmpPath);
+                            if ($imageData === false) {
+                                $error = 'تعذر قراءة الصورة';
+                            } else {
+                                $profilePhotoData = 'data:' . $mimeType . ';base64,' . base64_encode($imageData);
+                                $removePhoto = false;
+                            }
                         }
                     }
+                } else {
+                    $error = 'فشل رفع الصورة';
                 }
-            } else {
-                $error = 'فشل رفع الصورة';
             }
         }
         
@@ -92,10 +106,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (empty($error)) {
                 $updateFields = "full_name = ?, email = ?, phone = ?, updated_at = NOW()";
                 $params = [$fullName, $email, $phone];
-                if ($profilePhotoData !== null) {
+                if ($profilePhotoSupported && $profilePhotoData !== null) {
                     $updateFields .= ", profile_photo = ?";
                     $params[] = $profilePhotoData;
-                } elseif ($removePhoto) {
+                } elseif ($profilePhotoSupported && $removePhoto) {
                     $updateFields .= ", profile_photo = NULL";
                 }
                 $params[] = $currentUser['id'];
@@ -217,6 +231,7 @@ $dashboardUrl = getDashboardUrl($currentUser['role']);
                                     </div>
                                 </div>
                     
+                    <?php if ($profilePhotoSupported): ?>
                     <div class="mb-3">
                         <label class="form-label">
                             <i class="bi bi-image me-2"></i>الصورة الشخصية
@@ -243,6 +258,7 @@ $dashboardUrl = getDashboardUrl($currentUser['role']);
                             </div>
                         </div>
                     </div>
+                    <?php endif; ?>
                                 
                                 <div class="mb-3">
                                     <label for="full_name" class="form-label">
