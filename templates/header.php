@@ -517,6 +517,9 @@ $currentUser = getCurrentUser();
                 <button class="mobile-menu-toggle d-md-none" id="mobileMenuToggle" type="button">
                     <i class="bi bi-list"></i>
                 </button>
+                <button class="mobile-reload-btn d-md-none" id="mobileReloadBtn" type="button">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
                 <div class="breadcrumb-nav">
                     <?php 
                     $pageTitleText = isset($pageTitle) ? $pageTitle : (isset($lang['dashboard']) ? $lang['dashboard'] : 'لوحة التحكم');

@@ -12,6 +12,14 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    const mobileReloadBtn = document.getElementById('mobileReloadBtn');
+    if (mobileReloadBtn) {
+        mobileReloadBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            window.location.reload();
+        });
+    }
+    
     // تهيئة Popovers
     if (typeof bootstrap !== 'undefined') {
         const popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
