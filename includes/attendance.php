@@ -1,3 +1,30 @@
+function formatRoleName($role) {
+    $roleNames = [
+        'manager' => 'المدير',
+        'accountant' => 'المحاسب',
+        'sales' => 'مندوب المبيعات',
+        'production' => 'عامل الإنتاج',
+    ];
+    return $roleNames[$role] ?? $role;
+}
+
+function formatArabicDate($dateTime) {
+    try {
+        $dt = new DateTime($dateTime);
+    } catch (Exception $e) {
+        $dt = new DateTime();
+    }
+    return $dt->format('Y-m-d');
+}
+
+function formatArabicTime($dateTime) {
+    try {
+        $dt = new DateTime($dateTime);
+    } catch (Exception $e) {
+        $dt = new DateTime();
+    }
+    return $dt->format('H:i:s');
+}
 <?php
 /**
  * نظام الحضور والانصراف المتقدم
@@ -220,9 +247,9 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
             try {
                 $caption = "🔔 <b>تسجيل حضور جديد</b>\n\n";
                 $caption .= "👤 <b>الاسم:</b> {$userName}\n";
-                $caption .= "🏷️ <b>الدور:</b> {$role}\n";
-                $caption .= "📅 <b>التاريخ:</b> " . date('Y-m-d') . "\n";
-                $caption .= "🕐 <b>الوقت:</b> " . date('H:i:s') . "\n";
+                $caption .= "🏷️ <b>الدور:</b> " . formatRoleName($role) . "\n";
+                $caption .= "📅 <b>التاريخ:</b> " . formatArabicDate($now) . "\n";
+                $caption .= "🕐 <b>الوقت:</b> " . formatArabicTime($now) . "\n";
                 $caption .= "{$delayText}";
                 
                 $photoForTelegram = $savedPhotoAbsolute ?: $photoBase64;
@@ -244,9 +271,9 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
             try {
                 $message = "🔔 <b>تسجيل حضور جديد</b>\n\n";
                 $message .= "👤 <b>الاسم:</b> {$userName}\n";
-                $message .= "🏷️ <b>الدور:</b> {$role}\n";
-                $message .= "📅 <b>التاريخ:</b> " . date('Y-m-d') . "\n";
-                $message .= "🕐 <b>الوقت:</b> " . date('H:i:s') . "\n";
+                $message .= "🏷️ <b>الدور:</b> " . formatRoleName($role) . "\n";
+                $message .= "📅 <b>التاريخ:</b> " . formatArabicDate($now) . "\n";
+                $message .= "🕐 <b>الوقت:</b> " . formatArabicTime($now) . "\n";
                 $message .= "{$delayText}\n";
                 $message .= "⚠️ <i>لم يتم التقاط صورة</i>";
                 

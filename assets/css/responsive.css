@@ -126,6 +126,10 @@
         margin: -0.5rem;
         padding: 0;
     }
+    
+    #cameraModal .modal-dialog {
+        margin-top: 6vh;
+    }
 }
 
 /* ===== Tablet Styles ===== */
@@ -144,6 +148,10 @@
 @media (min-width: 769px) {
     .homeline-sidebar {
         transform: translateX(0);
+    }
+    
+    #cameraModal .modal-dialog {
+        margin-top: 8vh;
     }
     
     .mobile-menu-toggle {

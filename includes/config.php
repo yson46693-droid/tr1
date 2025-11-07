@@ -297,11 +297,12 @@ function preventDuplicateSubmission($successMessage = null, $redirectParams = []
         }
     }
     
-    // تنظيف URL من أي protocols
-    $redirectUrl = str_replace(['http://', 'https://'], '', $redirectUrl);
-    // استخدام substr بدلاً من str_starts_with للتوافق مع PHP < 8.0
-    if (substr($redirectUrl, 0, 1) !== '/') {
-        $redirectUrl = '/' . $redirectUrl;
+    // إذا لم يكن الرابط مطلقاً، تأكد من أنه يبدأ بشرطة مائلة
+    if (!preg_match('/^https?:\/\//i', $redirectUrl)) {
+        // استخدام substr بدلاً من str_starts_with للتوافق مع PHP < 8.0
+        if (substr($redirectUrl, 0, 1) !== '/') {
+            $redirectUrl = '/' . ltrim($redirectUrl, '/');
+        }
     }
     
     // التحقق من أن headers لم يتم إرسالها بعد
