@@ -469,6 +469,16 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 }
                 ?>
                 
+            <?php elseif ($page === 'production_reports'): ?>
+                <?php 
+                $modulePath = __DIR__ . '/../modules/manager/production_reports.php';
+                if (file_exists($modulePath)) {
+                    include $modulePath;
+                } else {
+                    echo '<div class="alert alert-warning">صفحة تقارير الإنتاج غير متاحة حالياً</div>';
+                }
+                ?>
+                
             <?php elseif ($page === 'import_packaging'): ?>
                 <!-- صفحة استيراد أدوات التعبئة -->
                 <?php 

@@ -67,6 +67,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => 'تقارير الإنتاج',
+                'icon' => 'bi-graph-up-arrow',
+                'url' => $baseUrl . 'manager.php?page=production_reports',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'production_reports'),
+                'badge' => null
+            ],
+            [
                 'title' => isset($lang['menu_warehouse_transfers']) ? $lang['menu_warehouse_transfers'] : 'نقل المخازن',
                 'icon' => 'bi-arrow-left-right',
                 'url' => $baseUrl . 'manager.php?page=warehouse_transfers',
