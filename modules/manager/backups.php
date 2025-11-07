@@ -56,7 +56,10 @@ $totalPages = ceil($totalBackups / $perPage);
 $backups = array_slice($allBackups, $offset, $perPage);
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-database me-2"></i>النسخ الاحتياطية</h2>
+    <div class="d-flex align-items-center gap-2">
+        <i class="bi bi-database text-primary fs-4"></i>
+        <h2 class="mb-0">النسخ الاحتياطية</h2>
+    </div>
     <button class="btn btn-primary" onclick="createBackup(event)">
         <i class="bi bi-plus-circle me-2"></i>إنشاء نسخة احتياطية
     </button>

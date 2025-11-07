@@ -63,14 +63,7 @@ switch ($role) {
                 'title' => isset($lang['menu_security']) ? $lang['menu_security'] : 'الأمان',
                 'icon' => 'bi-lock',
                 'url' => $baseUrl . 'manager.php?page=security',
-                'active' => ($currentPage === 'manager.php' && ($currentPageParam === 'security' || $currentPageParam === 'permissions')),
-                'badge' => null
-            ],
-            [
-                'title' => 'تقارير الإنتاج',
-                'icon' => 'bi-graph-up-arrow',
-                'url' => $baseUrl . 'manager.php?page=production_reports',
-                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'production_reports'),
+                'active' => ($currentPage === 'manager.php' && in_array($currentPageParam, ['security', 'permissions'])),
                 'badge' => null
             ],
             [

@@ -36,22 +36,16 @@ function getRelativeUrl(path) {
         // بناء المسار الأساسي ديناميكياً
         let basePath = '/';
         if (pathParts.length > 0) {
-            // استخدم جميع الأجزاء كـ base path (دون المجلدات الخاصة)
-            const filteredParts = pathParts.filter(p => p !== 'dashboard' && p !== 'modules' && p !== 'api');
-            if (filteredParts.length > 0) {
-                basePath = '/' + filteredParts.join('/') + '/';
+            const first = pathParts[0].toLowerCase();
+            if (first !== 'dashboard' && first !== 'modules' && !first.includes('.')) {
+                basePath = '/' + pathParts[0] + '/';
             }
         }
         
-        // بناء المسار النهائي
-        const finalPath = basePath + path;
-        
-        // تنظيف المسار: إزالة أي dashboard أو modules من المسار
-        return finalPath
+        return (basePath + path)
+            .replace(/\/{2,}/g, '/')
             .replace(/\/dashboard\/api\//g, '/api/')
-            .replace(/\/modules\/api\//g, '/api/')
-            .replace(/\/dashboard\//g, '/')
-            .replace(/\/modules\//g, '/');
+            .replace(/\/modules\/api\//g, '/api/');
     }
     return path;
 }

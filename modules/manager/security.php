@@ -414,6 +414,20 @@ $activeTab = $_GET['tab'] ?? 'security';
                 </div>
             </div>
             
+    <div class="tab-pane fade <?php echo $activeTab === 'backup' ? 'show active' : ''; ?>" 
+         id="backup-content"
+         role="tabpanel"
+         aria-labelledby="backup-tab">
+        <?php 
+        $backupModule = __DIR__ . '/../manager/backups.php';
+        if (file_exists($backupModule)) {
+            include $backupModule;
+        } else {
+            echo '<div class="alert alert-warning">صفحة النسخ الاحتياطي غير متاحة حالياً</div>';
+        }
+        ?>
+    </div>
+</div>
             <div class="col-12 col-md-8">
                 <div class="card shadow-sm">
                     <div class="card-header bg-primary text-white">
