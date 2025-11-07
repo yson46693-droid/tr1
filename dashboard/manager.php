@@ -368,13 +368,30 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 
             <?php elseif ($page === 'reports'): ?>
                 <h2><i class="bi bi-file-earmark-text me-2"></i><?php echo isset($lang['reports']) ? $lang['reports'] : 'التقارير'; ?></h2>
-                <div class="card shadow-sm">
-                    <div class="card-body">
-                        <button class="btn btn-primary" onclick="if(typeof generatePDFReport === 'function') { generatePDFReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
-                            <i class="bi bi-file-pdf me-2"></i>توليد تقرير PDF
-                        </button>
+                
+                <div class="card shadow-sm mb-4">
+                    <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+                        <div>
+                            <h5 class="mb-1"><i class="bi bi-file-earmark-text me-2"></i>أدوات سريعة</h5>
+                            <p class="text-muted mb-0">توليد تقرير مالي سريع بصيغة PDF أو Excel.</p>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-primary" onclick="if(typeof generatePDFReport === 'function') { generatePDFReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
+                                <i class="bi bi-file-pdf me-2"></i>توليد تقرير PDF
+                            </button>
+                            <button class="btn btn-outline-primary" onclick="if(typeof generateExcelReport === 'function') { generateExcelReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
+                                <i class="bi bi-file-earmark-spreadsheet me-2"></i>توليد تقرير Excel
+                            </button>
+                        </div>
                     </div>
                 </div>
+                
+                <?php 
+                $productionReportsModule = __DIR__ . '/../modules/manager/production_reports.php';
+                if (file_exists($productionReportsModule)) {
+                    include $productionReportsModule;
+                }
+                ?>
                 
             <?php elseif ($page === 'performance'): ?>
                 <h2><i class="bi bi-graph-up-arrow me-2"></i><?php echo isset($lang['performance']) ? $lang['performance'] : 'الأداء'; ?></h2>
@@ -385,12 +402,9 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 </div>
                 
             <?php elseif ($page === 'backups'): ?>
-                <!-- صفحة النسخ الاحتياطية -->
                 <?php 
-                $modulePath = __DIR__ . '/../modules/manager/backups.php';
-                if (file_exists($modulePath)) {
-                    include $modulePath;
-                }
+                header('Location: manager.php?page=security&tab=backup');
+                exit;
                 ?>
                 
             <?php elseif ($page === 'users'): ?>
@@ -466,16 +480,6 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                     include $modulePath;
                 } else {
                     echo '<div class="alert alert-warning">صفحة مخزن أدوات التعبئة غير متاحة حالياً</div>';
-                }
-                ?>
-                
-            <?php elseif ($page === 'production_reports'): ?>
-                <?php 
-                $modulePath = __DIR__ . '/../modules/manager/production_reports.php';
-                if (file_exists($modulePath)) {
-                    include $modulePath;
-                } else {
-                    echo '<div class="alert alert-warning">صفحة تقارير الإنتاج غير متاحة حالياً</div>';
                 }
                 ?>
                 

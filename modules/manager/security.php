@@ -235,6 +235,18 @@ $activeTab = $_GET['tab'] ?? 'security';
             <i class="bi bi-shield-check me-2"></i><span>الصلاحيات</span>
         </button>
     </li>
+    <li class="nav-item flex-shrink-0" role="presentation">
+        <button class="nav-link <?php echo $activeTab === 'backup' ? 'active' : ''; ?>" 
+                id="backup-tab" 
+                data-bs-toggle="tab" 
+                data-bs-target="#backup-content" 
+                type="button" 
+                role="tab" 
+                aria-controls="backup-content" 
+                aria-selected="<?php echo $activeTab === 'backup' ? 'true' : 'false'; ?>">
+            <i class="bi bi-hdd-stack me-2"></i><span>النسخ الاحتياطي</span>
+        </button>
+    </li>
 </ul>
 
 <div class="tab-content" id="securityTabsContent">
@@ -414,20 +426,6 @@ $activeTab = $_GET['tab'] ?? 'security';
                 </div>
             </div>
             
-    <div class="tab-pane fade <?php echo $activeTab === 'backup' ? 'show active' : ''; ?>" 
-         id="backup-content"
-         role="tabpanel"
-         aria-labelledby="backup-tab">
-        <?php 
-        $backupModule = __DIR__ . '/../manager/backups.php';
-        if (file_exists($backupModule)) {
-            include $backupModule;
-        } else {
-            echo '<div class="alert alert-warning">صفحة النسخ الاحتياطي غير متاحة حالياً</div>';
-        }
-        ?>
-    </div>
-</div>
             <div class="col-12 col-md-8">
                 <div class="card shadow-sm">
                     <div class="card-header bg-primary text-white">
@@ -566,6 +564,22 @@ $activeTab = $_GET['tab'] ?? 'security';
             </div>
         </div>
     </div>
+</div>
+
+<!-- Tab: النسخ الاحتياطي -->
+<div class="tab-pane fade <?php echo $activeTab === 'backup' ? 'show active' : ''; ?>" 
+     id="backup-content"
+     role="tabpanel"
+     aria-labelledby="backup-tab">
+    <?php 
+    $backupModule = __DIR__ . '/backups.php';
+    if (file_exists($backupModule)) {
+        include $backupModule;
+    } else {
+        echo '<div class="alert alert-warning">صفحة النسخ الاحتياطي غير متاحة حالياً</div>';
+    }
+    ?>
+</div>
 </div>
 
 <script>

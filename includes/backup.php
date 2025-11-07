@@ -334,10 +334,12 @@ function restoreDatabase($backupId) {
             $result = $connection->query($query);
             if ($result === false) {
                 $error = $connection->error ?? '';
-                if (stripos($error, 'already exists') !== false) {
-                    continue;
-                }
-                if (stripos($error, 'duplicate column') !== false) {
+                $lowerError = strtolower($error);
+                if (strpos($lowerError, 'already exists') !== false ||
+                    strpos($lowerError, 'duplicate column') !== false ||
+                    strpos($lowerError, 'unknown table') !== false ||
+                    strpos($lowerError, 'duplicate entry') !== false ||
+                    (strpos($lowerError, 'unknown column') !== false && strpos($query, 'DROP') !== false)) {
                     continue;
                 }
                 throw new Exception($error ?: 'خطأ غير معروف أثناء تنفيذ الاستعلام');

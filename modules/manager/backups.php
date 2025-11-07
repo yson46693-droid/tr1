@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/backup.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/path_helper.php';
 
 requireRole('manager');
 
@@ -180,8 +181,8 @@ $backups = array_slice($allBackups, $offset, $perPage);
                                     <div class="btn-group btn-group-sm" role="group">
                                         <?php if (in_array($backup['status'], ['success', 'completed'])): ?>
                                             <?php 
-                                            $downloadPath = str_replace('\\', '/', str_replace(BASE_PATH, '', $backup['file_path'])); 
-                                            $downloadPath = '/' . ltrim($downloadPath, '/');
+                                            $relativeFile = ltrim(str_replace(BASE_PATH, '', $backup['file_path']), '/');
+                                            $downloadPath = getRelativeUrl($relativeFile);
                                             ?>
                                             <a href="<?php echo htmlspecialchars($downloadPath); ?>" 
                                                class="btn btn-success" download>
@@ -266,8 +267,8 @@ $backups = array_slice($allBackups, $offset, $perPage);
                             <div class="d-grid gap-2 d-flex mt-3">
                                 <?php if (in_array($backup['status'], ['success', 'completed'])): ?>
                                     <?php 
-                                    $downloadPath = str_replace('\\', '/', str_replace(BASE_PATH, '', $backup['file_path'])); 
-                                    $downloadPath = '/' . ltrim($downloadPath, '/');
+                                    $relativeFile = ltrim(str_replace(BASE_PATH, '', $backup['file_path']), '/');
+                                    $downloadPath = getRelativeUrl($relativeFile);
                                     ?>
                                     <a href="<?php echo htmlspecialchars($downloadPath); ?>" 
                                        class="btn btn-sm btn-success flex-fill" download>

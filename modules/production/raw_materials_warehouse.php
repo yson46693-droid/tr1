@@ -1805,7 +1805,7 @@ if ($section === 'honey') {
     <?php
 } elseif ($section === 'nuts') {
     // جلب موردي المكسرات (جميع الموردين النشطين)
-    $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status = 'active' ORDER BY name");
+$nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status = 'active' AND type = 'nuts' ORDER BY name");
     
     // قسم المكسرات
     $nutsStats = [
