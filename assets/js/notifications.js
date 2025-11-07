@@ -1,0 +1,453 @@
+/**
+ * JavaScript للإشعارات
+ */
+
+let notificationCheckInterval = null;
+
+/**
+ * دالة مساعدة لحساب المسار الصحيح لـ API
+ */
+function getApiPath(endpoint) {
+    // احصل على المسار الحالي
+    const currentPath = window.location.pathname;
+    
+    // قسم المسار وأزل الأجزاء الفارغة
+    const parts = currentPath.split('/').filter(p => p);
+    
+    // ابحث عن أول جزء من المسار (مثل 'tr')
+    // تخطى 'dashboard' وملفات PHP و 'api'
+    const basePath = parts.find(p => p !== 'dashboard' && p !== 'api' && !p.endsWith('.php')) || '';
+    
+    // إذا كان هناك basePath، استخدمه، وإلا استخدم المسار المطلق
+    // تأكد من أن المسار يبدأ بـ /
+    const apiPath = basePath ? '/' + basePath + '/' + endpoint : '/' + endpoint;
+    
+    // تأكد من عدم وجود مسارات مكررة
+    return apiPath.replace(/\/+/g, '/');
+}
+
+/**
+ * التحقق من حالة الإذن لإشعارات المتصفح (بدون طلبه)
+ */
+function checkNotificationPermission() {
+    if ('Notification' in window) {
+        return Notification.permission;
+    }
+    return null;
+}
+
+/**
+ * طلب الإذن لإشعارات المتصفح (يجب استدعاؤه فقط من user event مثل click)
+ */
+function requestNotificationPermission() {
+    if (!('Notification' in window)) {
+        console.warn('This browser does not support notifications');
+        return Promise.resolve('not-supported');
+    }
+    
+    if (Notification.permission === 'granted') {
+        return Promise.resolve('granted');
+    }
+    
+    if (Notification.permission === 'denied') {
+        return Promise.resolve('denied');
+    }
+    
+    // طلب الإذن فقط إذا كان default
+    return Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+            console.log('Notification permission granted');
+        } else {
+            console.log('Notification permission denied');
+        }
+        return permission;
+    });
+}
+
+/**
+ * إرسال إشعار متصفح
+ */
+function showBrowserNotification(title, body, icon = null, tag = null) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        const notification = new Notification(title, {
+            body: body,
+            icon: icon || '/assets/icons/notification.png',
+            tag: tag,
+            badge: '/assets/icons/badge.png',
+            requireInteraction: false
+        });
+        
+        notification.onclick = function() {
+            window.focus();
+            this.close();
+        };
+        
+        // إغلاق تلقائي بعد 5 ثوان
+        setTimeout(() => {
+            notification.close();
+        }, 5000);
+    }
+}
+
+/**
+ * تحميل الإشعارات
+ */
+async function loadNotifications() {
+    try {
+        const apiPath = getApiPath('api/notifications.php');
+        const response = await fetch(apiPath + '?action=list&unread=true&limit=10', {
+            credentials: 'same-origin'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // قراءة الاستجابة كنص أولاً للتحقق من أنها JSON صالحة
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            // إذا لم تكن JSON، تجاهل بصمت
+            return;
+        }
+        
+        const responseText = await response.text();
+        
+        // التحقق من أن الاستجابة ليست فارغة
+        if (!responseText || responseText.trim() === '') {
+            return;
+        }
+        
+        let data;
+        try {
+            data = JSON.parse(responseText);
+        } catch (parseError) {
+            // إذا فشل parse JSON، تجاهل بصمت
+            console.warn('Invalid JSON response from notifications API:', parseError);
+            return;
+        }
+        
+        if (data && data.success) {
+            // التحقق من إشعار تغيير الدور أولاً
+            if (checkForRoleChangeNotification(data.data)) {
+                return; // سيتم إعادة التوجيه
+            }
+            
+            updateNotificationBadge(data.data ? data.data.length : 0);
+            updateNotificationList(data.data || []);
+            
+            // إرسال إشعارات متصفح للإشعارات الجديدة
+            if (data.data && data.data.length > 0) {
+                const firstNotification = data.data[0];
+                if (firstNotification.created_at && new Date(firstNotification.created_at) > new Date(Date.now() - 60000)) {
+                    // إشعار جديد خلال الدقيقة الماضية
+                    showBrowserNotification(
+                        firstNotification.title || '',
+                        firstNotification.message || '',
+                        null,
+                        'notification_' + firstNotification.id
+                    );
+                }
+            }
+        }
+    } catch (error) {
+        // تجاهل أخطاء CORS بصمت
+        if (error.name === 'TypeError' && (error.message.includes('CORS') || error.message.includes('fetch'))) {
+            return;
+        }
+        // تجاهل أخطاء JSON parse بصمت
+        if (error.name === 'SyntaxError' && error.message.includes('JSON')) {
+            return;
+        }
+        // تسجيل الأخطاء الأخرى فقط
+        if (error.message && !error.message.includes('JSON') && !error.message.includes('Unexpected end')) {
+            console.error('Error loading notifications:', error);
+        }
+    }
+}
+
+/**
+ * تحديث عداد الإشعارات
+ */
+async function updateNotificationBadge(count = null) {
+    if (count === null) {
+        try {
+            const apiPath = getApiPath('api/notifications.php');
+            const response = await fetch(apiPath + '?action=count');
+            const data = await response.json();
+            count = data.count || 0;
+        } catch (error) {
+            // تجاهل أخطاء CORS بصمت
+            if (error.name === 'TypeError' && error.message.includes('CORS')) {
+                console.log('CORS error ignored in notification count');
+                return;
+            }
+            console.error('Error getting notification count:', error);
+            return;
+        }
+    }
+    
+    const badge = document.getElementById('notificationBadge');
+    if (badge) {
+        if (count > 0) {
+            badge.textContent = count;
+            badge.style.display = 'inline-block';
+        } else {
+            badge.style.display = 'none';
+        }
+    }
+}
+
+/**
+ * التحقق من إشعار تغيير الدور وإجبار إعادة تسجيل الدخول
+ */
+function checkForRoleChangeNotification(notifications) {
+    // البحث عن إشعار تغيير الدور غير المقروء
+    const roleChangeNotification = notifications.find(n => 
+        n.read == 0 && 
+        (n.title.includes('تغيير دور') || n.title.includes('تغيير دور الحساب') || n.message.includes('تم تغيير دور'))
+    );
+    
+    if (roleChangeNotification) {
+        // إشعار تغيير الدور موجود - إجبار إعادة تسجيل الدخول
+        console.warn('Role change detected. Forcing logout and cache clear.');
+        
+        // مسح الكاش
+        if ('caches' in window) {
+            caches.keys().then(function(names) {
+                for (let name of names) {
+                    caches.delete(name);
+                }
+            });
+        }
+        
+        // مسح localStorage و sessionStorage
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+        } catch (e) {
+            console.error('Error clearing storage:', e);
+        }
+        
+        // إظهار رسالة للمستخدم
+        const message = 'تم تغيير دور حسابك. يرجى تسجيل الخروج وإعادة تسجيل الدخول لتفعيل التغييرات.';
+        alert(message);
+        
+        // إعادة توجيه إلى صفحة تسجيل الخروج
+        // حساب المسار ديناميكياً
+        let logoutUrl = roleChangeNotification.link;
+        if (!logoutUrl) {
+            const currentPath = window.location.pathname;
+            const pathParts = currentPath.split('/').filter(p => p && !p.endsWith('.php') && p !== 'dashboard' && p !== 'modules' && p !== 'api');
+            const basePath = pathParts.length > 0 ? '/' + pathParts[0] + '/' : '/';
+            logoutUrl = basePath + 'logout.php';
+        }
+        window.location.href = logoutUrl;
+        
+        return true;
+    }
+    
+    return false;
+}
+
+/**
+ * تحديث قائمة الإشعارات
+ */
+function updateNotificationList(notifications) {
+    const list = document.getElementById('notificationsList');
+    if (!list) return;
+    
+    // التحقق من إشعار تغيير الدور أولاً
+    if (checkForRoleChangeNotification(notifications)) {
+        return; // سيتم إعادة التوجيه، لا حاجة لتحديث القائمة
+    }
+    
+    if (notifications.length === 0) {
+        list.innerHTML = '<small class="text-muted">لا توجد إشعارات</small>';
+        return;
+    }
+    
+    let html = '';
+    notifications.forEach(notification => {
+        const typeClass = {
+            'info': 'text-info',
+            'success': 'text-success',
+            'warning': 'text-warning',
+            'error': 'text-danger',
+            'approval': 'text-primary'
+        }[notification.type] || 'text-info';
+        
+        const icon = {
+            'info': 'bi-info-circle',
+            'success': 'bi-check-circle',
+            'warning': 'bi-exclamation-triangle',
+            'error': 'bi-x-circle',
+            'approval': 'bi-check-square'
+        }[notification.type] || 'bi-bell';
+        
+        const unreadClass = notification.read == 0 ? 'unread' : '';
+        const timeAgo = getTimeAgo(notification.created_at);
+        
+        html += `
+            <div class="notification-item ${unreadClass}" data-id="${notification.id}">
+                <div class="d-flex align-items-start">
+                    <i class="bi ${icon} ${typeClass} me-2 mt-1"></i>
+                    <div class="flex-grow-1">
+                        <div class="fw-bold">${notification.title}</div>
+                        <div class="small text-muted">${notification.message}</div>
+                        <div class="small text-muted mt-1">${timeAgo}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    list.innerHTML = html;
+    
+    // إضافة مستمعي الأحداث
+    list.querySelectorAll('.notification-item').forEach(item => {
+        item.addEventListener('click', function() {
+            const notificationId = this.getAttribute('data-id');
+            markNotificationAsRead(notificationId);
+            
+            if (notifications.find(n => n.id == notificationId && n.link)) {
+                const notification = notifications.find(n => n.id == notificationId);
+                window.location.href = notification.link;
+            }
+        });
+    });
+}
+
+/**
+ * تحديد إشعار كمقروء
+ */
+async function markNotificationAsRead(notificationId) {
+    try {
+        const apiPath = getApiPath('api/notifications.php');
+        await fetch(apiPath, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'mark_read',
+                id: notificationId
+            })
+        });
+        
+        // إعادة تحميل الإشعارات
+        loadNotifications();
+    } catch (error) {
+        // تجاهل أخطاء CORS بصمت
+        if (error.name === 'TypeError' && error.message.includes('CORS')) {
+            console.log('CORS error ignored when marking notification as read');
+            return;
+        }
+        console.error('Error marking notification as read:', error);
+    }
+}
+
+/**
+ * تحديد جميع الإشعارات كمقروءة
+ */
+async function markAllNotificationsAsRead() {
+    try {
+        const apiPath = getApiPath('api/notifications.php');
+        await fetch(apiPath, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                action: 'mark_all_read'
+            })
+        });
+        
+        // إعادة تحميل الإشعارات
+        loadNotifications();
+    } catch (error) {
+        // تجاهل أخطاء CORS بصمت
+        if (error.name === 'TypeError' && error.message.includes('CORS')) {
+            console.log('CORS error ignored when marking all notifications as read');
+            return;
+        }
+        console.error('Error marking all notifications as read:', error);
+    }
+}
+
+/**
+ * حساب الوقت المنقضي
+ */
+function getTimeAgo(dateString) {
+    const now = new Date();
+    const date = new Date(dateString);
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    
+    if (diffMins < 1) {
+        return 'الآن';
+    } else if (diffMins < 60) {
+        return `منذ ${diffMins} دقيقة`;
+    } else if (diffHours < 24) {
+        return `منذ ${diffHours} ساعة`;
+    } else if (diffDays < 7) {
+        return `منذ ${diffDays} يوم`;
+    } else {
+        return date.toLocaleDateString('ar-EG');
+    }
+}
+
+// تهيئة النظام عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    // التحقق من حالة الإذن (بدون طلبه تلقائياً)
+    const permission = checkNotificationPermission();
+    if (permission === 'granted') {
+        console.log('Notification permission already granted');
+    } else if (permission === 'default') {
+        console.log('Notification permission not yet requested');
+    }
+    
+    // تحميل الإشعارات فوراً
+    loadNotifications();
+    
+    // تحديث الإشعارات (استخدام الفترة من config أو 60 ثانية افتراضياً)
+    if (typeof NOTIFICATION_POLL_INTERVAL !== 'undefined') {
+        notificationCheckInterval = setInterval(loadNotifications, NOTIFICATION_POLL_INTERVAL);
+    } else {
+        notificationCheckInterval = setInterval(loadNotifications, 60000); // 60 ثانية بدلاً من 5 ثوان
+    }
+    
+    // طلب الإذن عند النقر على أيقونة الإشعارات (user-generated event)
+    // البحث عن أيقونة الإشعارات في header
+    const notificationDropdown = document.getElementById('notificationsDropdown');
+    const notificationBadge = document.getElementById('notificationBadge');
+    
+    // استخدام أي عنصر متاح (dropdown link أو badge container)
+    const notificationIcon = notificationDropdown || 
+                             (notificationBadge?.closest('a')) ||
+                             (notificationBadge?.closest('button')) ||
+                             document.querySelector('[data-notification-icon]') ||
+                             document.querySelector('.notification-icon');
+    
+    if (notificationIcon) {
+        // إضافة event listener عند النقر على أيقونة الإشعارات
+        // يجب طلب الإذن مباشرة في event handler (user-generated event)
+        notificationIcon.addEventListener('click', function(e) {
+            // طلب الإذن فقط إذا لم يكن مُمنحاً بالفعل
+            if (checkNotificationPermission() === 'default') {
+                requestNotificationPermission().catch(err => {
+                    console.error('Error requesting notification permission:', err);
+                });
+            }
+        }, { once: false, passive: true });
+    }
+});
+
+// إيقاف التحديث عند مغادرة الصفحة
+window.addEventListener('beforeunload', function() {
+    if (notificationCheckInterval) {
+        clearInterval(notificationCheckInterval);
+    }
+});
+

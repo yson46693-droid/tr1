@@ -1,0 +1,909 @@
+<?php
+/**
+ * صفحة إدارة طلبات العملاء
+ */
+
+if (!defined('ACCESS_ALLOWED')) {
+    die('Direct access not allowed');
+}
+
+require_once __DIR__ . '/../../includes/config.php';
+require_once __DIR__ . '/../../includes/db.php';
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/notifications.php';
+
+requireRole(['sales', 'accountant', 'manager']);
+
+$currentUser = getCurrentUser();
+$db = db();
+$error = '';
+$success = '';
+
+// Pagination
+$pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
+$perPage = 20;
+$offset = ($pageNum - 1) * $perPage;
+
+// البحث والفلترة
+$filters = [
+    'customer_id' => $_GET['customer_id'] ?? '',
+    'order_number' => $_GET['order_number'] ?? '',
+    'status' => $_GET['status'] ?? '',
+    'priority' => $_GET['priority'] ?? '',
+    'date_from' => $_GET['date_from'] ?? '',
+    'date_to' => $_GET['date_to'] ?? ''
+];
+
+$filters = array_filter($filters, function($value) {
+    return $value !== '';
+});
+
+// معالجة العمليات
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+    
+    if ($action === 'create_order') {
+        $customerId = intval($_POST['customer_id'] ?? 0);
+        $salesRepId = !empty($_POST['sales_rep_id']) ? intval($_POST['sales_rep_id']) : null;
+        $orderDate = $_POST['order_date'] ?? date('Y-m-d');
+        $deliveryDate = !empty($_POST['delivery_date']) ? $_POST['delivery_date'] : null;
+        $priority = $_POST['priority'] ?? 'normal';
+        $notes = trim($_POST['notes'] ?? '');
+        
+        // معالجة العناصر
+        $items = [];
+        if (isset($_POST['items']) && is_array($_POST['items'])) {
+            foreach ($_POST['items'] as $item) {
+                if (!empty($item['product_id']) && $item['quantity'] > 0 && $item['unit_price'] > 0) {
+                    $items[] = [
+                        'product_id' => intval($item['product_id']),
+                        'quantity' => floatval($item['quantity']),
+                        'unit_price' => floatval($item['unit_price']),
+                        'total_price' => floatval($item['quantity']) * floatval($item['unit_price'])
+                    ];
+                }
+            }
+        }
+        
+        if ($customerId <= 0 || empty($items)) {
+            $error = 'يجب إدخال العميل وعناصر الطلب';
+        } else {
+            // توليد رقم طلب
+            $year = date('Y');
+            $month = date('m');
+            $lastOrder = $db->queryOne(
+                "SELECT order_number FROM customer_orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1",
+                ["ORD-{$year}{$month}-%"]
+            );
+            
+            $serial = 1;
+            if ($lastOrder) {
+                $parts = explode('-', $lastOrder['order_number']);
+                $serial = intval($parts[2] ?? 0) + 1;
+            }
+            $orderNumber = sprintf("ORD-%s%s-%04d", $year, $month, $serial);
+            
+            // حساب المبالغ
+            $subtotal = 0;
+            foreach ($items as $item) {
+                $subtotal += $item['total_price'];
+            }
+            $discountAmount = floatval($_POST['discount_amount'] ?? 0);
+            $totalAmount = $subtotal - $discountAmount;
+            
+            // إنشاء الطلب
+            $db->execute(
+                "INSERT INTO customer_orders 
+                (order_number, customer_id, sales_rep_id, order_date, delivery_date, 
+                 subtotal, discount_amount, total_amount, priority, notes, created_by, status) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+                [
+                    $orderNumber,
+                    $customerId,
+                    $salesRepId ?? $currentUser['id'],
+                    $orderDate,
+                    $deliveryDate,
+                    $subtotal,
+                    $discountAmount,
+                    $totalAmount,
+                    $priority,
+                    $notes,
+                    $currentUser['id']
+                ]
+            );
+            
+            $orderId = $db->getLastInsertId();
+            
+            // إضافة العناصر
+            foreach ($items as $item) {
+                $db->execute(
+                    "INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price) 
+                     VALUES (?, ?, ?, ?, ?)",
+                    [
+                        $orderId,
+                        $item['product_id'],
+                        $item['quantity'],
+                        $item['unit_price'],
+                        $item['total_price']
+                    ]
+                );
+            }
+            
+            // إرسال إشعار للمديرين
+            notifyManagers(
+                'طلب عميل جديد',
+                "تم إنشاء طلب جديد رقم {$orderNumber} من العميل",
+                'info',
+                "dashboard/sales.php?page=orders&id={$orderId}"
+            );
+            
+            logAudit($currentUser['id'], 'create_order', 'customer_order', $orderId, null, [
+                'order_number' => $orderNumber,
+                'total_amount' => $totalAmount
+            ]);
+            
+            $success = 'تم إنشاء الطلب بنجاح: ' . $orderNumber;
+        }
+    } elseif ($action === 'update_status') {
+        $orderId = intval($_POST['order_id'] ?? 0);
+        $status = $_POST['status'] ?? '';
+        
+        if ($orderId > 0 && !empty($status)) {
+            $oldOrder = $db->queryOne("SELECT status FROM customer_orders WHERE id = ?", [$orderId]);
+            
+            $db->execute(
+                "UPDATE customer_orders SET status = ?, updated_at = NOW() WHERE id = ?",
+                [$status, $orderId]
+            );
+            
+            logAudit($currentUser['id'], 'update_order_status', 'customer_order', $orderId, 
+                     ['old_status' => $oldOrder['status']], 
+                     ['new_status' => $status]);
+            
+            $success = 'تم تحديث حالة الطلب بنجاح';
+        }
+    }
+}
+
+// إذا كان المستخدم مندوب مبيعات، عرض فقط طلباته
+if ($currentUser['role'] === 'sales') {
+    $filters['sales_rep_id'] = $currentUser['id'];
+}
+
+// الحصول على الطلبات
+$sql = "SELECT o.*, c.name as customer_name, u.full_name as sales_rep_name
+        FROM customer_orders o
+        LEFT JOIN customers c ON o.customer_id = c.id
+        LEFT JOIN users u ON o.sales_rep_id = u.id
+        WHERE 1=1";
+
+$countSql = "SELECT COUNT(*) as total FROM customer_orders WHERE 1=1";
+$params = [];
+
+// إذا كان المستخدم مندوب مبيعات، فلتر حسب sales_rep_id
+if ($currentUser['role'] === 'sales') {
+    $sql .= " AND o.sales_rep_id = ?";
+    $countSql .= " AND sales_rep_id = ?";
+    $params[] = $currentUser['id'];
+}
+
+if (!empty($filters['customer_id'])) {
+    $sql .= " AND o.customer_id = ?";
+    $countSql .= " AND customer_id = ?";
+    $params[] = $filters['customer_id'];
+}
+
+if (!empty($filters['order_number'])) {
+    $sql .= " AND o.order_number LIKE ?";
+    $countSql .= " AND order_number LIKE ?";
+    $params[] = "%{$filters['order_number']}%";
+}
+
+if (!empty($filters['status'])) {
+    $sql .= " AND o.status = ?";
+    $countSql .= " AND status = ?";
+    $params[] = $filters['status'];
+}
+
+if (!empty($filters['priority'])) {
+    $sql .= " AND o.priority = ?";
+    $countSql .= " AND priority = ?";
+    $params[] = $filters['priority'];
+}
+
+if (!empty($filters['date_from'])) {
+    $sql .= " AND DATE(o.order_date) >= ?";
+    $countSql .= " AND DATE(order_date) >= ?";
+    $params[] = $filters['date_from'];
+}
+
+if (!empty($filters['date_to'])) {
+    $sql .= " AND DATE(o.order_date) <= ?";
+    $countSql .= " AND DATE(order_date) <= ?";
+    $params[] = $filters['date_to'];
+}
+
+$totalOrders = $db->queryOne($countSql, $params);
+$totalOrders = $totalOrders['total'] ?? 0;
+$totalPages = ceil($totalOrders / $perPage);
+
+$sql .= " ORDER BY o.created_at DESC LIMIT ? OFFSET ?";
+$params[] = $perPage;
+$params[] = $offset;
+$orders = $db->query($sql, $params);
+
+$customers = $db->query("SELECT id, name FROM customers WHERE status = 'active' ORDER BY name");
+$products = $db->query("SELECT id, name, unit_price FROM products WHERE status = 'active' ORDER BY name");
+$salesReps = $db->query("SELECT id, username, full_name FROM users WHERE role = 'sales' AND status = 'active' ORDER BY username");
+
+// طلب محدد للعرض
+$selectedOrder = null;
+if (isset($_GET['id'])) {
+    $orderId = intval($_GET['id']);
+    $selectedOrder = $db->queryOne(
+        "SELECT o.*, c.name as customer_name, c.phone as customer_phone, c.address as customer_address,
+                u.full_name as sales_rep_name
+         FROM customer_orders o
+         LEFT JOIN customers c ON o.customer_id = c.id
+         LEFT JOIN users u ON o.sales_rep_id = u.id
+         WHERE o.id = ?",
+        [$orderId]
+    );
+    
+    if ($selectedOrder) {
+        $selectedOrder['items'] = $db->query(
+            "SELECT oi.*, p.name as product_name
+             FROM order_items oi
+             LEFT JOIN products p ON oi.product_id = p.id
+             WHERE oi.order_id = ?
+             ORDER BY oi.id",
+            [$orderId]
+        );
+    }
+}
+?>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-cart-check me-2"></i>إدارة طلبات العملاء</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addOrderModal">
+        <i class="bi bi-plus-circle me-2"></i>إنشاء طلب جديد
+    </button>
+</div>
+
+<?php if ($error): ?>
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <?php echo htmlspecialchars($error); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($success): ?>
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle-fill me-2"></i>
+        <?php echo htmlspecialchars($success); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($selectedOrder): ?>
+    <!-- عرض طلب محدد -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">طلب رقم: <?php echo htmlspecialchars($selectedOrder['order_number']); ?></h5>
+            <a href="?page=orders" class="btn btn-light btn-sm">
+                <i class="bi bi-x"></i>
+            </a>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-6">
+                    <table class="table table-bordered">
+                        <tr>
+                            <th width="40%">العميل:</th>
+                            <td><?php echo htmlspecialchars($selectedOrder['customer_name'] ?? '-'); ?></td>
+                        </tr>
+                        <tr>
+                            <th>تاريخ الطلب:</th>
+                            <td><?php echo formatDate($selectedOrder['order_date']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>تاريخ التسليم المطلوب:</th>
+                            <td><?php echo $selectedOrder['delivery_date'] ? formatDate($selectedOrder['delivery_date']) : '-'; ?></td>
+                        </tr>
+                        <tr>
+                            <th>مندوب المبيعات:</th>
+                            <td><?php echo htmlspecialchars($selectedOrder['sales_rep_name'] ?? '-'); ?></td>
+                        </tr>
+                        <tr>
+                            <th>الأولوية:</th>
+                            <td>
+                                <span class="badge bg-<?php 
+                                    echo $selectedOrder['priority'] === 'urgent' ? 'danger' : 
+                                        ($selectedOrder['priority'] === 'high' ? 'warning' : 
+                                        ($selectedOrder['priority'] === 'normal' ? 'info' : 'secondary')); 
+                                ?>">
+                                    <?php 
+                                    $priorities = [
+                                        'low' => 'منخفضة',
+                                        'normal' => 'عادية',
+                                        'high' => 'عالية',
+                                        'urgent' => 'عاجلة'
+                                    ];
+                                    echo $priorities[$selectedOrder['priority']] ?? $selectedOrder['priority'];
+                                    ?>
+                                </span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <table class="table table-bordered">
+                        <tr>
+                            <th width="40%">الحالة:</th>
+                            <td>
+                                <span class="badge bg-<?php 
+                                    echo $selectedOrder['status'] === 'delivered' ? 'success' : 
+                                        ($selectedOrder['status'] === 'in_production' ? 'info' : 
+                                        ($selectedOrder['status'] === 'cancelled' ? 'danger' : 'warning')); 
+                                ?>">
+                                    <?php 
+                                    $statuses = [
+                                        'pending' => 'معلق',
+                                        'confirmed' => 'مؤكد',
+                                        'in_production' => 'قيد الإنتاج',
+                                        'ready' => 'جاهز',
+                                        'delivered' => 'تم التسليم',
+                                        'cancelled' => 'ملغى'
+                                    ];
+                                    echo $statuses[$selectedOrder['status']] ?? $selectedOrder['status'];
+                                    ?>
+                                </span>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th>المجموع الفرعي:</th>
+                            <td><?php echo formatCurrency($selectedOrder['subtotal']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>الخصم:</th>
+                            <td><?php echo formatCurrency($selectedOrder['discount_amount']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>الإجمالي:</th>
+                            <td><strong><?php echo formatCurrency($selectedOrder['total_amount']); ?></strong></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+            
+            <?php if (!empty($selectedOrder['items'])): ?>
+                <h6 class="mt-3">عناصر الطلب:</h6>
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>المنتج</th>
+                                <th>الكمية</th>
+                                <th>سعر الوحدة</th>
+                                <th>الإجمالي</th>
+                                <th>حالة الإنتاج</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($selectedOrder['items'] as $item): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
+                                    <td><?php echo number_format($item['quantity'], 2); ?></td>
+                                    <td><?php echo formatCurrency($item['unit_price']); ?></td>
+                                    <td><?php echo formatCurrency($item['total_price']); ?></td>
+                                    <td>
+                                        <span class="badge bg-<?php 
+                                            echo $item['production_status'] === 'completed' ? 'success' : 
+                                                ($item['production_status'] === 'in_production' ? 'info' : 'warning'); 
+                                        ?>">
+                                            <?php 
+                                            $prodStatuses = [
+                                                'pending' => 'معلق',
+                                                'in_production' => 'قيد الإنتاج',
+                                                'completed' => 'مكتمل'
+                                            ];
+                                            echo $prodStatuses[$item['production_status']] ?? $item['production_status'];
+                                            ?>
+                                        </span>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+            
+            <?php if ($selectedOrder['notes']): ?>
+                <div class="mt-3">
+                    <h6>ملاحظات:</h6>
+                    <p><?php echo nl2br(htmlspecialchars($selectedOrder['notes'])); ?></p>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+<?php endif; ?>
+
+<!-- البحث والفلترة -->
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="GET" class="row g-3">
+            <input type="hidden" name="page" value="orders">
+            <div class="col-md-3">
+                <label class="form-label">رقم الطلب</label>
+                <input type="text" class="form-control" name="order_number" 
+                       value="<?php echo htmlspecialchars($filters['order_number'] ?? ''); ?>" 
+                       placeholder="ORD-...">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">العميل</label>
+                <select class="form-select" name="customer_id">
+                    <option value="">جميع العملاء</option>
+                    <?php 
+                    require_once __DIR__ . '/../../includes/path_helper.php';
+                    $selectedCustomerId = isset($filters['customer_id']) ? intval($filters['customer_id']) : 0;
+                    $customerValid = isValidSelectValue($selectedCustomerId, $customers, 'id');
+                    foreach ($customers as $customer): ?>
+                        <option value="<?php echo $customer['id']; ?>" 
+                                <?php echo $customerValid && $selectedCustomerId == $customer['id'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($customer['name']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">الحالة</label>
+                <select class="form-select" name="status">
+                    <option value="">جميع الحالات</option>
+                    <option value="pending" <?php echo ($filters['status'] ?? '') === 'pending' ? 'selected' : ''; ?>>معلق</option>
+                    <option value="confirmed" <?php echo ($filters['status'] ?? '') === 'confirmed' ? 'selected' : ''; ?>>مؤكد</option>
+                    <option value="in_production" <?php echo ($filters['status'] ?? '') === 'in_production' ? 'selected' : ''; ?>>قيد الإنتاج</option>
+                    <option value="ready" <?php echo ($filters['status'] ?? '') === 'ready' ? 'selected' : ''; ?>>جاهز</option>
+                    <option value="delivered" <?php echo ($filters['status'] ?? '') === 'delivered' ? 'selected' : ''; ?>>تم التسليم</option>
+                    <option value="cancelled" <?php echo ($filters['status'] ?? '') === 'cancelled' ? 'selected' : ''; ?>>ملغى</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">الأولوية</label>
+                <select class="form-select" name="priority">
+                    <option value="">جميع الأولويات</option>
+                    <option value="low" <?php echo ($filters['priority'] ?? '') === 'low' ? 'selected' : ''; ?>>منخفضة</option>
+                    <option value="normal" <?php echo ($filters['priority'] ?? '') === 'normal' ? 'selected' : ''; ?>>عادية</option>
+                    <option value="high" <?php echo ($filters['priority'] ?? '') === 'high' ? 'selected' : ''; ?>>عالية</option>
+                    <option value="urgent" <?php echo ($filters['priority'] ?? '') === 'urgent' ? 'selected' : ''; ?>>عاجلة</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">من تاريخ</label>
+                <input type="date" class="form-control" name="date_from" 
+                       value="<?php echo htmlspecialchars($filters['date_from'] ?? ''); ?>">
+            </div>
+            <div class="col-md-1">
+                <label class="form-label">&nbsp;</label>
+                <button type="submit" class="btn btn-primary w-100">
+                    <i class="bi bi-search"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- قائمة الطلبات -->
+<div class="card shadow-sm">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">قائمة الطلبات (<?php echo $totalOrders; ?>)</h5>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-striped table-hover">
+                <thead>
+                    <tr>
+                        <th>رقم الطلب</th>
+                        <th>العميل</th>
+                        <th>تاريخ الطلب</th>
+                        <th>تاريخ التسليم</th>
+                        <th>المبلغ الإجمالي</th>
+                        <th>الأولوية</th>
+                        <th>الحالة</th>
+                        <th>الإجراءات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($orders)): ?>
+                        <tr>
+                            <td colspan="8" class="text-center text-muted">لا توجد طلبات</td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($orders as $order): ?>
+                            <tr>
+                                <td>
+                                    <a href="?page=orders&id=<?php echo $order['id']; ?>" class="text-decoration-none">
+                                        <strong><?php echo htmlspecialchars($order['order_number']); ?></strong>
+                                    </a>
+                                </td>
+                                <td><?php echo htmlspecialchars($order['customer_name'] ?? '-'); ?></td>
+                                <td><?php echo formatDate($order['order_date']); ?></td>
+                                <td><?php echo $order['delivery_date'] ? formatDate($order['delivery_date']) : '-'; ?></td>
+                                <td><?php echo formatCurrency($order['total_amount']); ?></td>
+                                <td>
+                                    <span class="badge bg-<?php 
+                                        echo $order['priority'] === 'urgent' ? 'danger' : 
+                                            ($order['priority'] === 'high' ? 'warning' : 
+                                            ($order['priority'] === 'normal' ? 'info' : 'secondary')); 
+                                    ?>">
+                                        <?php 
+                                        $priorities = [
+                                            'low' => 'منخفضة',
+                                            'normal' => 'عادية',
+                                            'high' => 'عالية',
+                                            'urgent' => 'عاجلة'
+                                        ];
+                                        echo $priorities[$order['priority']] ?? $order['priority'];
+                                        ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-<?php 
+                                        echo $order['status'] === 'delivered' ? 'success' : 
+                                            ($order['status'] === 'in_production' ? 'info' : 
+                                            ($order['status'] === 'cancelled' ? 'danger' : 'warning')); 
+                                    ?>">
+                                        <?php 
+                                        $statuses = [
+                                            'pending' => 'معلق',
+                                            'confirmed' => 'مؤكد',
+                                            'in_production' => 'قيد الإنتاج',
+                                            'ready' => 'جاهز',
+                                            'delivered' => 'تم التسليم',
+                                            'cancelled' => 'ملغى'
+                                        ];
+                                        echo $statuses[$order['status']] ?? $order['status'];
+                                        ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a href="?page=orders&id=<?php echo $order['id']; ?>" 
+                                           class="btn btn-info" title="عرض">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        <?php if ($order['status'] !== 'delivered' && $order['status'] !== 'cancelled'): ?>
+                                        <button class="btn btn-warning" 
+                                                onclick="showStatusModal(<?php echo $order['id']; ?>, '<?php echo $order['status']; ?>')"
+                                                title="تغيير الحالة">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pagination -->
+        <?php if ($totalPages > 1): ?>
+        <nav aria-label="Page navigation" class="mt-3">
+            <ul class="pagination justify-content-center flex-wrap">
+                <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
+                    <a class="page-link" href="?page=orders&p=<?php echo $pageNum - 1; ?>&<?php echo http_build_query($filters); ?>">
+                        <i class="bi bi-chevron-right"></i>
+                    </a>
+                </li>
+                
+                <?php
+                $startPage = max(1, $pageNum - 2);
+                $endPage = min($totalPages, $pageNum + 2);
+                
+                if ($startPage > 1): ?>
+                    <li class="page-item"><a class="page-link" href="?page=orders&p=1&<?php echo http_build_query($filters); ?>">1</a></li>
+                    <?php if ($startPage > 2): ?>
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    <?php endif; ?>
+                <?php endif; ?>
+                
+                <?php for ($i = $startPage; $i <= $endPage; $i++): ?>
+                    <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
+                        <a class="page-link" href="?page=orders&p=<?php echo $i; ?>&<?php echo http_build_query($filters); ?>">
+                            <?php echo $i; ?>
+                        </a>
+                    </li>
+                <?php endfor; ?>
+                
+                <?php if ($endPage < $totalPages): ?>
+                    <?php if ($endPage < $totalPages - 1): ?>
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                    <?php endif; ?>
+                    <li class="page-item"><a class="page-link" href="?page=orders&p=<?php echo $totalPages; ?>&<?php echo http_build_query($filters); ?>"><?php echo $totalPages; ?></a></li>
+                <?php endif; ?>
+                
+                <li class="page-item <?php echo $pageNum >= $totalPages ? 'disabled' : ''; ?>">
+                    <a class="page-link" href="?page=orders&p=<?php echo $pageNum + 1; ?>&<?php echo http_build_query($filters); ?>">
+                        <i class="bi bi-chevron-left"></i>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- Modal إنشاء طلب -->
+<div class="modal fade" id="addOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">إنشاء طلب جديد</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="orderForm">
+                <input type="hidden" name="action" value="create_order">
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">العميل <span class="text-danger">*</span></label>
+                            <select class="form-select" name="customer_id" required>
+                                <option value="">اختر العميل</option>
+                                <?php foreach ($customers as $customer): ?>
+                                    <option value="<?php echo $customer['id']; ?>">
+                                        <?php echo htmlspecialchars($customer['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">مندوب المبيعات</label>
+                            <select class="form-select" name="sales_rep_id">
+                                <option value="">اختر مندوب</option>
+                                <?php foreach ($salesReps as $rep): ?>
+                                    <option value="<?php echo $rep['id']; ?>" <?php echo $rep['id'] == $currentUser['id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($rep['full_name'] ?? $rep['username']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">تاريخ الطلب <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" name="order_date" value="<?php echo date('Y-m-d'); ?>" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">تاريخ التسليم</label>
+                            <input type="date" class="form-control" name="delivery_date">
+                        </div>
+                        <div class="col-md-1">
+                            <label class="form-label">الأولوية</label>
+                            <select class="form-select" name="priority">
+                                <option value="normal">عادية</option>
+                                <option value="low">منخفضة</option>
+                                <option value="high">عالية</option>
+                                <option value="urgent">عاجلة</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">عناصر الطلب</label>
+                        <div id="orderItems">
+                            <div class="order-item row mb-2">
+                                <div class="col-md-5">
+                                    <select class="form-select product-select" name="items[0][product_id]" required>
+                                        <option value="">اختر المنتج</option>
+                                        <?php foreach ($products as $product): ?>
+                                            <option value="<?php echo $product['id']; ?>" 
+                                                    data-price="<?php echo $product['unit_price']; ?>">
+                                                <?php echo htmlspecialchars($product['name']); ?> 
+                                                (<?php echo formatCurrency($product['unit_price']); ?>)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="number" step="0.01" class="form-control quantity" 
+                                           name="items[0][quantity]" placeholder="الكمية" required min="0.01">
+                                </div>
+                                <div class="col-md-2">
+                                    <input type="number" step="0.01" class="form-control unit-price" 
+                                           name="items[0][unit_price]" placeholder="السعر" required min="0.01">
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="d-flex">
+                                        <input type="text" class="form-control item-total" readonly placeholder="الإجمالي">
+                                        <button type="button" class="btn btn-danger ms-2 remove-item">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn">
+                            <i class="bi bi-plus-circle me-2"></i>إضافة عنصر
+                        </button>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">ملاحظات</label>
+                            <textarea class="form-control" name="notes" rows="3"></textarea>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card bg-light">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <strong>المجموع الفرعي:</strong>
+                                        <span id="subtotal">0.00 ج.م</span>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label">الخصم (ج.م)</label>
+                                        <input type="number" step="0.01" class="form-control" name="discount_amount" 
+                                               value="0" min="0" oninput="calculateOrderTotal()">
+                                    </div>
+                                    <hr>
+                                    <div class="d-flex justify-content-between">
+                                        <h5>الإجمالي:</h5>
+                                        <h5 id="totalAmount">0.00 ج.م</h5>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">إنشاء طلب</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal تغيير الحالة -->
+<div class="modal fade" id="statusModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">تغيير حالة الطلب</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="update_status">
+                <input type="hidden" name="order_id" id="statusOrderId">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">الحالة</label>
+                        <select class="form-select" name="status" id="statusSelect" required>
+                            <option value="pending">معلق</option>
+                            <option value="confirmed">مؤكد</option>
+                            <option value="in_production">قيد الإنتاج</option>
+                            <option value="ready">جاهز</option>
+                            <option value="delivered">تم التسليم</option>
+                            <option value="cancelled">ملغى</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let itemIndex = 1;
+
+// إضافة عنصر جديد
+document.getElementById('addItemBtn')?.addEventListener('click', function() {
+    const itemsDiv = document.getElementById('orderItems');
+    const newItem = document.createElement('div');
+    newItem.className = 'order-item row mb-2';
+    newItem.innerHTML = `
+        <div class="col-md-5">
+            <select class="form-select product-select" name="items[${itemIndex}][product_id]" required>
+                <option value="">اختر المنتج</option>
+                <?php foreach ($products as $product): ?>
+                    <option value="<?php echo $product['id']; ?>" 
+                            data-price="<?php echo $product['unit_price']; ?>">
+                        <?php echo htmlspecialchars($product['name']); ?> 
+                        (<?php echo formatCurrency($product['unit_price']); ?>)
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <input type="number" step="0.01" class="form-control quantity" 
+                   name="items[${itemIndex}][quantity]" placeholder="الكمية" required min="0.01">
+        </div>
+        <div class="col-md-2">
+            <input type="number" step="0.01" class="form-control unit-price" 
+                   name="items[${itemIndex}][unit_price]" placeholder="السعر" required min="0.01">
+        </div>
+        <div class="col-md-2">
+            <div class="d-flex">
+                <input type="text" class="form-control item-total" readonly placeholder="الإجمالي">
+                <button type="button" class="btn btn-danger ms-2 remove-item">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    itemsDiv.appendChild(newItem);
+    itemIndex++;
+    attachItemEvents(newItem);
+});
+
+// حذف عنصر
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.remove-item')) {
+        e.target.closest('.order-item').remove();
+        calculateOrderTotal();
+    }
+});
+
+// ربط أحداث العناصر
+function attachItemEvents(item) {
+    const productSelect = item.querySelector('.product-select');
+    const quantityInput = item.querySelector('.quantity');
+    const unitPriceInput = item.querySelector('.unit-price');
+    const itemTotal = item.querySelector('.item-total');
+    
+    productSelect?.addEventListener('change', function() {
+        const price = this.options[this.selectedIndex].dataset.price;
+        if (price) {
+            unitPriceInput.value = price;
+            calculateItemTotal(item);
+            calculateOrderTotal();
+        }
+    });
+    
+    [quantityInput, unitPriceInput].forEach(input => {
+        input?.addEventListener('input', function() {
+            calculateItemTotal(item);
+            calculateOrderTotal();
+        });
+    });
+}
+
+function calculateItemTotal(item) {
+    const quantity = parseFloat(item.querySelector('.quantity').value) || 0;
+    const unitPrice = parseFloat(item.querySelector('.unit-price').value) || 0;
+    const total = quantity * unitPrice;
+    item.querySelector('.item-total').value = total.toFixed(2);
+}
+
+function calculateOrderTotal() {
+    const form = document.getElementById('orderForm');
+    if (!form) return;
+    
+    let subtotal = 0;
+    document.querySelectorAll('.item-total').forEach(input => {
+        subtotal += parseFloat(input.value) || 0;
+    });
+    
+    const discountAmount = parseFloat(form.querySelector('[name="discount_amount"]').value) || 0;
+    const total = subtotal - discountAmount;
+    
+    document.getElementById('subtotal').textContent = subtotal.toFixed(2) + ' ج.م';
+    document.getElementById('totalAmount').textContent = total.toFixed(2) + ' ج.م';
+}
+
+// ربط الأحداث للعناصر الموجودة
+document.querySelectorAll('.order-item').forEach(item => {
+    attachItemEvents(item);
+});
+
+function showStatusModal(orderId, currentStatus) {
+    document.getElementById('statusOrderId').value = orderId;
+    document.getElementById('statusSelect').value = currentStatus;
+    const modal = new bootstrap.Modal(document.getElementById('statusModal'));
+    modal.show();
+}
+</script>
+

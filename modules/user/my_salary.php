@@ -1,0 +1,1300 @@
+<?php
+/**
+ * صفحة مرتب المستخدم مع طلب السلفة
+ */
+
+if (!defined('ACCESS_ALLOWED')) {
+    die('Direct access not allowed');
+}
+
+require_once __DIR__ . '/../../includes/config.php';
+require_once __DIR__ . '/../../includes/db.php';
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/salary_calculator.php';
+require_once __DIR__ . '/../../includes/notifications.php';
+require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/path_helper.php';
+
+requireLogin();
+
+$currentUser = getCurrentUser();
+
+// تنظيف hourly_rate من currentUser مباشرة عند تحميل الصفحة
+if (isset($currentUser['hourly_rate'])) {
+    $currentUser['hourly_rate'] = cleanFinancialValue($currentUser['hourly_rate']);
+}
+
+// استبعاد المدير - ليس له راتب
+if ($currentUser['role'] === 'manager') {
+    header('Location: ' . getDashboardUrl('manager'));
+    exit;
+}
+
+$db = db();
+$error = '';
+$success = '';
+
+// الحصول على رسالة النجاح من session (بعد redirect)
+$sessionSuccess = getSuccessMessage();
+if ($sessionSuccess) {
+    $success = $sessionSuccess;
+}
+
+// الحصول على الشهر والسنة الحالية
+$selectedMonth = isset($_GET['month']) ? intval($_GET['month']) : date('n');
+$selectedYear = isset($_GET['year']) ? intval($_GET['year']) : date('Y');
+
+// معالجة طلب زيادة سعر الساعة
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'request_hourly_rate_increase') {
+    $newRate = floatval($_POST['new_rate'] ?? 0);
+    $reason = trim($_POST['reason'] ?? '');
+    $currentRate = cleanFinancialValue($currentUser['hourly_rate'] ?? 0);
+    
+    if ($newRate <= 0) {
+        $error = 'يجب إدخال سعر ساعة صحيح أكبر من الصفر';
+    } elseif ($newRate <= $currentRate) {
+        $error = 'السعر الجديد يجب أن يكون أكبر من السعر الحالي (' . formatCurrency($currentRate) . ')';
+    } else {
+        // إنشاء جدول hourly_rate_requests إذا لم يكن موجوداً
+        $tableCheck = $db->queryOne("SHOW TABLES LIKE 'hourly_rate_requests'");
+        if (empty($tableCheck)) {
+            try {
+                $db->execute("
+                    CREATE TABLE IF NOT EXISTS `hourly_rate_requests` (
+                      `id` int(11) NOT NULL AUTO_INCREMENT,
+                      `user_id` int(11) NOT NULL,
+                      `current_rate` decimal(10,2) NOT NULL,
+                      `requested_rate` decimal(10,2) NOT NULL,
+                      `reason` text DEFAULT NULL,
+                      `status` enum('pending','approved','rejected') DEFAULT 'pending',
+                      `approved_by` int(11) DEFAULT NULL,
+                      `approved_at` timestamp NULL DEFAULT NULL,
+                      `rejection_reason` text DEFAULT NULL,
+                      `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (`id`),
+                      KEY `user_id` (`user_id`),
+                      KEY `status` (`status`),
+                      CONSTRAINT `hourly_rate_requests_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+                      CONSTRAINT `hourly_rate_requests_ibfk_2` FOREIGN KEY (`approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                ");
+            } catch (Exception $e) {
+                error_log("Error creating hourly_rate_requests table: " . $e->getMessage());
+            }
+        }
+        
+        // التحقق من وجود طلب معلق
+        $existingRequest = $db->queryOne(
+            "SELECT id FROM hourly_rate_requests 
+             WHERE user_id = ? AND status = 'pending'",
+            [$currentUser['id']]
+        );
+        
+        if ($existingRequest) {
+            $error = 'يوجد طلب زيادة سعر ساعة معلق بالفعل';
+        } else {
+            // إنشاء طلب زيادة سعر الساعة
+            $result = $db->execute(
+                "INSERT INTO hourly_rate_requests (user_id, current_rate, requested_rate, reason, status) 
+                 VALUES (?, ?, ?, ?, 'pending')",
+                [$currentUser['id'], $currentRate, $newRate, $reason ?: null]
+            );
+            
+            $requestId = $result['insert_id'];
+            
+            // إرسال إشعار للمدير والمحاسب
+            $managers = $db->query("SELECT id, role FROM users WHERE role IN ('manager', 'accountant') AND status = 'active'");
+            foreach ($managers as $manager) {
+                $managerRole = $manager['role'] ?? 'manager'; // قيمة افتراضية
+                createNotification(
+                    $manager['id'],
+                    'طلب زيادة سعر ساعة',
+                    'طلب زيادة سعر ساعة من ' . ($currentUser['full_name'] ?? $currentUser['username']) . ' من ' . formatCurrency($currentRate) . ' إلى ' . formatCurrency($newRate),
+                    'info',
+                    getDashboardUrl($managerRole === 'manager' ? 'manager' : 'accountant') . '?page=salary_settings',
+                    false
+                );
+            }
+            
+            logAudit($currentUser['id'], 'request_hourly_rate_increase', 'hourly_rate_request', $requestId, null, [
+                'current_rate' => $currentRate,
+                'requested_rate' => $newRate
+            ]);
+            
+            // منع التكرار باستخدام redirect
+            $successMessage = 'تم إرسال طلب زيادة سعر الساعة بنجاح. سيتم مراجعته من قبل المدير.';
+            $redirectParams = [
+                'page' => 'my_salary',
+                'month' => $selectedMonth,
+                'year' => $selectedYear
+            ];
+            preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+        }
+    }
+}
+
+// معالجة طلب السلفة
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'request_advance') {
+    $amount = floatval($_POST['amount'] ?? 0);
+    $reason = trim($_POST['reason'] ?? '');
+    $month = intval($_POST['month'] ?? $selectedMonth);
+    $year = intval($_POST['year'] ?? $selectedYear);
+    
+    if ($amount <= 0) {
+        $error = 'يجب إدخال مبلغ صحيح أكبر من الصفر';
+    } else {
+        // حساب الراتب الحالي
+        $salaryData = getSalarySummary($currentUser['id'], $month, $year);
+        
+        if (!$salaryData['exists'] && (!isset($salaryData['calculation']) || !$salaryData['calculation']['success'])) {
+            $error = 'لا يوجد راتب محسوب لهذا الشهر. يرجى الانتظار حتى يتم حساب الراتب.';
+        } else {
+            $currentSalary = $salaryData['exists'] ? $salaryData['salary']['total_amount'] : $salaryData['calculation']['total_amount'];
+            $maxAdvance = $currentSalary * 0.5; // نصف الراتب
+            
+            if ($amount > $maxAdvance) {
+                $error = 'قيمة السلفة لا يمكن أن تتجاوز نصف الراتب الحالي (' . formatCurrency($maxAdvance) . ')';
+            } else {
+                // التحقق من وجود طلب سلفة معلق
+                $existingRequest = $db->queryOne(
+                    "SELECT id FROM salary_advances 
+                     WHERE user_id = ? AND status = 'pending'",
+                    [$currentUser['id']]
+                );
+                
+                if ($existingRequest) {
+                    $error = 'يوجد طلب سلفة معلق بالفعل';
+                } else {
+                    // التحقق من وجود جدول salary_advances
+                    $tableCheck = $db->queryOne("SHOW TABLES LIKE 'salary_advances'");
+                    if (empty($tableCheck)) {
+                        try {
+                            $db->execute("
+                                CREATE TABLE IF NOT EXISTS `salary_advances` (
+                                  `id` int(11) NOT NULL AUTO_INCREMENT,
+                                  `user_id` int(11) NOT NULL COMMENT 'الموظف',
+                                  `amount` decimal(10,2) NOT NULL COMMENT 'مبلغ السلفة',
+                                  `reason` text DEFAULT NULL COMMENT 'سبب السلفة',
+                                  `request_date` date NOT NULL COMMENT 'تاريخ الطلب',
+                                  `status` enum('pending','accountant_approved','manager_approved','rejected') DEFAULT 'pending' COMMENT 'حالة الطلب',
+                                  `accountant_approved_by` int(11) DEFAULT NULL,
+                                  `accountant_approved_at` timestamp NULL DEFAULT NULL,
+                                  `manager_approved_by` int(11) DEFAULT NULL,
+                                  `manager_approved_at` timestamp NULL DEFAULT NULL,
+                                  `deducted_from_salary_id` int(11) DEFAULT NULL COMMENT 'الراتب الذي تم خصم السلفة منه',
+                                  `notes` text DEFAULT NULL,
+                                  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                  PRIMARY KEY (`id`),
+                                  KEY `user_id` (`user_id`),
+                                  KEY `status` (`status`),
+                                  KEY `request_date` (`request_date`),
+                                  KEY `accountant_approved_by` (`accountant_approved_by`),
+                                  KEY `manager_approved_by` (`manager_approved_by`),
+                                  KEY `deducted_from_salary_id` (`deducted_from_salary_id`),
+                                  CONSTRAINT `salary_advances_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+                                  CONSTRAINT `salary_advances_ibfk_2` FOREIGN KEY (`accountant_approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+                                  CONSTRAINT `salary_advances_ibfk_3` FOREIGN KEY (`manager_approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+                                  CONSTRAINT `salary_advances_ibfk_4` FOREIGN KEY (`deducted_from_salary_id`) REFERENCES `salaries` (`id`) ON DELETE SET NULL
+                                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                            ");
+                        } catch (Exception $e) {
+                            error_log("Error creating salary_advances table: " . $e->getMessage());
+                        }
+                    }
+                    
+                    // إنشاء طلب السلفة
+                    $result = $db->execute(
+                        "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
+                         VALUES (?, ?, ?, ?, 'pending')",
+                        [$currentUser['id'], $amount, $reason ?: null, date('Y-m-d')]
+                    );
+                    
+                    $requestId = $result['insert_id'];
+                    
+                    // إرسال إشعار للمحاسب
+                    $accountants = $db->query("SELECT id FROM users WHERE role = 'accountant' AND status = 'active'");
+                    foreach ($accountants as $accountant) {
+                        createNotification(
+                            $accountant['id'],
+                            'طلب سلفة جديد',
+                            'طلب سلفة من ' . ($currentUser['full_name'] ?? $currentUser['username']) . ' بقيمة ' . formatCurrency($amount),
+                            'warning',
+                            getDashboardUrl('accountant') . '?page=salaries&view=advances',
+                            false
+                        );
+                    }
+                    
+                    logAudit($currentUser['id'], 'request_advance', 'salary_advance', $requestId, null, [
+                        'amount' => $amount
+                    ]);
+                    
+                    // منع التكرار باستخدام redirect
+                    $successMessage = 'تم إرسال طلب السلفة بنجاح. سيتم مراجعته من قبل المحاسب والمدير.';
+                    $redirectParams = [
+                        'page' => 'my_salary',
+                        'month' => $month,
+                        'year' => $year
+                    ];
+                    preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+                }
+            }
+        }
+    }
+}
+
+// الحصول على بيانات الراتب الحالي
+$salaryData = getSalarySummary($currentUser['id'], $selectedMonth, $selectedYear);
+
+// الحصول على طلبات السلفة من الجدول الموحد salary_advances
+$advanceRequests = [];
+$tableCheck = $db->queryOne("SHOW TABLES LIKE 'salary_advances'");
+if (!empty($tableCheck)) {
+    $advanceRequests = $db->query(
+        "SELECT * FROM salary_advances 
+         WHERE user_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT 10",
+        [$currentUser['id']]
+    );
+}
+
+// الحصول على طلبات زيادة سعر الساعة
+$hourlyRateRequests = [];
+$rateTableCheck = $db->queryOne("SHOW TABLES LIKE 'hourly_rate_requests'");
+if (!empty($rateTableCheck)) {
+    $hourlyRateRequests = $db->query(
+        "SELECT * FROM hourly_rate_requests 
+         WHERE user_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT 10",
+        [$currentUser['id']]
+    );
+}
+
+// الحصول على تفاصيل الراتب الشهري (إذا كان محفوظاً)
+$salaryDetails = null;
+if ($salaryData['exists']) {
+    $salaryDetails = $salaryData['salary'];
+}
+
+// حساب الراتب الحالي (إذا لم يكن محسوباً، احسبه حتى الآن)
+$currentSalary = null;
+$maxAdvance = 0;
+$isTemporary = false; // هل الراتب محسوب مؤقتاً أم محفوظ في قاعدة البيانات
+
+if ($salaryData['exists']) {
+    // الراتب محفوظ في قاعدة البيانات
+    $currentSalary = $salaryData['salary'];
+    
+    // تنظيف جميع القيم المالية من 262145
+    if (isset($currentSalary['hourly_rate'])) {
+        $currentSalary['hourly_rate'] = cleanFinancialValue($currentSalary['hourly_rate']);
+    }
+    if (isset($currentSalary['base_amount'])) {
+        $currentSalary['base_amount'] = cleanFinancialValue($currentSalary['base_amount']);
+    }
+    if (isset($currentSalary['total_amount'])) {
+        $currentSalary['total_amount'] = cleanFinancialValue($currentSalary['total_amount'] ?? 0);
+    }
+    if (isset($currentSalary['bonus'])) {
+        $currentSalary['bonus'] = cleanFinancialValue($currentSalary['bonus']);
+    }
+    if (isset($currentSalary['deductions'])) {
+        $currentSalary['deductions'] = cleanFinancialValue($currentSalary['deductions']);
+    }
+    
+    $maxAdvance = cleanFinancialValue($currentSalary['total_amount'] * 0.5);
+} else if (isset($salaryData['calculation']) && $salaryData['calculation']['success']) {
+    // الراتب محسوب مؤقتاً بناءً على الساعات حتى الآن
+    $currentSalary = $salaryData['calculation'];
+    
+    // تنظيف جميع القيم المالية من 262145
+    if (isset($currentSalary['hourly_rate'])) {
+        $currentSalary['hourly_rate'] = cleanFinancialValue($currentSalary['hourly_rate']);
+    }
+    
+    if (isset($currentSalary['base_amount'])) {
+        $currentSalary['base_amount'] = cleanFinancialValue($currentSalary['base_amount']);
+    }
+    
+    if (isset($currentSalary['total_amount'])) {
+        $currentSalary['total_amount'] = cleanFinancialValue($currentSalary['total_amount'] ?? 0);
+    }
+    if (isset($currentSalary['bonus'])) {
+        $currentSalary['bonus'] = cleanFinancialValue($currentSalary['bonus']);
+    }
+    if (isset($currentSalary['deductions'])) {
+        $currentSalary['deductions'] = cleanFinancialValue($currentSalary['deductions']);
+    }
+    
+    $maxAdvance = cleanFinancialValue($currentSalary['total_amount'] * 0.5);
+    $isTemporary = true;
+} else {
+    // إذا فشل الحساب، حاول حساب الراتب مباشرة
+    $calculation = calculateSalary($currentUser['id'], $selectedMonth, $selectedYear);
+    if ($calculation['success']) {
+        $currentSalary = $calculation;
+        
+        // تنظيف جميع القيم المالية من 262145
+        if (isset($currentSalary['hourly_rate'])) {
+            $currentSalary['hourly_rate'] = cleanFinancialValue($currentSalary['hourly_rate']);
+        }
+        
+        if (isset($currentSalary['base_amount'])) {
+            $currentSalary['base_amount'] = cleanFinancialValue($currentSalary['base_amount']);
+        }
+        
+        if (isset($currentSalary['total_amount'])) {
+            $currentSalary['total_amount'] = cleanFinancialValue($currentSalary['total_amount'] ?? 0);
+        }
+        if (isset($currentSalary['bonus'])) {
+            $currentSalary['bonus'] = cleanFinancialValue($currentSalary['bonus']);
+        }
+        if (isset($currentSalary['deductions'])) {
+            $currentSalary['deductions'] = cleanFinancialValue($currentSalary['deductions']);
+        }
+        
+        $maxAdvance = cleanFinancialValue($currentSalary['total_amount'] * 0.5);
+        $isTemporary = true;
+    }
+}
+
+// الحصول على إحصائيات الرواتب
+$monthStats = [
+    'total_hours' => 0,
+    'total_salary' => 0,
+    'collections_bonus' => 0
+];
+
+if ($currentSalary) {
+    $monthStats['total_hours'] = $currentSalary['total_hours'] ?? 0;
+    $totalSalaryRaw = $currentSalary['total_amount'] ?? 0;
+    // تنظيف إضافي للتأكد من إزالة 262145
+    $totalSalaryStr = (string)$totalSalaryRaw;
+    $totalSalaryStr = str_replace('262145', '', $totalSalaryStr);
+    $totalSalaryStr = preg_replace('/\s+/', '', trim($totalSalaryStr));
+    $totalSalaryStr = preg_replace('/[^0-9.]/', '', $totalSalaryStr);
+    $monthStats['total_salary'] = cleanFinancialValue($totalSalaryStr ?: 0);
+    $monthStats['collections_bonus'] = cleanFinancialValue($currentSalary['collections_bonus'] ?? 0);
+    $maxAdvance = cleanFinancialValue($monthStats['total_salary'] * 0.5);
+} else {
+    // إذا لم يكن هناك راتب محفوظ، احسب الساعات مباشرة من attendance_records
+    // لضمان أن الساعات معروضة حتى لو لم يتم حساب الراتب بعد
+    $monthStats['total_hours'] = calculateMonthlyHours($currentUser['id'], $selectedMonth, $selectedYear);
+    $monthStats['total_salary'] = 0;
+    $monthStats['collections_bonus'] = 0;
+    $maxAdvance = 0;
+}
+?>
+<?php
+$dashboardUrl = getDashboardUrl($currentUser['role']);
+require_once __DIR__ . '/../../includes/lang/' . getCurrentLanguage() . '.php';
+$lang = isset($translations) ? $translations : [];
+?>
+<div class="page-header mb-4 d-flex justify-content-between align-items-center flex-wrap">
+    <h2 class="mb-0"><i class="bi bi-wallet2 me-2"></i>مرتبي</h2>
+    <div class="d-flex align-items-center gap-3">
+        <form method="GET" class="d-inline">
+            <select name="month" class="form-select d-inline" style="width: auto;" onchange="this.form.submit()">
+                <?php for ($m = 1; $m <= 12; $m++): ?>
+                    <option value="<?php echo $m; ?>" <?php echo $selectedMonth == $m ? 'selected' : ''; ?>>
+                        <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
+                    </option>
+                <?php endfor; ?>
+            </select>
+            <select name="year" class="form-select d-inline ms-2" style="width: auto;" onchange="this.form.submit()">
+                <?php for ($y = date('Y'); $y >= date('Y') - 2; $y--): ?>
+                    <option value="<?php echo $y; ?>" <?php echo $selectedYear == $y ? 'selected' : ''; ?>>
+                        <?php echo $y; ?>
+                    </option>
+                <?php endfor; ?>
+            </select>
+        </form>
+        <a href="<?php echo htmlspecialchars($dashboardUrl); ?>" class="btn btn-back">
+            <i class="bi bi-arrow-right me-2"></i><span><?php echo isset($lang['back']) ? $lang['back'] : 'رجوع'; ?></span>
+        </a>
+    </div>
+</div>
+
+<?php if ($error): ?>
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <?php echo htmlspecialchars($error); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($success): ?>
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle-fill me-2"></i>
+        <?php echo htmlspecialchars($success); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<style>
+/* تحسينات الأزرار */
+.btn-gradient-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: none;
+    color: white;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-gradient-primary:hover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    color: white;
+}
+
+.btn-gradient-primary:active {
+    transform: translateY(0);
+}
+
+.bg-gradient-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* تحسين تصميم الجداول - محذوف لأننا نستخدم salary-grid الآن */
+
+/* Badge تحسينات */
+.badge {
+    font-weight: 600;
+    padding: 0.5em 1em;
+    border-radius: 50px;
+    letter-spacing: 0.3px;
+}
+
+/* Input Group تحسينات */
+.input-group-text {
+    border: 1px solid #ced4da;
+    transition: all 0.2s ease;
+}
+
+.form-control:focus + .input-group-text,
+.input-group-text + .form-control:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.form-control-lg {
+    border-radius: 0.5rem;
+    border: 1px solid #ced4da;
+    transition: all 0.2s ease;
+}
+
+.form-control-lg:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* تحسين زر طلب السلفة */
+#advanceRequestForm button[type="submit"]:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 6px 20px rgba(79, 172, 254, 0.4) !important;
+    background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%) !important;
+}
+
+#advanceRequestForm button[type="submit"]:active {
+    transform: translateY(-1px) !important;
+}
+
+/* Card تحسينات */
+.card {
+    transition: all 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 25px rgba(0,0,0,0.15) !important;
+}
+
+.card-header {
+    border-bottom: 3px solid rgba(255,255,255,0.2);
+}
+
+/* Alert تحسينات */
+.alert {
+    border-radius: 0.75rem;
+    border-left: 4px solid;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.alert-info {
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border-left-color: #2196f3;
+}
+
+.alert-warning {
+    background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+    border-left-color: #ff9800;
+}
+
+/* تحسينات الأيقونات */
+.bi {
+    vertical-align: middle;
+}
+
+/* Tooltip تحسينات */
+[data-bs-toggle="tooltip"] {
+    cursor: help;
+}
+
+/* تحسينات Responsive */
+@media (max-width: 768px) {
+    .btn-gradient-primary {
+        font-size: 0.9rem;
+        padding: 0.5rem 1rem;
+    }
+    
+    .badge {
+        font-size: 0.75rem;
+        padding: 0.4em 0.8em;
+    }
+    
+    .card:hover {
+        transform: none;
+    }
+    
+    .input-group-lg .form-control,
+    .input-group-lg .input-group-text {
+        font-size: 1rem;
+    }
+    
+    .salary-header-title {
+        font-size: 16px;
+    }
+    
+    .temp-badge-modern {
+        font-size: 11px;
+        padding: 3px 10px;
+    }
+}
+
+@media (max-width: 576px) {
+    .salary-header-modern {
+        padding: 12px 15px;
+    }
+    
+    .salary-amount {
+        font-size: 16px;
+    }
+    
+    .temp-badge-modern {
+        display: block;
+        margin-top: 8px;
+        text-align: center;
+    }
+}
+
+/* أنيميشن للبطاقات */
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card, .salary-details-modern {
+    animation: slideIn 0.5s ease-out;
+}
+
+.salary-details-modern {
+    background: white;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid #e3e8ef;
+    overflow: hidden;
+}
+
+.salary-card-inner {
+    background: white;
+}
+
+.salary-header-modern {
+    background: #4169e1;
+    padding: 15px 20px;
+    color: white;
+    border-bottom: 3px solid #2851c7;
+}
+
+.salary-header-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.salary-header-title i {
+    font-size: 20px;
+}
+
+.temp-badge-modern {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.salary-grid {
+    display: grid;
+    gap: 0;
+}
+
+.salary-row {
+    display: grid;
+    grid-template-columns: 40% 60%;
+    border-bottom: 1px solid #e8ecf3;
+    transition: background 0.2s ease;
+}
+
+.salary-row:hover {
+    background: #f8f9fc;
+}
+
+.salary-row.section-header {
+    background: #f0f4ff;
+    color: #2c5fb3;
+    border-bottom: 2px solid #4169e1;
+}
+
+.salary-row.section-header:hover {
+    background: #e6edff;
+}
+
+.salary-row.total-row {
+    background: #4169e1;
+    color: white;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.salary-row.total-row:hover {
+    background: #3558c9;
+}
+
+.salary-row.final-row {
+    background: #28a745;
+    color: white;
+    font-size: 17px;
+    font-weight: 700;
+    border-bottom: none;
+}
+
+.salary-row.final-row:hover {
+    background: #218838;
+}
+
+.salary-cell {
+    padding: 12px 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.salary-cell.label {
+    font-weight: 600;
+    color: #374151;
+    font-size: 14px;
+}
+
+.salary-cell.value {
+    text-align: left;
+    align-items: flex-start;
+}
+
+.section-header .salary-cell {
+    font-weight: 700;
+    font-size: 14px;
+    padding: 10px 18px;
+}
+
+.salary-amount {
+    font-size: 18px;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 3px;
+}
+
+.salary-amount.primary {
+    color: #4169e1;
+}
+
+.salary-amount.success {
+    color: #28a745;
+}
+
+.salary-amount.danger {
+    color: #dc3545;
+}
+
+.salary-amount.white {
+    color: white;
+}
+
+.salary-amount.warning {
+    color: #ffc107;
+}
+
+.salary-description {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 2px;
+}
+
+.total-row .salary-description,
+.final-row .salary-description {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.icon-wrapper {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    margin-left: 8px;
+}
+
+.icon-wrapper i {
+    font-size: 16px;
+}
+
+@media (max-width: 768px) {
+    .salary-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .salary-cell {
+        padding: 10px 15px;
+    }
+    
+    .salary-cell.value {
+        border-top: 1px dashed #e8ecf3;
+        background: #f9fafb;
+    }
+    
+    .salary-amount {
+        font-size: 16px;
+    }
+    
+    .salary-header-title {
+        font-size: 16px;
+    }
+    
+    .salary-header-modern {
+        padding: 12px 15px;
+    }
+}
+
+.alert-modern {
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    border-radius: 8px;
+    padding: 12px 18px;
+    margin: 15px;
+    border-right: 4px solid #ffc107;
+}
+
+.alert-modern i {
+    font-size: 18px;
+    color: #ff9800;
+}
+
+.salary-row:nth-child(even):not(.section-header):not(.total-row):not(.final-row) {
+    background: #fafbfc;
+}
+
+.salary-row:last-child:not(.final-row) {
+    border-bottom: none;
+}
+</style>
+
+<div class="salary-details-modern">
+    <div class="salary-card-inner">
+        <!-- Header -->
+        <div class="salary-header-modern">
+            <div class="d-flex justify-content-between align-items-center">
+                <h2 class="salary-header-title">
+                    <i class="bi bi-wallet2"></i>
+                    تفاصيل الراتب - <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?>
+                </h2>
+        <?php if ($isTemporary): ?>
+                    <span class="temp-badge-modern">
+                        <i class="bi bi-clock-history me-1"></i>حساب مؤقت
+            </span>
+        <?php endif; ?>
+    </div>
+        </div>
+
+        <!-- Alerts -->
+        <?php if ($isTemporary): ?>
+            <div class="alert-modern">
+                <i class="bi bi-info-circle me-2"></i>
+                <strong>ملاحظة:</strong> هذا الراتب محسوب بناءً على الساعات المسجلة حتى الآن. سيتم تحديثه تلقائياً عند انتهاء الشهر.
+            </div>
+        <?php endif; ?>
+        
+        <?php if (!$currentSalary): ?>
+            <div class="alert-modern">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>ملاحظة:</strong> لا توجد ساعات عمل مسجلة لهذا الشهر حتى الآن.
+            </div>
+        <?php endif; ?>
+
+        <!-- Salary Grid -->
+        <div class="salary-grid">
+            <!-- تفاصيل الراتب - Header -->
+            <div class="salary-row section-header">
+                <div class="salary-cell" style="grid-column: 1 / -1;">
+                    <span class="icon-wrapper">
+                        <i class="bi bi-calculator"></i>
+                    </span>
+                    تفاصيل الراتب
+                </div>
+            </div>
+
+            <!-- سعر الساعة -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    سعر الساعة
+                </div>
+                <div class="salary-cell value">
+                            <?php 
+                            $hourlyRateRaw = $currentSalary['hourly_rate'] ?? $currentUser['hourly_rate'] ?? 0;
+                    $hourlyRate = cleanFinancialValue($hourlyRateRaw);
+                    ?>
+                    <span class="salary-amount primary"><?php echo formatCurrency($hourlyRate); ?></span>
+                    <span class="salary-description">المعدل بالساعة</span>
+                </div>
+            </div>
+
+            <!-- عدد الساعات -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    عدد الساعات
+                </div>
+                <div class="salary-cell value">
+                    <span class="salary-amount primary"><?php echo number_format($monthStats['total_hours'], 2); ?> ساعة</span>
+                    <span class="salary-description">إجمالي ساعات العمل</span>
+                </div>
+            </div>
+
+            <!-- الراتب الأساسي -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    الراتب الأساسي
+                </div>
+                <div class="salary-cell value">
+                            <?php 
+                            $baseAmountRaw = $currentSalary['base_amount'] ?? 0;
+                    $baseAmount = cleanFinancialValue($baseAmountRaw);
+                    ?>
+                    <span class="salary-amount success"><?php echo formatCurrency($baseAmount); ?></span>
+                    <span class="salary-description">الساعات × سعر الساعة</span>
+                </div>
+            </div>
+            
+            <!-- نسبة التحصيلات للمندوبين -->
+                    <?php if ($currentUser['role'] === 'sales' && isset($currentSalary['collections_bonus']) && $currentSalary['collections_bonus'] > 0): ?>
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    نسبة التحصيلات (2%)
+                </div>
+                <div class="salary-cell value">
+                    <span class="salary-amount success">+<?php echo formatCurrency($currentSalary['collections_bonus']); ?></span>
+                    <span class="salary-description">مكافأة من التحصيلات</span>
+                </div>
+            </div>
+                    <?php endif; ?>
+                    
+            <!-- المكافآت - Header -->
+            <div class="salary-row section-header">
+                <div class="salary-cell" style="grid-column: 1 / -1;">
+                    <span class="icon-wrapper">
+                        <i class="bi bi-gift"></i>
+                    </span>
+                    المكافآت
+                </div>
+            </div>
+
+            <!-- مكافأة إضافية -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    مكافأة إضافية
+                </div>
+                <div class="salary-cell value">
+                    <?php if (isset($currentSalary['bonus']) && $currentSalary['bonus'] > 0): ?>
+                        <span class="salary-amount success">+<?php echo formatCurrency($currentSalary['bonus']); ?></span>
+                        <span class="salary-description"><?php echo htmlspecialchars($salaryDetails['notes'] ?? 'مكافأة من المدير أو المحاسب'); ?></span>
+                    <?php else: ?>
+                        <span class="salary-amount">0.00 ج.م</span>
+                        <span class="salary-description">لا توجد مكافآت</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            
+            <!-- الخصومات - Header -->
+            <div class="salary-row section-header">
+                <div class="salary-cell" style="grid-column: 1 / -1;">
+                    <span class="icon-wrapper">
+                        <i class="bi bi-dash-circle"></i>
+                    </span>
+                    الخصومات
+                </div>
+            </div>
+
+            <!-- خصومات -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    خصومات
+                </div>
+                <div class="salary-cell value">
+                    <?php if (isset($currentSalary['deductions']) && $currentSalary['deductions'] > 0): ?>
+                        <span class="salary-amount danger">-<?php echo formatCurrency($currentSalary['deductions']); ?></span>
+                        <span class="salary-description"><?php echo htmlspecialchars($salaryDetails['notes'] ?? 'خصومات من المدير أو المحاسب'); ?></span>
+                    <?php else: ?>
+                        <span class="salary-amount">0.00 ج.م</span>
+                        <span class="salary-description">لا توجد خصومات</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- قسم طلب سلفة جديدة داخل الجدول -->
+            <?php 
+            $maxAdvanceAmount = $maxAdvance > 0 ? $maxAdvance : 0;
+            $maxNumeric = number_format($maxAdvanceAmount, 2, '.', '');
+            ?>
+            
+            <!-- Header طلب سلفة -->
+            <div class="salary-row section-header" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); margin-top: 20px;">
+                <div class="salary-cell" style="grid-column: 1 / -1;">
+                    <span class="icon-wrapper">
+                        <i class="bi bi-cash-coin"></i>
+                    </span>
+                    طلب سلفة جديد
+                    <?php if ($maxAdvanceAmount > 0): ?>
+                        <span class="badge bg-light text-dark ms-2" style="font-size: 0.85em;">
+                            الحد الأقصى: <?php echo formatCurrency($maxAdvanceAmount); ?>
+                        </span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <?php if ($maxAdvanceAmount <= 0): ?>
+            <!-- تنبيه عدم توفر سلفة -->
+            <div class="salary-row" style="background: #fff8e1; border-right: 4px solid #ffc107;">
+                <div class="salary-cell" style="grid-column: 1 / -1; padding: 20px;">
+                    <div class="text-center">
+                        <i class="bi bi-info-circle-fill" style="font-size: 2.5em; color: #ff9800;"></i>
+                        <p class="mb-0 mt-3" style="color: #856404; font-size: 1rem; font-weight: 500;">
+                            <strong>تنبيه:</strong> لا توجد سلفة متاحة حالياً. بمجرد حساب الراتب ستظهر الحدود القصوى ويمكنك إرسال الطلب.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <?php else: ?>
+            
+            <!-- نموذج طلب السلفة -->
+            <div class="salary-row" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">
+                <div class="salary-cell" style="grid-column: 1 / -1; padding: 25px;">
+                    <form method="POST" id="advanceRequestForm" class="needs-validation" novalidate>
+                        <input type="hidden" name="action" value="request_advance">
+                        <input type="hidden" name="month" value="<?php echo $selectedMonth; ?>">
+                        <input type="hidden" name="year" value="<?php echo $selectedYear; ?>">
+
+                        <div class="row g-3">
+                            <!-- مبلغ السلفة -->
+                            <div class="col-md-6">
+                                <label for="amount" class="form-label fw-bold mb-2" style="color: #2d3748; font-size: 0.95rem;">
+                                    <i class="bi bi-currency-exchange me-2" style="color: #4facfe;"></i>
+                                    مبلغ السلفة <span class="text-danger">*</span>
+                                </label>
+                                <div class="input-group">
+                                    <span class="input-group-text" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border: none;">
+                                        <i class="bi bi-cash-stack text-white"></i>
+                                    </span>
+                                    <input type="number" 
+                                           step="0.01" 
+                                           class="form-control" 
+                                           id="amount" 
+                                           name="amount" 
+                                           min="0.01"
+                                           max="<?php echo $maxNumeric; ?>"
+                                           required 
+                                           placeholder="أدخل المبلغ"
+                                           style="border-color: #4facfe; font-size: 1rem; padding: 0.65rem;">
+                                    <span class="input-group-text" style="background: #fff; border-color: #4facfe; font-weight: 600; color: #4facfe;">ج.م</span>
+                                </div>
+                                <small class="text-muted d-block mt-1" style="font-size: 0.8rem;">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    سيتم خصم المبلغ من راتبك القادم بعد الموافقة
+                                </small>
+                            </div>
+
+                            <!-- سبب الطلب -->
+                            <div class="col-md-6">
+                                <label for="reason" class="form-label fw-bold mb-2" style="color: #2d3748; font-size: 0.95rem;">
+                                    <i class="bi bi-chat-text me-2" style="color: #4facfe;"></i>
+                                    سبب الطلب <span class="text-muted" style="font-weight: normal;">(اختياري)</span>
+                                </label>
+                                <div class="input-group">
+                                    <span class="input-group-text" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); border: none;">
+                                        <i class="bi bi-pencil text-white"></i>
+                                    </span>
+                                    <input type="text" 
+                                           class="form-control" 
+                                           id="reason" 
+                                           name="reason" 
+                                           placeholder="اذكر سبب طلب السلفة"
+                                           style="border-color: #4facfe; font-size: 1rem; padding: 0.65rem;">
+                                </div>
+                                <small class="text-muted d-block mt-1" style="font-size: 0.8rem;">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    يمكنك ترك هذا الحقل فارغاً
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- زر الإرسال -->
+                        <div class="text-center mt-3">
+                            <button type="submit" 
+                                    class="btn text-white shadow-sm" 
+                                    style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); padding: 12px 40px; border-radius: 8px; font-size: 1rem; font-weight: 600; border: none; transition: all 0.3s ease;">
+                                <i class="bi bi-send-fill me-2"></i>إرسال طلب السلفة
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <?php endif; ?>
+                    
+                    <!-- الراتب الإجمالي -->
+            <div class="salary-row total-row" style="margin-top: 20px;">
+                <div class="salary-cell label">
+                    <strong>الراتب الإجمالي</strong>
+                </div>
+                <div class="salary-cell value">
+                    <?php $totalSalary = cleanFinancialValue($monthStats['total_salary'] ?? 0); ?>
+                    <span class="salary-amount white"><?php echo formatCurrency($totalSalary); ?></span>
+                    <span class="salary-description">إجمالي الراتب الشهري</span>
+                </div>
+            </div>
+
+
+            <!-- الراتب النهائي المستحق -->
+                    <?php 
+                    $totalApprovedAdvances = 0;
+            if (!empty($advanceRequests)) {
+                foreach ($advanceRequests as $advance) {
+                        if ($advance['status'] === 'approved' && $advance['requested_month'] == $selectedMonth && $advance['requested_year'] == $selectedYear) {
+                            $totalApprovedAdvances += $advance['amount'];
+                    }
+                }
+            }
+            ?>
+            
+                    <?php if ($totalApprovedAdvances > 0): ?>
+            <!-- السلفات المخصومة -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    السلفات المعتمدة
+                </div>
+                <div class="salary-cell value">
+                    <span class="salary-amount danger">-<?php echo formatCurrency($totalApprovedAdvances); ?></span>
+                    <span class="salary-description">تم خصمها من الراتب</span>
+                </div>
+            </div>
+
+            <!-- الراتب النهائي -->
+            <div class="salary-row final-row">
+                <div class="salary-cell label">
+                    <strong>الراتب النهائي المستحق</strong>
+        </div>
+                <div class="salary-cell value">
+                    <span class="salary-amount white"><?php echo formatCurrency($monthStats['total_salary'] - $totalApprovedAdvances); ?></span>
+                    <span class="salary-description">بعد خصم السلفات</span>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- قسم طلبات السلف في نفس الجدول -->
+            <?php if (!empty($advanceRequests)): ?>
+            <!-- Separator -->
+            <div class="salary-row section-header">
+                <div class="salary-cell" style="grid-column: 1 / -1;">
+                    <span class="icon-wrapper">
+                        <i class="bi bi-list-check"></i>
+                    </span>
+                    سجل طلبات السلف (آخر 10 طلبات)
+                </div>
+            </div>
+
+            <?php 
+            $counter = 1;
+            foreach ($advanceRequests as $request): 
+                $statusClass = '';
+                $statusIcon = '';
+                $statusText = '';
+                
+                switch($request['status']) {
+                    case 'pending':
+                        $statusClass = 'warning';
+                        $statusIcon = 'hourglass-split';
+                        $statusText = 'قيد الانتظار';
+                        break;
+                    case 'accountant_approved':
+                        $statusClass = 'info';
+                        $statusIcon = 'check-circle';
+                        $statusText = 'تم الاستلام (بانتظار المدير)';
+                        break;
+                    case 'manager_approved':
+                        $statusClass = 'success';
+                        $statusIcon = 'check-circle-fill';
+                        $statusText = 'تمت الموافقة';
+                        break;
+                    case 'rejected':
+                        $statusClass = 'danger';
+                        $statusIcon = 'x-circle-fill';
+                        $statusText = 'مرفوض';
+                        break;
+                }
+                
+                // استخدام request_date بدلاً من requested_month
+                $requestDate = isset($request['request_date']) ? $request['request_date'] : '';
+            ?>
+            
+            <!-- Request Header -->
+            <div class="salary-row" style="background: #f8f9fa;">
+                <div class="salary-cell" style="grid-column: 1 / -1; padding: 8px 20px;">
+                    <small style="color: #6c757d;">
+                        <i class="bi bi-receipt me-1"></i>
+                        طلب #<?php echo $counter++; ?> - <?php echo date('Y-m-d', strtotime($request['created_at'])); ?>
+                    </small>
+                </div>
+            </div>
+
+            <!-- المبلغ والتاريخ في صف واحد -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    <i class="bi bi-currency-exchange me-2"></i>المبلغ / التاريخ
+                </div>
+                <div class="salary-cell value">
+                    <span class="salary-amount primary"><?php echo formatCurrency($request['amount']); ?></span>
+                    <span class="salary-description"><?php echo $requestDate ? date('Y-m-d', strtotime($requestDate)) : '-'; ?></span>
+                </div>
+            </div>
+
+            <!-- الحالة والسبب في صف واحد -->
+            <div class="salary-row">
+                <div class="salary-cell label">
+                    <i class="bi bi-flag me-2"></i>الحالة / السبب
+                </div>
+                <div class="salary-cell value">
+                    <span class="salary-amount <?php echo $statusClass; ?>">
+                        <i class="bi bi-<?php echo $statusIcon; ?> me-2"></i><?php echo $statusText; ?>
+                    </span>
+                    <span class="salary-description" style="font-size: 12px;">
+                        <?php 
+                        if ($request['status'] === 'rejected' && !empty($request['notes'])) {
+                            echo 'سبب الرفض: ' . htmlspecialchars($request['notes']);
+                        } elseif (!empty($request['reason'])) {
+                            echo 'السبب: ' . htmlspecialchars($request['reason']);
+                        } else {
+                            echo '—';
+                        }
+                        ?>
+                    </span>
+                </div>
+            </div>
+
+            <?php endforeach; ?>
+            <?php endif; ?>
+
+        </div><!-- End salary-grid -->
+    </div><!-- End salary-card-inner -->
+</div><!-- End salary-details-modern -->
+
+
+<script>
+// تفعيل Bootstrap tooltips
+document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+    
+    // Form validation
+    const forms = document.querySelectorAll('.needs-validation');
+    Array.from(forms).forEach(form => {
+        form.addEventListener('submit', event => {
+            if (!form.checkValidity()) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+            form.classList.add('was-validated');
+        }, false);
+    });
+});
+
+// تحديث تلقائي للإحصائيات كل دقيقتين (120 ثانية) - تم تقليل الطلبات على السيرفر
+setInterval(function() {
+    // إعادة تحميل إحصائيات الراتب
+    const currentUrl = new URL(window.location.href);
+    const month = currentUrl.searchParams.get('month') || <?php echo $selectedMonth; ?>;
+    const year = currentUrl.searchParams.get('year') || <?php echo $selectedYear; ?>;
+    
+    // تحديث الإحصائيات فقط (بدون إعادة تحميل كامل)
+    const apiPath = '<?php 
+        $basePath = getBasePath();
+        echo rtrim($basePath, '/') . '/api/salary_stats.php';
+    ?>';
+    fetch(apiPath + '?user_id=<?php echo $currentUser["id"]; ?>&month=' + month + '&year=' + year)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // تحديث الإحصائيات في الصفحة
+                const stats = data.stats;
+                document.querySelectorAll('.stat-card-icon').forEach((icon, index) => {
+                    const parent = icon.closest('.card-body');
+                    if (parent) {
+                        const h4 = parent.querySelector('.h4');
+                        if (h4 && index === 0) {
+                            h4.textContent = stats.total_hours.toFixed(2);
+                        } else if (h4 && index === 1) {
+                            h4.textContent = stats.total_salary.toLocaleString('ar-EG', {style: 'currency', currency: 'EGP'});
+                        }
+                    }
+                });
+            }
+        })
+        .catch(error => console.error('Error updating stats:', error));
+}, 120000); // كل دقيقتين (120 ثانية) بدلاً من 30 ثانية
+
+// التحقق من المبلغ عند الإدخال
+document.getElementById('amount')?.addEventListener('input', function() {
+    const maxAmount = <?php echo $maxAdvance; ?>;
+    if (parseFloat(this.value) > maxAmount) {
+        this.setCustomValidity('المبلغ يتجاوز الحد الأقصى: <?php echo formatCurrency($maxAdvance); ?>');
+    } else {
+        this.setCustomValidity('');
+    }
+});
+</script>
+

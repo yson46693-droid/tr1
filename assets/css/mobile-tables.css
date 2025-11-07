@@ -1,0 +1,150 @@
+/* تحسين تنسيق الجداول على الموبايل */
+/* Mobile Tables Optimization - بدون scroll جانبي */
+
+@media (max-width: 767.98px) {
+    /* إجبار الجداول على عرض بدون scroll */
+    .table-responsive {
+        overflow-x: visible !important; /* إزالة السحب الجانبي */
+        -webkit-overflow-scrolling: touch;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+    
+    /* تحسين عرض الجداول على الموبايل */
+    .table {
+        width: 100% !important;
+        min-width: auto !important; /* إزالة min-width */
+        max-width: 100%;
+        font-size: 0.8rem; /* تقليل حجم الخط */
+        table-layout: fixed; /* توزيع متساوي للأعمدة */
+        border-collapse: collapse;
+    }
+    
+    .table th,
+    .table td {
+        padding: 0.35rem 0.2rem !important; /* تقليل padding بشكل كبير */
+        white-space: normal !important; /* السماح بالتفاف النص */
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        vertical-align: middle;
+        font-size: 0.75rem;
+        line-height: 1.3;
+        max-width: 0; /* يساعد في table-layout: fixed */
+    }
+    
+    /* تحسين العناوين */
+    .table thead th {
+        font-size: 0.7rem;
+        padding: 0.4rem 0.25rem !important;
+        line-height: 1.2;
+        font-weight: 600;
+    }
+    
+    /* تحسين الأزرار في الجداول */
+    .table .btn {
+        padding: 0.2rem 0.35rem !important; /* تقليل padding */
+        font-size: 0.7rem !important; /* تقليل حجم الخط */
+        line-height: 1.2;
+        min-width: auto;
+    }
+    
+    .table .btn-group {
+        flex-wrap: wrap;
+        gap: 0.15rem !important; /* تقليل المسافة */
+    }
+    
+    .table .btn-group .btn {
+        flex: 0 0 auto;
+    }
+    
+    /* تقليل حجم badges والأيقونات */
+    .table .badge {
+        font-size: 0.6rem;
+        padding: 0.15rem 0.3rem;
+        line-height: 1.2;
+    }
+    
+    .table .bi {
+        font-size: 0.85rem;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    
+    /* إزالة المسافات الزائدة من العناصر */
+    .table td > *,
+    .table th > * {
+        margin: 0;
+    }
+    
+    /* تحسين عرض النصوص الطويلة */
+    .table td small,
+    .table th small {
+        font-size: 0.65rem;
+        line-height: 1.2;
+    }
+}
+
+/* Cards view للموبايل - يجب أن يتم إضافتها في PHP */
+.mobile-card-view {
+    display: none;
+}
+
+@media (max-width: 767.98px) {
+    .mobile-card-view {
+        display: block;
+    }
+    
+    .mobile-card-view .card {
+        border: 1px solid #dee2e6;
+        margin-bottom: 1rem;
+    }
+    
+    .mobile-card-view .card-body {
+        padding: 1rem;
+    }
+    
+    .mobile-card-view .card-header {
+        background: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        padding: 0.75rem 1rem;
+        font-weight: 600;
+    }
+    
+    .mobile-card-view .info-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .mobile-card-view .info-row:last-child {
+        border-bottom: none;
+    }
+    
+    .mobile-card-view .info-label {
+        color: #6c757d;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+    
+    .mobile-card-view .info-value {
+        font-weight: 600;
+        text-align: left;
+        direction: ltr;
+    }
+    
+    .mobile-card-view .actions-group {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        flex-wrap: wrap;
+    }
+    
+    .mobile-card-view .actions-group .btn {
+        flex: 1;
+        min-width: 80px;
+    }
+}
+

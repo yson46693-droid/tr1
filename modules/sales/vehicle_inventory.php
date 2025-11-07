@@ -1,0 +1,527 @@
+<?php
+/**
+ * صفحة إدارة مخازن سيارات المندوبين
+ */
+
+if (!defined('ACCESS_ALLOWED')) {
+    die('Direct access not allowed');
+}
+
+require_once __DIR__ . '/../../includes/config.php';
+require_once __DIR__ . '/../../includes/db.php';
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/vehicle_inventory.php';
+require_once __DIR__ . '/../../includes/audit_log.php';
+
+requireRole(['sales', 'accountant', 'production', 'manager']);
+
+$currentUser = getCurrentUser();
+$db = db();
+$error = '';
+$success = '';
+
+// Pagination
+$pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
+$perPage = 20;
+$offset = ($pageNum - 1) * $perPage;
+
+// البحث والفلترة
+$filters = [
+    'vehicle_id' => $_GET['vehicle_id'] ?? '',
+    'product_id' => $_GET['product_id'] ?? '',
+    'product_name' => $_GET['product_name'] ?? ''
+];
+
+$filters = array_filter($filters, function($value) {
+    return $value !== '';
+});
+
+// إذا كان المستخدم مندوب مبيعات، عرض فقط سيارته
+if ($currentUser['role'] === 'sales') {
+    $userVehicle = $db->queryOne("SELECT id FROM vehicles WHERE driver_id = ?", [$currentUser['id']]);
+    if ($userVehicle) {
+        $filters['vehicle_id'] = $userVehicle['id'];
+    }
+}
+
+// معالجة العمليات
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+    
+    if ($action === 'create_transfer') {
+        $fromWarehouseId = intval($_POST['from_warehouse_id'] ?? 0);
+        $toWarehouseId = intval($_POST['to_warehouse_id'] ?? 0);
+        $transferDate = $_POST['transfer_date'] ?? date('Y-m-d');
+        $reason = trim($_POST['reason'] ?? '');
+        $notes = trim($_POST['notes'] ?? '');
+        
+        // معالجة العناصر
+        $items = [];
+        if (isset($_POST['items']) && is_array($_POST['items'])) {
+            foreach ($_POST['items'] as $item) {
+                if (!empty($item['product_id']) && $item['quantity'] > 0) {
+                    $items[] = [
+                        'product_id' => intval($item['product_id']),
+                        'quantity' => floatval($item['quantity']),
+                        'notes' => trim($item['notes'] ?? '')
+                    ];
+                }
+            }
+        }
+        
+        if ($fromWarehouseId <= 0 || $toWarehouseId <= 0 || empty($items)) {
+            $error = 'يجب إدخال جميع البيانات المطلوبة';
+        } else {
+            $result = createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate, $items, $reason, $notes);
+            if ($result['success']) {
+                $success = 'تم إنشاء طلب النقل بنجاح: ' . $result['transfer_number'];
+            } else {
+                $error = $result['message'];
+            }
+        }
+    }
+}
+
+// الحصول على السيارات
+$vehicles = getVehicles(['status' => 'active']);
+
+// الحصول على المخازن
+$warehouses = $db->query("SELECT id, name, warehouse_type FROM warehouses WHERE status = 'active' ORDER BY name");
+$mainWarehouses = $db->query("SELECT id, name FROM warehouses WHERE warehouse_type = 'main' AND status = 'active' ORDER BY name");
+$vehicleWarehouses = $db->query("SELECT id, name, vehicle_id FROM warehouses WHERE warehouse_type = 'vehicle' AND status = 'active' ORDER BY name");
+
+// الحصول على المنتجات
+$products = $db->query("SELECT id, name, quantity, unit_price FROM products WHERE status = 'active' ORDER BY name");
+
+// مخزن سيارة محدد
+$selectedVehicle = null;
+$vehicleInventory = [];
+if (isset($_GET['vehicle_id']) || !empty($filters['vehicle_id'])) {
+    $vehicleId = intval($_GET['vehicle_id'] ?? $filters['vehicle_id']);
+    $selectedVehicle = $db->queryOne(
+        "SELECT v.*, u.full_name as driver_name, u.username as driver_username,
+                w.id as warehouse_id, w.name as warehouse_name
+         FROM vehicles v
+         LEFT JOIN users u ON v.driver_id = u.id
+         LEFT JOIN warehouses w ON w.vehicle_id = v.id AND w.warehouse_type = 'vehicle'
+         WHERE v.id = ?",
+        [$vehicleId]
+    );
+    
+    if ($selectedVehicle) {
+        // إنشاء مخزن السيارة إذا لم يكن موجوداً
+        if (!$selectedVehicle['warehouse_id']) {
+            $result = createVehicleWarehouse($vehicleId);
+            if ($result['success']) {
+                $selectedVehicle['warehouse_id'] = $result['warehouse_id'];
+            }
+        }
+        
+        // الحصول على مخزون السيارة
+        $vehicleInventory = getVehicleInventory($vehicleId, $filters);
+    }
+}
+
+// إحصائيات المخزون
+$inventoryStats = [
+    'total_products' => count($vehicleInventory),
+    'total_quantity' => 0,
+    'total_value' => 0
+];
+
+foreach ($vehicleInventory as $item) {
+    $inventoryStats['total_quantity'] += floatval($item['quantity'] ?? 0);
+    $inventoryStats['total_value'] += floatval($item['total_value'] ?? 0);
+}
+?>
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2><i class="bi bi-truck me-2"></i>مخازن سيارات المندوبين</h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTransferModal">
+        <i class="bi bi-arrow-left-right me-2"></i>طلب نقل منتجات
+    </button>
+</div>
+
+<?php if ($error): ?>
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+        <?php echo htmlspecialchars($error); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($success): ?>
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle-fill me-2"></i>
+        <?php echo htmlspecialchars($success); ?>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if ($selectedVehicle): ?>
+    <!-- عرض مخزن سيارة محدد -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="bi bi-truck me-2"></i>
+                مخزن سيارة: <?php echo htmlspecialchars($selectedVehicle['vehicle_number']); ?>
+            </h5>
+            <a href="?page=vehicle_inventory" class="btn btn-light btn-sm">
+                <i class="bi bi-x"></i>
+            </a>
+        </div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <table class="table table-bordered">
+                        <tr>
+                            <th width="40%">رقم السيارة:</th>
+                            <td><?php echo htmlspecialchars($selectedVehicle['vehicle_number']); ?></td>
+                        </tr>
+                        <tr>
+                            <th>الموديل:</th>
+                            <td><?php echo htmlspecialchars($selectedVehicle['model'] ?? '-'); ?></td>
+                        </tr>
+                        <tr>
+                            <th>المندوب:</th>
+                            <td><?php echo htmlspecialchars($selectedVehicle['driver_name'] ?? '-'); ?></td>
+                        </tr>
+                        <tr>
+                            <th>الحالة:</th>
+                            <td>
+                                <span class="badge bg-<?php 
+                                    echo $selectedVehicle['status'] === 'active' ? 'success' : 
+                                        ($selectedVehicle['status'] === 'maintenance' ? 'warning' : 'secondary'); 
+                                ?>">
+                                    <?php 
+                                    $statuses = [
+                                        'active' => 'نشطة',
+                                        'inactive' => 'غير نشطة',
+                                        'maintenance' => 'صيانة'
+                                    ];
+                                    echo $statuses[$selectedVehicle['status']] ?? $selectedVehicle['status'];
+                                    ?>
+                                </span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <div class="card bg-light">
+                        <div class="card-body">
+                            <h6>إحصائيات المخزون</h6>
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>عدد المنتجات:</span>
+                                <strong><?php echo $inventoryStats['total_products']; ?></strong>
+                            </div>
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>إجمالي الكمية:</span>
+                                <strong><?php echo number_format($inventoryStats['total_quantity'], 2); ?></strong>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <span>القيمة الإجمالية:</span>
+                                <strong><?php echo formatCurrency($inventoryStats['total_value']); ?></strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- البحث في مخزون السيارة -->
+            <div class="card shadow-sm mb-3">
+                <div class="card-body">
+                    <form method="GET" class="row g-3">
+                        <input type="hidden" name="page" value="vehicle_inventory">
+                        <input type="hidden" name="vehicle_id" value="<?php echo $selectedVehicle['id']; ?>">
+                        <div class="col-md-4">
+                            <label class="form-label">اسم المنتج</label>
+                            <input type="text" class="form-control" name="product_name" 
+                                   value="<?php echo htmlspecialchars($filters['product_name'] ?? ''); ?>" 
+                                   placeholder="بحث...">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-search me-2"></i>بحث
+                            </button>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">&nbsp;</label>
+                            <a href="?page=vehicle_inventory&vehicle_id=<?php echo $selectedVehicle['id']; ?>" class="btn btn-secondary w-100">
+                                <i class="bi bi-arrow-clockwise me-2"></i>إعادة تعيين
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <!-- قائمة مخزون السيارة -->
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>المنتج</th>
+                            <th>الكمية</th>
+                            <th>سعر الوحدة</th>
+                            <th>القيمة الإجمالية</th>
+                            <th>آخر تحديث</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (empty($vehicleInventory)): ?>
+                            <tr>
+                                <td colspan="5" class="text-center text-muted">لا توجد منتجات في مخزن هذه السيارة</td>
+                            </tr>
+                        <?php else: ?>
+                            <?php foreach ($vehicleInventory as $item): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
+                                    <td><strong><?php echo number_format($item['quantity'], 2); ?></strong></td>
+                                    <td><?php echo formatCurrency($item['unit_price'] ?? 0); ?></td>
+                                    <td><?php echo formatCurrency($item['total_value'] ?? 0); ?></td>
+                                    <td><?php echo $item['last_updated_at'] ? formatDateTime($item['last_updated_at']) : '-'; ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+<?php endif; ?>
+
+<!-- قائمة السيارات -->
+<div class="card shadow-sm">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0">قائمة السيارات والمندوبين</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <?php if (empty($vehicles)): ?>
+                <div class="col-12">
+                    <p class="text-center text-muted">لا توجد سيارات مسجلة</p>
+                </div>
+            <?php else: ?>
+                <?php foreach ($vehicles as $vehicle): ?>
+                    <div class="col-md-4 mb-3">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i class="bi bi-truck me-2"></i>
+                                    <?php echo htmlspecialchars($vehicle['vehicle_number']); ?>
+                                </h6>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        <i class="bi bi-person me-1"></i>
+                                        <?php echo htmlspecialchars($vehicle['driver_name'] ?? 'لا يوجد مندوب'); ?>
+                                    </small>
+                                </p>
+                                <?php if ($vehicle['model']): ?>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        <i class="bi bi-car-front me-1"></i>
+                                        <?php echo htmlspecialchars($vehicle['model']); ?>
+                                    </small>
+                                </p>
+                                <?php endif; ?>
+                                <a href="?page=vehicle_inventory&vehicle_id=<?php echo $vehicle['id']; ?>" 
+                                   class="btn btn-primary btn-sm w-100">
+                                    <i class="bi bi-box-seam me-2"></i>عرض المخزون
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<!-- Modal إنشاء طلب نقل -->
+<div class="modal fade" id="createTransferModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">طلب نقل منتجات بين المخازن</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="transferForm">
+                <input type="hidden" name="action" value="create_transfer">
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">من المخزن <span class="text-danger">*</span></label>
+                            <select class="form-select" name="from_warehouse_id" id="fromWarehouse" required>
+                                <option value="">اختر المخزن المصدر</option>
+                                <?php foreach ($warehouses as $warehouse): ?>
+                                    <option value="<?php echo $warehouse['id']; ?>" 
+                                            data-type="<?php echo $warehouse['warehouse_type']; ?>">
+                                        <?php echo htmlspecialchars($warehouse['name']); ?> 
+                                        (<?php echo $warehouse['warehouse_type'] === 'main' ? 'رئيسي' : 'سيارة'; ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">إلى المخزن <span class="text-danger">*</span></label>
+                            <select class="form-select" name="to_warehouse_id" id="toWarehouse" required>
+                                <option value="">اختر المخزن الوجهة</option>
+                                <?php foreach ($warehouses as $warehouse): ?>
+                                    <option value="<?php echo $warehouse['id']; ?>" 
+                                            data-type="<?php echo $warehouse['warehouse_type']; ?>">
+                                        <?php echo htmlspecialchars($warehouse['name']); ?> 
+                                        (<?php echo $warehouse['warehouse_type'] === 'main' ? 'رئيسي' : 'سيارة'; ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">تاريخ النقل <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" name="transfer_date" 
+                                   value="<?php echo date('Y-m-d'); ?>" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">السبب</label>
+                            <input type="text" class="form-control" name="reason" 
+                                   placeholder="مثال: تعبئة سيارة المندوب">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">عناصر النقل</label>
+                        <div id="transferItems">
+                            <div class="transfer-item row mb-2">
+                                <div class="col-md-5">
+                                    <select class="form-select product-select" name="items[0][product_id]" required>
+                                        <option value="">اختر المنتج</option>
+                                        <?php foreach ($products as $product): ?>
+                                            <option value="<?php echo $product['id']; ?>" 
+                                                    data-available="<?php echo $product['quantity']; ?>">
+                                                <?php echo htmlspecialchars($product['name']); ?> 
+                                                (متوفر: <?php echo number_format($product['quantity'], 2); ?>)
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="number" step="0.01" class="form-control quantity" 
+                                           name="items[0][quantity]" placeholder="الكمية" required min="0.01">
+                                </div>
+                                <div class="col-md-3">
+                                    <input type="text" class="form-control" 
+                                           name="items[0][notes]" placeholder="ملاحظات">
+                                </div>
+                                <div class="col-md-1">
+                                    <button type="button" class="btn btn-danger remove-item">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn">
+                            <i class="bi bi-plus-circle me-2"></i>إضافة عنصر
+                        </button>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">ملاحظات</label>
+                        <textarea class="form-control" name="notes" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle me-2"></i>
+                        سيتم إرسال طلب النقل للمدير للموافقة عليه قبل التنفيذ
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">إنشاء الطلب</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let itemIndex = 1;
+
+// إضافة عنصر جديد
+document.getElementById('addItemBtn')?.addEventListener('click', function() {
+    const itemsDiv = document.getElementById('transferItems');
+    const newItem = document.createElement('div');
+    newItem.className = 'transfer-item row mb-2';
+    newItem.innerHTML = `
+        <div class="col-md-5">
+            <select class="form-select product-select" name="items[${itemIndex}][product_id]" required>
+                <option value="">اختر المنتج</option>
+                <?php foreach ($products as $product): ?>
+                    <option value="<?php echo $product['id']; ?>" 
+                            data-available="<?php echo $product['quantity']; ?>">
+                        <?php echo htmlspecialchars($product['name']); ?> 
+                        (متوفر: <?php echo number_format($product['quantity'], 2); ?>)
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <input type="number" step="0.01" class="form-control quantity" 
+                   name="items[${itemIndex}][quantity]" placeholder="الكمية" required min="0.01">
+        </div>
+        <div class="col-md-3">
+            <input type="text" class="form-control" 
+                   name="items[${itemIndex}][notes]" placeholder="ملاحظات">
+        </div>
+        <div class="col-md-1">
+            <button type="button" class="btn btn-danger remove-item">
+                <i class="bi bi-trash"></i>
+            </button>
+        </div>
+    `;
+    itemsDiv.appendChild(newItem);
+    itemIndex++;
+    attachItemEvents(newItem);
+});
+
+// حذف عنصر
+document.addEventListener('click', function(e) {
+    if (e.target.closest('.remove-item')) {
+        e.target.closest('.transfer-item').remove();
+    }
+});
+
+// ربط أحداث العناصر
+function attachItemEvents(item) {
+    const productSelect = item.querySelector('.product-select');
+    const quantityInput = item.querySelector('.quantity');
+    
+    productSelect?.addEventListener('change', function() {
+        const available = parseFloat(this.options[this.selectedIndex].dataset.available) || 0;
+        if (quantityInput) {
+            quantityInput.setAttribute('max', available);
+            if (parseFloat(quantityInput.value) > available) {
+                quantityInput.value = available;
+            }
+        }
+    });
+}
+
+// ربط الأحداث للعناصر الموجودة
+document.querySelectorAll('.transfer-item').forEach(item => {
+    attachItemEvents(item);
+});
+
+// التحقق من عدم اختيار نفس المخزن
+document.getElementById('transferForm')?.addEventListener('submit', function(e) {
+    const fromWarehouse = document.getElementById('fromWarehouse').value;
+    const toWarehouse = document.getElementById('toWarehouse').value;
+    
+    if (fromWarehouse === toWarehouse) {
+        e.preventDefault();
+        alert('لا يمكن النقل من وإلى نفس المخزن');
+        return false;
+    }
+});
+</script>
+

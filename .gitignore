@@ -1,0 +1,7 @@
+# Git push scripts are now included in repository
+# git-push.bat
+# git-push.ps1
+
+# Auto-fix flag file (created after running auto-fix)
+database/.fix_262145_completed
+

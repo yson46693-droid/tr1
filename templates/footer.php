@@ -1,0 +1,348 @@
+<?php
+
+
+if (!defined('ACCESS_ALLOWED')) {
+    die('Direct access not allowed');
+}
+?>
+    <!-- Footer -->
+    <footer class="footer mt-auto py-3 bg-light border-top safe-area-bottom">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-6 text-center text-md-start">
+                    <small class="text-muted">
+                        &copy; <?php echo date('Y'); ?> <?php echo COMPANY_NAME; ?>. <?php echo $lang['all_rights_reserved'] ?? 'جميع الحقوق محفوظة'; ?>
+                    </small>
+                </div>
+                <div class="col-md-6 text-center text-md-end">
+                    <small class="text-muted">
+                        <?php echo APP_NAME; ?> v<?php echo APP_VERSION; ?>
+                    </small>
+                </div>
+            </div>
+        </div>
+    </footer>
+    
+    <!-- Install Banner -->
+    <div class="install-banner" id="installBanner">
+        <div class="d-flex align-items-center justify-content-between">
+            <div class="flex-grow-1">
+                <strong><i class="bi bi-download me-2"></i>تثبيت التطبيق</strong>
+                <p class="mb-0 small">ثبت التطبيق للوصول السريع والاستخدام بدون إنترنت</p>
+            </div>
+            <button class="btn btn-light btn-sm" id="installButton">
+                <i class="bi bi-plus-circle me-1"></i>تثبيت
+            </button>
+        </div>
+        <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-2" id="dismissInstallBanner" aria-label="إغلاق"></button>
+    </div>
+    
+    <?php
+    // استخدام timestamp لـ cache busting (نفس المستخدم في header.php)
+    $cacheVersion = time();
+    ?>
+    <!-- Bootstrap 5 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- jQuery (optional, for some features) -->
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <!-- Custom JS -->
+    <script src="<?php echo ASSETS_URL; ?>js/fix-modal-interaction.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/main.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/sidebar.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/tables.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/notifications.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/dark-mode.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/pwa-install.js?v=<?php echo $cacheVersion; ?>"></script>
+    
+    <?php if (isset($extraScripts)): ?>
+        <?php foreach ($extraScripts as $script): ?>
+            <script src="<?php echo $script; ?>"></script>
+        <?php endforeach; ?>
+    <?php endif; ?>
+    
+    <script>
+        // تهيئة النظام
+        document.addEventListener('DOMContentLoaded', function() {
+            // إغلاق القائمة المنسدلة عند النقر على أي رابط
+            const mainMenuDropdown = document.getElementById('mainMenuDropdown');
+            const mainMenuDropdownMenu = document.querySelector('.main-menu-dropdown');
+            
+            if (mainMenuDropdown && mainMenuDropdownMenu) {
+                // إغلاق القائمة عند النقر على أي رابط
+                const menuLinks = mainMenuDropdownMenu.querySelectorAll('.dropdown-item');
+                menuLinks.forEach(link => {
+                    link.addEventListener('click', function() {
+                        // إغلاق القائمة باستخدام Bootstrap
+                        const dropdownInstance = bootstrap.Dropdown.getInstance(mainMenuDropdown);
+                        if (dropdownInstance) {
+                            dropdownInstance.hide();
+                        }
+                    });
+                });
+                
+                // إغلاق القائمة عند النقر خارجها
+                document.addEventListener('click', function(event) {
+                    if (!mainMenuDropdown.contains(event.target) && !mainMenuDropdownMenu.contains(event.target)) {
+                        const dropdownInstance = bootstrap.Dropdown.getInstance(mainMenuDropdown);
+                        if (dropdownInstance && mainMenuDropdownMenu.classList.contains('show')) {
+                            dropdownInstance.hide();
+                        }
+                    }
+                });
+            }
+            
+            // تحميل الإشعارات
+            if (typeof loadNotifications === 'function') {
+                loadNotifications();
+                const interval = <?php echo NOTIFICATION_POLL_INTERVAL; ?>;
+                setInterval(loadNotifications, interval);
+            }
+            
+            // تهيئة نظام التحقق من التحديثات
+            initUpdateChecker();
+        });
+        
+        // Register Service Worker (يتم تسجيله في header.php)
+        
+        // Offline Detection
+        const offlineIndicator = document.getElementById('offlineIndicator');
+        if (offlineIndicator) {
+            window.addEventListener('online', () => {
+                offlineIndicator.classList.remove('show');
+            });
+            
+            window.addEventListener('offline', () => {
+                offlineIndicator.classList.add('show');
+            });
+        }
+        
+        /**
+         * نظام التحقق من التحديثات
+         */
+        function initUpdateChecker() {
+            const STORAGE_KEY = 'app_last_version';
+            const CHECK_INTERVAL = 5 * 60 * 1000; // كل 5 دقائق
+            let updateCheckInterval = null;
+            let isChecking = false;
+            
+            // حساب مسار API
+            const currentPath = window.location.pathname;
+            const pathParts = currentPath.split('/').filter(p => p && !p.endsWith('.php'));
+            let apiPath = '/api/check_update.php';
+            if (pathParts.length > 0) {
+                apiPath = '/' + pathParts[0] + '/api/check_update.php';
+            }
+            
+            /**
+             * التحقق من وجود تحديثات
+             */
+            async function checkForUpdates() {
+                if (isChecking) return;
+                isChecking = true;
+                
+                try {
+                    const response = await fetch(apiPath + '?t=' + Date.now(), {
+                        method: 'GET',
+                        cache: 'no-cache',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to check for updates');
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        const currentHash = data.content_hash || data.version || data.last_modified;
+                        const storedHash = localStorage.getItem(STORAGE_KEY);
+                        
+                        // إذا كان هناك تغيير في hash أو version
+                        if (storedHash && storedHash !== currentHash) {
+                            // يوجد تحديث جديد
+                            showUpdateAvailableNotification(data.version || 'جديد');
+                        }
+                        
+                        // حفظ hash الحالي
+                        localStorage.setItem(STORAGE_KEY, currentHash);
+                    }
+                } catch (error) {
+                    console.log('Update check error:', error);
+                } finally {
+                    isChecking = false;
+                }
+            }
+            
+            /**
+             * إظهار إشعار التحديث
+             */
+            function showUpdateAvailableNotification(version) {
+                // التحقق من عدم وجود إشعار موجود بالفعل
+                if (document.getElementById('updateNotification')) {
+                    return;
+                }
+                
+                const notification = document.createElement('div');
+                notification.id = 'updateNotification';
+                notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
+                notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);';
+                notification.innerHTML = `
+                    <div class="d-flex align-items-start">
+                        <div class="flex-grow-1">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="bi bi-arrow-clockwise me-2 fs-5"></i>
+                                <strong>تحديث متاح!</strong>
+                            </div>
+                            <p class="mb-2 small">يتوفر تحديث جديد للموقع (v${version}). يرجى تحديث الصفحة للحصول على أحدث الميزات.</p>
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-sm btn-primary" onclick="refreshPage()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>تحديث الآن
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="dismissUpdateNotification()">
+                                    لاحقاً
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" class="btn-close ms-2" onclick="dismissUpdateNotification()" aria-label="إغلاق"></button>
+                    </div>
+                `;
+                
+                document.body.appendChild(notification);
+                
+                // إضافة دوال عامة
+                window.refreshPage = function() {
+                    // إزالة cache
+                    if ('caches' in window) {
+                        caches.keys().then(names => {
+                            names.forEach(name => {
+                                caches.delete(name);
+                            });
+                        });
+                    }
+                    // تحديث الصفحة
+                    window.location.reload(true);
+                };
+                
+                window.dismissUpdateNotification = function() {
+                    const notif = document.getElementById('updateNotification');
+                    if (notif) {
+                        notif.classList.remove('show');
+                        setTimeout(() => notif.remove(), 300);
+                    }
+                };
+                
+                // إزالة الإشعار تلقائياً بعد 60 ثانية
+                setTimeout(() => {
+                    window.dismissUpdateNotification();
+                }, 60000);
+            }
+            
+            // التحقق الأولي بعد تحميل الصفحة بـ 10 ثوان
+            setTimeout(checkForUpdates, 10000);
+            
+            // التحقق بشكل دوري
+            updateCheckInterval = setInterval(checkForUpdates, CHECK_INTERVAL);
+            
+            // التحقق عند إعادة التركيز على النافذة
+            window.addEventListener('focus', function() {
+                if (!isChecking) {
+                    checkForUpdates();
+                }
+            });
+            
+            // التحقق عند الاتصال بالإنترنت
+            window.addEventListener('online', function() {
+                if (!isChecking) {
+                    setTimeout(checkForUpdates, 2000);
+                }
+            });
+            
+            // تنظيف عند إغلاق الصفحة
+            window.addEventListener('beforeunload', function() {
+                if (updateCheckInterval) {
+                    clearInterval(updateCheckInterval);
+                }
+            });
+        }
+    </script>
+    
+    <!-- 🎬 Page Loading Animation Script -->
+    <script>
+        (function() {
+            'use strict';
+            
+            const pageLoader = document.getElementById('pageLoader');
+            const dashboardMain = document.querySelector('.dashboard-main');
+            
+            // إخفاء شاشة التحميل فوراً بعد تحميل الصفحة
+            window.addEventListener('DOMContentLoaded', function() {
+                // إخفاء فوري بدون تأخير
+                pageLoader.classList.add('hidden');
+                
+                // إضافة تأثير fade-in للمحتوى
+                if (dashboardMain) {
+                    dashboardMain.classList.add('content-fade-in');
+                }
+                
+                // إزالة شاشة التحميل من DOM بعد انتهاء التأثير
+                setTimeout(function() {
+                    pageLoader.style.display = 'none';
+                }, 500);
+            });
+            
+            // إخفاء شاشة التحميل عند فتح أي Modal
+            document.addEventListener('show.bs.modal', function() {
+                pageLoader.classList.add('hidden');
+                pageLoader.style.display = 'none';
+            });
+            
+            // تعطيل شاشة التحميل عند التنقل بين الأقسام لتجنب التجميد
+            // فقط للروابط الخارجية التي تغير الصفحة بالكامل
+            let isNavigating = false;
+            document.addEventListener('click', function(e) {
+                const link = e.target.closest('a');
+                
+                // تحقق من أن الرابط يؤدي لتغيير الصفحة الكامل (ليس tabs أو sections)
+                if (link && 
+                    link.href && 
+                    !link.href.includes('section=') && // تجاهل روابط الأقسام
+                    !link.href.includes('&tab=') && 
+                    !link.href.includes('#') &&
+                    !link.href.startsWith('javascript:') &&
+                    !link.href.startsWith('mailto:') &&
+                    !link.href.startsWith('tel:') &&
+                    !link.target &&
+                    !link.download &&
+                    link.hostname === window.location.hostname &&
+                    !link.hasAttribute('data-bs-toggle') && 
+                    !link.hasAttribute('data-bs-target') &&
+                    !link.classList.contains('dropdown-item') &&
+                    !link.closest('.nav-tabs') && // تجاهل روابط التبويبات
+                    !link.closest('.section-tabs') && // تجاهل روابط أقسام المخزن
+                    !isNavigating) {
+                    
+                    isNavigating = true;
+                    // إظهار شاشة التحميل فقط للتنقل بين الصفحات الرئيسية
+                    pageLoader.classList.remove('hidden');
+                    pageLoader.style.display = 'flex';
+                }
+            });
+            
+            // إخفاء شاشة التحميل عند الرجوع للصفحة
+            window.addEventListener('pageshow', function(event) {
+                isNavigating = false;
+                if (event.persisted || (window.performance && window.performance.navigation.type === 2)) {
+                    pageLoader.classList.add('hidden');
+                    pageLoader.style.display = 'none';
+                }
+            });
+            
+        })();
+    </script>
+        </main>
+    </div>
+</body>
+</html>
+

@@ -1,0 +1,51 @@
+name: Deploy to InfinityFree
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch: # يسمح بالتشغيل اليدوي
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Upload via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4
+        with:
+          server: ftpupload.net
+          username: if0_40239608
+          password: ${{ secrets.FTP_PASSWORD }}
+          server-dir: /htdocs/
+          local-dir: ./
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.DS_Store
+            **/Thumbs.db
+            **/.env
+            **/.env.local
+            **/.env.*.local
+            **/README.md
+            **/README*.md
+            **/INSTALLATION_GUIDE.md
+            **/QUICK_START.md
+            **/NEXT_STEPS.md
+            **/LOGIN_CREDENTIALS.md
+            **/github/**
+            **/.vscode/**
+            **/.idea/**
+            **/backups/**
+            **/*.log
+            **/composer.json
+            **/composer.lock
+            **/package.json
+            **/package-lock.json
+            **/start-localhost.bat
+            **/.htaccess.backup
+            **/uploads/.htaccess
+          log-level: verbose
