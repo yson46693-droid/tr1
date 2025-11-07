@@ -110,6 +110,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => isset($lang['customers']) ? $lang['customers'] : 'العملاء',
+                'icon' => 'bi-people',
+                'url' => $baseUrl . 'manager.php?page=customers',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'customers'),
+                'badge' => null
+            ],
+            [
                 'title' => isset($lang['menu_vehicles']) ? $lang['menu_vehicles'] : 'السيارات',
                 'icon' => 'bi-car-front',
                 'url' => $baseUrl . 'manager.php?page=vehicles',
@@ -118,7 +125,7 @@ switch ($role) {
             ],
             [
                 'title' => 'نقطة البيع',
-                'icon' => 'bi-cash-register',
+                'icon' => 'bi-shop',
                 'url' => $baseUrl . 'manager.php?page=pos',
                 'active' => ($currentPage === 'manager.php' && $currentPageParam === 'pos'),
                 'badge' => null

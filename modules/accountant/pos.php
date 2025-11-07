@@ -339,8 +339,8 @@ $customers = $db->query("SELECT id, name, phone FROM customers WHERE status = 'a
                         <input type="text" class="form-control" name="phone" placeholder="مثال: 01234567890">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">البريد الإلكتروني</label>
-                        <input type="email" class="form-control" name="email" placeholder="example@email.com">
+                        <label class="form-label">ديون العميل</label>
+                        <input type="number" class="form-control" name="balance" value="0" min="0" step="0">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">العنوان</label>
