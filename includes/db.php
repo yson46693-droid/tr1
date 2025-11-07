@@ -30,6 +30,18 @@ class Database {
             // مصر تستخدم توقيت UTC+2 بدون توقيت صيفي
             $this->connection->query("SET time_zone = '+02:00'");
             
+            try {
+                $columnCheck = $this->connection->query("SHOW COLUMNS FROM `users` LIKE 'profile_photo'");
+                if ($columnCheck instanceof mysqli_result) {
+                    if ($columnCheck->num_rows === 0) {
+                        $this->connection->query("ALTER TABLE `users` ADD COLUMN `profile_photo` LONGTEXT NULL AFTER `phone`");
+                    }
+                    $columnCheck->free();
+                }
+            } catch (Throwable $migrationError) {
+                error_log('Profile photo column migration error: ' . $migrationError->getMessage());
+            }
+            
         } catch (Exception $e) {
             die("Database connection error: " . $e->getMessage());
         }
