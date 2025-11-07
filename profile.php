@@ -49,7 +49,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $mimeType = mime_content_type($tmpPath);
                     }
                     if (!$mimeType && class_exists('finfo')) {
-                        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                        $mode = defined('FILEINFO_MIME_TYPE') ? FILEINFO_MIME_TYPE : 0;
+                        $finfo = finfo_open($mode);
                         if ($finfo) {
                             $mimeType = finfo_file($finfo, $tmpPath);
                             finfo_close($finfo);
