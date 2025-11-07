@@ -339,9 +339,7 @@ function restoreDatabase($backupId) {
                 if (strpos($lowerError, 'already exists') !== false && preg_match('/CREATE\s+TABLE\s+`?([a-z0-9_]+)`?/i', $query, $matches)) {
                     $tableName = $matches[1];
                     $connection->query("DROP TABLE IF EXISTS `$tableName`");
-                    if (!$connection->query($query)) {
-                        continue;
-                    }
+                    $connection->query($query);
                     continue;
                 }
                 
