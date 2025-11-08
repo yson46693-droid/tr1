@@ -21,6 +21,11 @@ $db = db();
 $error = '';
 $success = '';
 
+$sessionSuccess = getSuccessMessage();
+if ($sessionSuccess) {
+    $success = $sessionSuccess;
+}
+
 // Pagination
 $pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
 $perPage = 20;
@@ -38,8 +43,114 @@ $filters = [
 $tableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
 $usePackagingTable = !empty($tableCheck);
 
+// معالجة طلبات إضافة الكميات
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+
+    if ($action === 'add_packaging_quantity') {
+        $materialId = intval($_POST['material_id'] ?? 0);
+        $additionalQuantity = isset($_POST['additional_quantity']) ? round(floatval($_POST['additional_quantity']), 4) : 0.0;
+        $notes = trim($_POST['notes'] ?? '');
+
+        if ($materialId <= 0) {
+            $error = 'معرف أداة التعبئة غير صحيح.';
+        } elseif ($additionalQuantity <= 0) {
+            $error = 'يرجى إدخال كمية صحيحة أكبر من الصفر.';
+        } else {
+            try {
+                $db->beginTransaction();
+
+                if ($usePackagingTable) {
+                    $material = $db->queryOne(
+                        "SELECT id, name, quantity, unit FROM packaging_materials WHERE id = ? AND status = 'active' FOR UPDATE",
+                        [$materialId]
+                    );
+                } else {
+                    $unitColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'unit'");
+                    $selectColumns = $unitColumnCheck ? 'id, name, quantity, unit' : 'id, name, quantity';
+                    $material = $db->queryOne(
+                        "SELECT {$selectColumns} FROM products WHERE id = ? AND status = 'active' FOR UPDATE",
+                        [$materialId]
+                    );
+                    if ($unitColumnCheck && $material && !array_key_exists('unit', $material)) {
+                        $material['unit'] = null;
+                    }
+                }
+
+                if (!$material) {
+                    throw new Exception('أداة التعبئة غير موجودة أو غير مفعّلة.');
+                }
+
+                $quantityBefore = floatval($material['quantity'] ?? 0);
+                $quantityAfter = $quantityBefore + $additionalQuantity;
+
+                if ($usePackagingTable) {
+                    $db->execute(
+                        "UPDATE packaging_materials 
+                         SET quantity = ?, updated_at = NOW() 
+                         WHERE id = ?",
+                        [$quantityAfter, $materialId]
+                    );
+                } else {
+                    $db->execute(
+                        "UPDATE products 
+                         SET quantity = ? 
+                         WHERE id = ?",
+                        [$quantityAfter, $materialId]
+                    );
+                }
+
+                $auditDetailsAfter = [
+                    'quantity_after' => $quantityAfter,
+                    'added_quantity' => $additionalQuantity
+                ];
+
+                if ($notes !== '') {
+                    $auditDetailsAfter['notes'] = mb_substr($notes, 0, 500, 'UTF-8');
+                }
+
+                logAudit(
+                    $currentUser['id'],
+                    'add_packaging_quantity',
+                    $usePackagingTable ? 'packaging_materials' : 'products',
+                    $materialId,
+                    ['quantity_before' => $quantityBefore],
+                    $auditDetailsAfter
+                );
+
+                $db->commit();
+
+                $unitLabel = $material['unit'] ?? 'وحدة';
+                $successMessage = sprintf(
+                    'تمت إضافة %.2f %s إلى %s بنجاح.',
+                    $additionalQuantity,
+                    $unitLabel,
+                    $material['name'] ?? ('أداة #' . $materialId)
+                );
+
+                $redirectParams = ['page' => 'packaging_warehouse'];
+                foreach (['search', 'material_id', 'date_from', 'date_to'] as $param) {
+                    if (!empty($_GET[$param])) {
+                        $redirectParams[$param] = $_GET[$param];
+                    }
+                }
+
+            } catch (Exception $e) {
+                if ($db->inTransaction()) {
+                    $db->rollBack();
+                }
+                $error = 'حدث خطأ أثناء تحديث الكمية: ' . $e->getMessage();
+            }
+
+            if (empty($error)) {
+                preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+            }
+        }
+    }
+}
+
+// تحميل قائمة أدوات التعبئة بعد معالجة الطلبات
 if ($usePackagingTable) {
-    // استخدام جدول packaging_materials الجديد (بدون السعر)
     $packagingMaterials = $db->query(
         "SELECT id, material_id, name, type, specifications, quantity, unit, status, created_at, updated_at
          FROM packaging_materials 
@@ -47,21 +158,26 @@ if ($usePackagingTable) {
          ORDER BY name"
     );
 } else {
-    // Fallback إلى products إذا لم يكن packaging_materials موجوداً
     $typeColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'type'");
     $specificationsColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'specifications'");
+    $unitColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'unit'");
     $hasTypeColumn = !empty($typeColumnCheck);
     $hasSpecificationsColumn = !empty($specificationsColumnCheck);
 
     $columns = ['id', 'name', 'category', 'quantity'];
-    $whereConditions = ["(category LIKE '%تغليف%' OR category LIKE '%packaging%'"];
-
     if ($hasTypeColumn) {
         $columns[] = 'type';
-        $whereConditions[0] .= " OR type LIKE '%تغليف%'";
     }
     if ($hasSpecificationsColumn) {
         $columns[] = 'specifications';
+    }
+    if ($unitColumnCheck) {
+        $columns[] = 'unit';
+    }
+
+    $whereConditions = ["(category LIKE '%تغليف%' OR category LIKE '%packaging%'"];
+    if ($hasTypeColumn) {
+        $whereConditions[0] .= " OR type LIKE '%تغليف%'";
     }
     $whereConditions[0] .= ") AND status = 'active'";
 
@@ -539,6 +655,16 @@ $stats = [
                                 </td>
                                 <td style="padding: 0.4rem 0.25rem;">
                                     <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-success btn-sm"
+                                                data-id="<?php echo $material['id']; ?>"
+                                                data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-quantity="<?php echo number_format((float)($material['quantity'] ?? 0), 4, '.', ''); ?>"
+                                                onclick="openAddQuantityModal(this)"
+                                                title="إضافة كمية"
+                                                style="padding: 0.2rem 0.4rem; font-size: 0.75rem;">
+                                            <i class="bi bi-plus-circle"></i>
+                                        </button>
                                         <button class="btn btn-info btn-sm" 
                                                 onclick="viewMaterialDetails(<?php echo $material['id']; ?>)"
                                                 title="عرض التفاصيل"
@@ -601,6 +727,14 @@ $stats = [
                             </div>
                             
                             <div class="d-grid gap-2 d-flex mt-3">
+                                <button class="btn btn-sm btn-success flex-fill"
+                                        data-id="<?php echo $material['id']; ?>"
+                                        data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-quantity="<?php echo number_format((float)($material['quantity'] ?? 0), 4, '.', ''); ?>"
+                                        onclick="openAddQuantityModal(this)">
+                                    <i class="bi bi-plus-circle me-2"></i>إضافة كمية
+                                </button>
                                 <button class="btn btn-sm btn-info flex-fill" onclick="viewMaterialDetails(<?php echo $material['id']; ?>)">
                                     <i class="bi bi-eye me-2"></i>عرض التفاصيل
                                 </button>
@@ -663,6 +797,68 @@ $stats = [
     </div>
 </div>
 
+<!-- Modal إضافة كمية جديدة -->
+<div class="modal fade" id="addQuantityModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" id="addQuantityForm">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إضافة كمية لأداة التعبئة</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="add_packaging_quantity">
+                    <input type="hidden" name="material_id" id="add_quantity_material_id">
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">أداة التعبئة</label>
+                        <div class="form-control-plaintext" id="add_quantity_material_name">-</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">الكمية الحالية</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-secondary" id="add_quantity_existing">0</span>
+                            <span id="add_quantity_unit" class="text-muted small"></span>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">الكمية المضافة <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <input type="number"
+                                   step="0.01"
+                                   min="0.01"
+                                   class="form-control"
+                                   name="additional_quantity"
+                                   id="add_quantity_input"
+                                   required
+                                   placeholder="0.00">
+                            <span class="input-group-text" id="add_quantity_unit_suffix"></span>
+                        </div>
+                        <small class="text-muted">سيتم جمع الكمية المدخلة مع الموجود حالياً في المخزون.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">ملاحظات (اختياري)</label>
+                        <textarea class="form-control"
+                                  name="notes"
+                                  rows="3"
+                                  maxlength="500"
+                                  placeholder="مثال: إضافة من شحنة جديدة أو تصحيح جرد."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle me-2"></i>حفظ الكمية
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal لعرض التفاصيل -->
 <div class="modal fade" id="materialDetailsModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
@@ -686,6 +882,54 @@ $stats = [
 </div>
 
 <script>
+function openAddQuantityModal(trigger) {
+    const modalElement = document.getElementById('addQuantityModal');
+    const form = document.getElementById('addQuantityForm');
+    if (!modalElement || !form) {
+        return;
+    }
+
+    const materialIdInput = document.getElementById('add_quantity_material_id');
+    const nameElement = document.getElementById('add_quantity_material_name');
+    const existingElement = document.getElementById('add_quantity_existing');
+    const unitElement = document.getElementById('add_quantity_unit');
+    const unitSuffix = document.getElementById('add_quantity_unit_suffix');
+    const quantityInput = document.getElementById('add_quantity_input');
+
+    if (form) {
+        form.reset();
+    }
+
+    const dataset = trigger?.dataset || {};
+    const materialId = dataset.id || '';
+    const materialName = dataset.name || '-';
+    const unit = dataset.unit || 'وحدة';
+    const existingQuantity = parseFloat(dataset.quantity || '0') || 0;
+
+    if (!materialId) {
+        console.warn('Material id is missing for add quantity modal trigger.');
+        return;
+    }
+
+    materialIdInput.value = materialId;
+    nameElement.textContent = materialName;
+    existingElement.textContent = existingQuantity.toLocaleString('ar-EG', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+    unitElement.textContent = unit;
+    unitSuffix.textContent = unit;
+    quantityInput.value = '';
+
+    const modal = new bootstrap.Modal(modalElement);
+    modal.show();
+
+    setTimeout(() => {
+        quantityInput.focus();
+        quantityInput.select();
+    }, 250);
+}
+
 function viewMaterialDetails(materialId) {
     const modal = new bootstrap.Modal(document.getElementById('materialDetailsModal'));
     const content = document.getElementById('materialDetailsContent');
