@@ -424,6 +424,19 @@ function hasAllRoles($roles) {
  * التحقق من الوصول - إعادة توجيه إذا لم يكن مسجلاً
  */
 function requireLogin() {
+    if (isLoggedIn()) {
+        if (!function_exists('logRequestUsage')) {
+            $monitorPath = __DIR__ . '/request_monitor.php';
+            if (file_exists($monitorPath)) {
+                require_once $monitorPath;
+            }
+        }
+        if (function_exists('logRequestUsage')) {
+            logRequestUsage();
+        }
+        return;
+    }
+
     if (!isLoggedIn()) {
         // محاولة تحميل path_helper إذا لم يكن محملاً
         if (!function_exists('getRelativeUrl') && file_exists(__DIR__ . '/path_helper.php')) {

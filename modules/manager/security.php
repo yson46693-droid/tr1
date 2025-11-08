@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/permissions.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/security.php';
+require_once __DIR__ . '/../../includes/request_monitor.php';
 
 requireRole('manager');
 
@@ -92,6 +93,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = 'معرف المستخدم أو الصلاحية غير صحيح';
         }
+    } elseif ($action === 'block_ip') {
+        $ipAddress = trim($_POST['ip_address'] ?? '');
+        $reason = trim($_POST['reason'] ?? '');
+        $durationMinutes = intval($_POST['duration_minutes'] ?? 0);
+
+        if (empty($ipAddress) || !filter_var($ipAddress, FILTER_VALIDATE_IP)) {
+            $error = 'عنوان IP غير صالح.';
+        } else {
+            $blockedUntil = null;
+            if ($durationMinutes > 0) {
+                $blockedUntil = date('Y-m-d H:i:s', time() + ($durationMinutes * 60));
+            }
+
+            if (blockIP($ipAddress, $reason ?: 'نشاط مرتفع', $blockedUntil, $currentUser['id'] ?? null)) {
+                $success = 'تم حظر عنوان IP بنجاح.';
+            } else {
+                $error = 'تعذر حظر عنوان IP المحدد.';
+            }
+        }
+
+        $_GET['tab'] = 'usage';
+    } elseif ($action === 'cleanup_usage') {
+        $days = intval($_POST['days'] ?? 30);
+        $deleted = cleanupRequestUsage($days);
+        $success = 'تم حذف ' . $deleted . ' سجل استخدام قديم.';
+        $_GET['tab'] = 'usage';
     }
 }
 
@@ -147,6 +174,40 @@ $users = $db->query("SELECT id, username, full_name, role FROM users WHERE statu
 $permissions = getAllPermissions();
 $selectedUserId = $_GET['user_id'] ?? ($users[0]['id'] ?? null);
 $userPermissions = $selectedUserId ? getUserPermissions($selectedUserId) : [];
+
+// بيانات مراقبة الاستخدام
+$usageDate = $_GET['usage_date'] ?? date('Y-m-d');
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $usageDate)) {
+    $usageDate = date('Y-m-d');
+}
+$usageLimit = isset($_GET['usage_limit']) ? max(10, min(200, intval($_GET['usage_limit']))) : 50;
+$selectedUsageUserId = isset($_GET['usage_user_id']) ? max(0, intval($_GET['usage_user_id'])) : null;
+
+$requestUsageUsers = getRequestUsageSummary([
+    'type' => 'user',
+    'date' => $usageDate,
+    'limit' => $usageLimit,
+]);
+$requestUsageIps = getRequestUsageSummary([
+    'type' => 'ip',
+    'date' => $usageDate,
+    'limit' => $usageLimit,
+]);
+$requestUsageAlerts = getRequestUsageAlerts($usageDate, max(50, $usageLimit));
+$selectedUsageUserDetails = $selectedUsageUserId ? getRequestUsageDetailsForUser($selectedUsageUserId, $usageDate) : [];
+$selectedUsageUser = null;
+
+if ($selectedUsageUserId) {
+    foreach ($requestUsageUsers as $usageRow) {
+        if (intval($usageRow['user_id']) === intval($selectedUsageUserId)) {
+            $selectedUsageUser = $usageRow;
+            break;
+        }
+    }
+}
+
+$usageThresholdUser = defined('REQUEST_USAGE_THRESHOLD_PER_USER') ? REQUEST_USAGE_THRESHOLD_PER_USER : null;
+$usageThresholdIp = defined('REQUEST_USAGE_THRESHOLD_PER_IP') ? REQUEST_USAGE_THRESHOLD_PER_IP : null;
 
 // الحصول على بيانات الأمان
 $blockedIPs = getBlockedIPs();
@@ -221,6 +282,18 @@ $activeTab = $_GET['tab'] ?? 'security';
                 aria-controls="security-content" 
                 aria-selected="<?php echo $activeTab === 'security' ? 'true' : 'false'; ?>">
             <i class="bi bi-shield-lock me-2"></i><span>الأمان</span>
+        </button>
+    </li>
+    <li class="nav-item flex-shrink-0" role="presentation">
+        <button class="nav-link <?php echo $activeTab === 'usage' ? 'active' : ''; ?>"
+                id="usage-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#usage-content"
+                type="button"
+                role="tab"
+                aria-controls="usage-content"
+                aria-selected="<?php echo $activeTab === 'usage' ? 'true' : 'false'; ?>">
+            <i class="bi bi-activity me-2"></i><span>مراقبة الاستخدام</span>
         </button>
     </li>
     <li class="nav-item flex-shrink-0" role="presentation">
@@ -396,6 +469,367 @@ $activeTab = $_GET['tab'] ?? 'security';
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tab-pane fade <?php echo $activeTab === 'usage' ? 'show active' : ''; ?>" 
+         id="usage-content" 
+         role="tabpanel" 
+         aria-labelledby="usage-tab">
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-12 col-xl-7">
+                        <form class="row g-3 align-items-end" method="get">
+                            <input type="hidden" name="tab" value="usage">
+                            <?php if ($selectedUsageUserId): ?>
+                                <input type="hidden" name="usage_user_id" value="<?php echo intval($selectedUsageUserId); ?>">
+                            <?php endif; ?>
+                            <div class="col-12 col-md-6 col-xl-5">
+                                <label class="form-label">التاريخ</label>
+                                <input type="date" name="usage_date" value="<?php echo htmlspecialchars($usageDate); ?>" class="form-control">
+                            </div>
+                            <div class="col-12 col-md-4 col-xl-4">
+                                <label class="form-label">عدد السجلات</label>
+                                <input type="number" name="usage_limit" value="<?php echo htmlspecialchars($usageLimit); ?>" min="10" max="200" step="10" class="form-control">
+                            </div>
+                            <div class="col-12 col-md-2 col-xl-3">
+                                <label class="form-label">&nbsp;</label>
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="bi bi-arrow-repeat me-2"></i>
+                                    تحديث
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                    <div class="col-12 col-xl-5">
+                        <div class="bg-light border rounded p-3 h-100">
+                            <div class="d-flex flex-column gap-2">
+                                <div>
+                                    <small class="text-muted d-block">
+                                        حد المستخدم اليومي: 
+                                        <strong><?php echo $usageThresholdUser ? number_format($usageThresholdUser) : 'غير محدد'; ?></strong>
+                                    </small>
+                                    <small class="text-muted d-block">
+                                        حد عنوان IP اليومي: 
+                                        <strong><?php echo $usageThresholdIp ? number_format($usageThresholdIp) : 'غير محدد'; ?></strong>
+                                    </small>
+                                    <small class="text-muted d-block">
+                                        نافذة المراقبة: 
+                                        <strong><?php echo defined('REQUEST_USAGE_ALERT_WINDOW_MINUTES') ? intval(REQUEST_USAGE_ALERT_WINDOW_MINUTES) : 1440; ?></strong> دقيقة
+                                    </small>
+                                </div>
+                                <form method="post" class="d-flex align-items-center gap-2 flex-wrap">
+                                    <input type="hidden" name="action" value="cleanup_usage">
+                                    <label class="form-label mb-0 me-2">
+                                        <small>تنظيف الأقدم من</small>
+                                    </label>
+                                    <select name="days" class="form-select form-select-sm w-auto">
+                                        <option value="7">7 أيام</option>
+                                        <option value="30" selected>30 يوماً</option>
+                                        <option value="90">90 يوماً</option>
+                                    </select>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" onclick="return confirm('سيتم حذف سجلات الاستخدام الأقدم من المدة المحددة. هل أنت متأكد؟');">
+                                        <i class="bi bi-trash me-1"></i>
+                                        تنظيف السجلات
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row g-3">
+            <div class="col-12 col-xl-7">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>استخدام حسب المستخدمين</h5>
+                        <small class="text-white-50">عرض أعلى <?php echo htmlspecialchars($usageLimit); ?> مستخدم</small>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>المستخدم</th>
+                                        <th class="d-none d-md-table-cell">الدور</th>
+                                        <th>عدد الطلبات</th>
+                                        <th class="d-none d-lg-table-cell">آخر طلب</th>
+                                        <th class="d-none d-xl-table-cell">عناوين IP</th>
+                                        <th>إجراءات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($requestUsageUsers)): ?>
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted">لا توجد بيانات استخدام في هذا التاريخ</td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <?php foreach ($requestUsageUsers as $usage): ?>
+                                            <?php
+                                                $totalRequests = intval($usage['total_requests'] ?? 0);
+                                                $isOverThreshold = $usageThresholdUser && $totalRequests >= $usageThresholdUser;
+                                                $userId = intval($usage['user_id']);
+                                                $detailUrlParams = [
+                                                    'tab' => 'usage',
+                                                    'usage_date' => $usageDate,
+                                                    'usage_limit' => $usageLimit,
+                                                    'usage_user_id' => $userId,
+                                                ];
+                                                $detailUrl = '?' . http_build_query($detailUrlParams);
+                                            ?>
+                                            <tr<?php echo $selectedUsageUserId === $userId ? ' class="table-info"' : ''; ?>>
+                                                <td>
+                                                    <div class="fw-semibold"><?php echo htmlspecialchars($usage['username'] ?? 'غير معروف'); ?></div>
+                                                    <?php if (!empty($usage['full_name'])): ?>
+                                                        <small class="text-muted d-block"><?php echo htmlspecialchars($usage['full_name']); ?></small>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="d-none d-md-table-cell">
+                                                    <span class="badge bg-secondary"><?php echo htmlspecialchars($usage['role'] ?? '-'); ?></span>
+                                                </td>
+                                                <td>
+                                                    <span class="fw-semibold <?php echo $isOverThreshold ? 'text-danger' : ''; ?>">
+                                                        <?php echo number_format($totalRequests); ?>
+                                                    </span>
+                                                    <?php if ($isOverThreshold): ?>
+                                                        <span class="badge bg-danger ms-1">مرتفع</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="d-none d-lg-table-cell">
+                                                    <small><?php echo !empty($usage['last_request']) ? formatDateTime($usage['last_request']) : '-'; ?></small>
+                                                </td>
+                                                <td class="d-none d-xl-table-cell">
+                                                    <small class="text-muted"><?php echo htmlspecialchars($usage['recent_ips'] ?? '-'); ?></small>
+                                                </td>
+                                                <td>
+                                                    <a href="<?php echo htmlspecialchars($detailUrl); ?>" class="btn btn-sm btn-outline-primary">
+                                                        <i class="bi bi-list-check"></i>
+                                                        <span class="d-none d-sm-inline">تفاصيل</span>
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-xl-5">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-hdd-network me-2"></i>استخدام حسب عنوان IP</h5>
+                        <small class="text-white-50">أعلى العناوين خلال اليوم</small>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>عنوان IP</th>
+                                        <th>الطلبات</th>
+                                        <th class="d-none d-lg-table-cell">آخر نشاط</th>
+                                        <th>المستخدمون</th>
+                                        <th>حظر</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($requestUsageIps)): ?>
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted">لا توجد بيانات استخدام في هذا التاريخ</td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <?php foreach ($requestUsageIps as $ipUsage): ?>
+                                            <?php
+                                                $totalRequests = intval($ipUsage['total_requests'] ?? 0);
+                                                $isOverThreshold = $usageThresholdIp && $totalRequests >= $usageThresholdIp;
+                                            ?>
+                                            <tr>
+                                                <td><code><?php echo htmlspecialchars($ipUsage['ip_address']); ?></code></td>
+                                                <td>
+                                                    <span class="fw-semibold <?php echo $isOverThreshold ? 'text-danger' : ''; ?>">
+                                                        <?php echo number_format($totalRequests); ?>
+                                                    </span>
+                                                    <?php if ($isOverThreshold): ?>
+                                                        <span class="badge bg-danger ms-1">مرتفع</span>
+                                                    <?php endif; ?>
+                                                    <?php if (!empty($ipUsage['anonymous_requests'])): ?>
+                                                        <div><small class="text-muted">مجهول: <?php echo number_format($ipUsage['anonymous_requests']); ?></small></div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="d-none d-lg-table-cell">
+                                                    <small><?php echo !empty($ipUsage['last_request']) ? formatDateTime($ipUsage['last_request']) : '-'; ?></small>
+                                                </td>
+                                                <td>
+                                                    <small class="text-muted"><?php echo htmlspecialchars($ipUsage['usernames'] ?? '-'); ?></small>
+                                                </td>
+                                                <td>
+                                                    <form method="post" class="d-flex flex-column flex-sm-row align-items-stretch align-items-sm-center gap-2">
+                                                        <input type="hidden" name="action" value="block_ip">
+                                                        <input type="hidden" name="ip_address" value="<?php echo htmlspecialchars($ipUsage['ip_address'], ENT_QUOTES); ?>">
+                                                        <input type="hidden" name="reason" value="نشاط مرتفع بتاريخ <?php echo htmlspecialchars($usageDate); ?>">
+                                                        <select name="duration_minutes" class="form-select form-select-sm w-auto" aria-label="مدة الحظر">
+                                                            <option value="60">1 ساعة</option>
+                                                            <option value="240">4 ساعات</option>
+                                                            <option value="1440">يوم</option>
+                                                            <option value="4320">3 أيام</option>
+                                                            <option value="0">دائم</option>
+                                                        </select>
+                                                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('هل تريد حظر عنوان IP هذا؟');">
+                                                            <i class="bi bi-shield-exclamation"></i>
+                                                            <span class="d-none d-xl-inline">حظر</span>
+                                                        </button>
+                                                    </form>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row g-3 mt-1">
+            <div class="col-12 col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-warning text-white">
+                        <h5 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i>تنبيهات الاستخدام المرتفع</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>النوع</th>
+                                        <th>المعرف</th>
+                                        <th>الطلبات</th>
+                                        <th>الحد</th>
+                                        <th class="d-none d-lg-table-cell">الفترة</th>
+                                        <th>إجراء</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($requestUsageAlerts)): ?>
+                                        <tr>
+                                            <td colspan="6" class="text-center text-muted">لا توجد تنبيهات خلال هذا اليوم</td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <?php foreach ($requestUsageAlerts as $alert): ?>
+                                            <?php
+                                                $isUserAlert = ($alert['identifier_type'] === 'user');
+                                                $identifierValue = $alert['identifier_value'];
+                                                $count = intval($alert['request_count'] ?? 0);
+                                                $threshold = intval($alert['threshold'] ?? 0);
+                                                $windowLabel = formatDateTime($alert['window_start']) . ' → ' . formatDateTime($alert['window_end']);
+                                                $actionHtml = '-';
+                                                if ($isUserAlert) {
+                                                    $alertUrl = '?' . http_build_query([
+                                                        'tab' => 'usage',
+                                                        'usage_date' => $usageDate,
+                                                        'usage_limit' => $usageLimit,
+                                                        'usage_user_id' => intval($identifierValue),
+                                                    ]);
+                                                    $actionHtml = '<a href="' . htmlspecialchars($alertUrl) . '" class="btn btn-sm btn-outline-primary">تفاصيل المستخدم</a>';
+                                                } else {
+                                                    $actionHtml = '<form method="post" class="d-inline">
+                                                        <input type="hidden" name="action" value="block_ip">
+                                                        <input type="hidden" name="ip_address" value="' . htmlspecialchars($identifierValue, ENT_QUOTES) . '">
+                                                        <input type="hidden" name="reason" value="تنبيه استخدام مرتفع ' . htmlspecialchars($usageDate) . '">
+                                                        <input type="hidden" name="duration_minutes" value="1440">
+                                                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm(\'حظر عنوان IP المرتفع؟\');">
+                                                            <i class="bi bi-shield-exclamation"></i>
+                                                        </button>
+                                                    </form>';
+                                                }
+                                            ?>
+                                            <tr>
+                                                <td>
+                                                    <?php if ($isUserAlert): ?>
+                                                        <span class="badge bg-primary">مستخدم</span>
+                                                    <?php else: ?>
+                                                        <span class="badge bg-secondary">IP</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td>
+                                                    <?php if ($isUserAlert): ?>
+                                                        <span class="fw-semibold">#<?php echo htmlspecialchars($identifierValue); ?></span>
+                                                    <?php else: ?>
+                                                        <code><?php echo htmlspecialchars($identifierValue); ?></code>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td><span class="fw-semibold text-danger"><?php echo number_format($count); ?></span></td>
+                                                <td><?php echo number_format($threshold); ?></td>
+                                                <td class="d-none d-lg-table-cell"><small><?php echo htmlspecialchars($windowLabel); ?></small></td>
+                                                <td><?php echo $actionHtml; ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-lg-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>تفاصيل المستخدم المختار</h5>
+                        <?php if ($selectedUsageUserId): ?>
+                            <small class="text-white-50">المعرف: <?php echo intval($selectedUsageUserId); ?></small>
+                        <?php endif; ?>
+                    </div>
+                    <div class="card-body">
+                        <?php if (!$selectedUsageUserId || empty($selectedUsageUser)): ?>
+                            <div class="alert alert-light border text-muted mb-0">
+                                اختر مستخدماً من الجدول لرؤية تفاصيل الطلبات الخاصة به خلال اليوم.
+                            </div>
+                        <?php else: ?>
+                            <div class="mb-3">
+                                <h6 class="mb-1"><?php echo htmlspecialchars($selectedUsageUser['username'] ?? ''); ?></h6>
+                                <?php if (!empty($selectedUsageUser['full_name'])): ?>
+                                    <small class="text-muted d-block"><?php echo htmlspecialchars($selectedUsageUser['full_name']); ?></small>
+                                <?php endif; ?>
+                                <small class="text-muted d-block">عدد الطلبات: <?php echo number_format(intval($selectedUsageUser['total_requests'] ?? 0)); ?></small>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>المسار</th>
+                                            <th class="d-none d-md-table-cell">الطريقة</th>
+                                            <th>الطلبات</th>
+                                            <th class="d-none d-lg-table-cell">آخر طلب</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($selectedUsageUserDetails)): ?>
+                                            <tr>
+                                                <td colspan="4" class="text-center text-muted">لا توجد تفاصيل متاحة</td>
+                                            </tr>
+                                        <?php else: ?>
+                                            <?php foreach ($selectedUsageUserDetails as $detail): ?>
+                                                <tr>
+                                                    <td><small><?php echo htmlspecialchars($detail['path'] ?? '-'); ?></small></td>
+                                                    <td class="d-none d-md-table-cell"><span class="badge bg-light text-dark"><?php echo htmlspecialchars($detail['method'] ?? '-'); ?></span></td>
+                                                    <td><?php echo number_format(intval($detail['total_requests'] ?? 0)); ?></td>
+                                                    <td class="d-none d-lg-table-cell"><small><?php echo !empty($detail['last_request']) ? formatDateTime($detail['last_request']) : '-'; ?></small></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>

@@ -80,6 +80,10 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 // إعدادات الأمان
 define('PASSWORD_MIN_LENGTH', 8);
 define('CSRF_TOKEN_NAME', 'csrf_token');
+define('REQUEST_USAGE_MONITOR_ENABLED', true);
+define('REQUEST_USAGE_THRESHOLD_PER_USER', 2000); // الحد اليومي لكل مستخدم قبل إنشاء تنبيه
+define('REQUEST_USAGE_THRESHOLD_PER_IP', 3000);    // الحد اليومي لكل عنوان IP قبل إنشاء تنبيه
+define('REQUEST_USAGE_ALERT_WINDOW_MINUTES', 1440); // فترة المراقبة بالدقائق (افتراضياً يوم كامل)
 
 // إعدادات المسارات
 define('BASE_PATH', dirname(__DIR__));
