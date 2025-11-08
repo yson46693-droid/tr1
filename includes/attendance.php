@@ -239,6 +239,8 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
     $role = $user['role'] ?? 'unknown';
     
     // إرسال إشعار واحد فقط عبر Telegram (صورة مع جميع البيانات)
+    $photoDeleted = false;
+
     if (isTelegramConfigured()) {
         $delayText = $delayMinutes > 0 ? "⏰ تأخير: {$delayMinutes} دقيقة" : "✅ في الوقت";
         
@@ -260,6 +262,11 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
                 
                 if ($telegramResult) {
                     error_log("Attendance check-in sent to Telegram successfully for user {$userId}");
+                    if ($savedPhotoAbsolute && file_exists($savedPhotoAbsolute)) {
+                        @unlink($savedPhotoAbsolute);
+                        $savedPhotoAbsolute = null;
+                        $photoDeleted = true;
+                    }
                 } else {
                     error_log("Failed to send attendance check-in to Telegram for user {$userId}");
                 }
@@ -285,6 +292,17 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
         }
     }
     
+    if ($photoDeleted) {
+        try {
+            $db->execute(
+                "UPDATE attendance_records SET photo_path = ? WHERE id = ?",
+                ['deleted_after_send', $recordId]
+            );
+        } catch (Exception $e) {
+            error_log("Failed to update deleted photo status for attendance record {$recordId}: " . $e->getMessage());
+        }
+    }
+
     try {
         $db->execute(
             "DELETE FROM notifications WHERE user_id = ? AND type = 'attendance_checkin'",
@@ -299,7 +317,7 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
         'record_id' => $recordId,
         'delay_minutes' => $delayMinutes,
         'message' => $delayMinutes > 0 ? "تم تسجيل الحضور مع تأخير {$delayMinutes} دقيقة" : 'تم تسجيل الحضور في الوقت',
-        'photo_path' => $savedPhotoRelative
+        'photo_path' => $photoDeleted ? 'deleted_after_send' : $savedPhotoRelative
     ];
 }
 
@@ -393,6 +411,8 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
     $role = $user['role'] ?? 'unknown';
     
     // إرسال إشعار واحد فقط عبر Telegram (صورة مع جميع البيانات)
+    $checkoutPhotoDeleted = false;
+
     if (isTelegramConfigured()) {
         // إذا كانت الصورة متوفرة، أرسلها مع البيانات
         if ($photoBase64 && !empty(trim($photoBase64))) {
@@ -414,6 +434,11 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
                 
                 if ($telegramResult) {
                     error_log("Attendance check-out sent to Telegram successfully for user {$userId}");
+                    if ($checkoutPhotoAbsolute && file_exists($checkoutPhotoAbsolute)) {
+                        @unlink($checkoutPhotoAbsolute);
+                        $checkoutPhotoAbsolute = null;
+                        $checkoutPhotoDeleted = true;
+                    }
                 } else {
                     error_log("Failed to send attendance check-out to Telegram for user {$userId}");
                 }
@@ -440,6 +465,17 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
             }
         }
     }
+
+    if ($checkoutPhotoDeleted) {
+        try {
+            $db->execute(
+                "UPDATE attendance_records SET checkout_photo_path = ? WHERE id = ?",
+                ['deleted_after_send', $lastCheckIn['id']]
+            );
+        } catch (Exception $e) {
+            error_log("Failed to update deleted checkout photo status for attendance record {$lastCheckIn['id']}: " . $e->getMessage());
+        }
+    }
     
     try {
         $db->execute(
@@ -456,7 +492,7 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
         'today_hours' => $todayHours,
         'month_hours' => $monthHours,
         'message' => 'تم تسجيل الانصراف بنجاح',
-        'checkout_photo_path' => $checkoutPhotoRelative
+        'checkout_photo_path' => $checkoutPhotoDeleted ? 'deleted_after_send' : $checkoutPhotoRelative
     ];
 }
 

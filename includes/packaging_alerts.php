@@ -110,6 +110,10 @@ function processDailyPackagingAlert(): void {
     $caption = "تقرير أدوات التعبئة منخفضة الكمية\nالتاريخ: " . date('Y-m-d H:i') . "\nالحد الأدنى: أقل من " . PACKAGING_ALERT_THRESHOLD . ' قطعة';
 
     $sent = sendTelegramFile($pdfPath, $caption);
+    if ($sent && file_exists($pdfPath)) {
+        @unlink($pdfPath);
+        $pdfPath = null;
+    }
 
     if (!$sent) {
         return;
@@ -118,20 +122,20 @@ function processDailyPackagingAlert(): void {
     try {
         if ($jobState) {
             $db->execute(
-                "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = ?, updated_at = NOW() WHERE job_key = ?",
-                [$pdfPath, PACKAGING_ALERT_JOB_KEY]
+                "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = NULL, updated_at = NOW() WHERE job_key = ?",
+                [PACKAGING_ALERT_JOB_KEY]
             );
         } else {
             $db->execute(
-                "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), ?)",
-                [PACKAGING_ALERT_JOB_KEY, $pdfPath]
+                "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), NULL)",
+                [PACKAGING_ALERT_JOB_KEY]
             );
         }
 
         if (function_exists('createNotificationForRole')) {
             try {
                 $relativeLink = null;
-                if (defined('BASE_PATH') && function_exists('getRelativeUrl')) {
+                if ($pdfPath && defined('BASE_PATH') && function_exists('getRelativeUrl')) {
                     $relative = ltrim(str_replace(BASE_PATH, '', $pdfPath), '/\\');
                     if ($relative !== '') {
                         $relativeLink = getRelativeUrl($relative);

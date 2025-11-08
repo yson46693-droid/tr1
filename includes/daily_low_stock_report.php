@@ -383,10 +383,10 @@ if (!function_exists('triggerDailyLowStockReport')) {
                         $status = 'failed';
                         $errorMessage = 'فشل إرسال التقرير إلى Telegram';
                     } else {
-                        if (REPORTS_AUTO_DELETE && file_exists($savedFilePath)) {
+                        if (file_exists($savedFilePath)) {
                             @unlink($savedFilePath);
-                            $savedFilePath = null;
                         }
+                        $savedFilePath = null;
                     }
                 }
             }
@@ -398,36 +398,25 @@ if (!function_exists('triggerDailyLowStockReport')) {
                 'date' => $todayDate,
                 'status' => $status,
                 'completed_at' => date('Y-m-d H:i:s'),
-                'file' => $reportFileName,
                 'counts' => $counts,
+                'file_deleted' => ($status === 'completed'),
             ];
             if (!empty($errorMessage)) {
                 $finalData['error'] = $errorMessage;
-            }
-            if ($savedFilePath !== null) {
-                $finalData['file_path'] = $savedFilePath;
             }
 
             if ($status === 'completed') {
                 lowStockReportNotifyManager('تم إرسال تقرير المخازن منخفضة الكمية إلى شات Telegram.');
                 try {
-                    if ($savedFilePath !== null) {
-                        $fileLogValue = $savedFilePath;
-                    } elseif (!empty($reportFileName)) {
-                        $fileLogValue = $reportFileName;
-                    } else {
-                        $fileLogValue = null;
-                    }
-
                     if ($jobState) {
                         $db->execute(
-                            "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = ?, updated_at = NOW() WHERE job_key = ?",
-                            [$fileLogValue, LOW_STOCK_REPORT_JOB_KEY]
+                            "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = NULL, updated_at = NOW() WHERE job_key = ?",
+                            [LOW_STOCK_REPORT_JOB_KEY]
                         );
                     } else {
                         $db->execute(
-                            "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), ?)",
-                            [LOW_STOCK_REPORT_JOB_KEY, $fileLogValue]
+                            "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), NULL)",
+                            [LOW_STOCK_REPORT_JOB_KEY]
                         );
                     }
                 } catch (Throwable $jobUpdateError) {
