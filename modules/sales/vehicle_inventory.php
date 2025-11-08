@@ -20,6 +20,13 @@ $db = db();
 $error = '';
 $success = '';
 
+$currentPageSlug = $_GET['page'] ?? 'vehicle_inventory';
+$currentSection = $_GET['section'] ?? null;
+$baseQueryString = '?page=' . urlencode($currentPageSlug);
+if ($currentSection !== null && $currentSection !== '') {
+    $baseQueryString .= '&section=' . urlencode($currentSection);
+}
+
 // Pagination
 $pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
 $perPage = 20;
@@ -165,7 +172,7 @@ foreach ($vehicleInventory as $item) {
                 <i class="bi bi-truck me-2"></i>
                 مخزن سيارة: <?php echo htmlspecialchars($selectedVehicle['vehicle_number']); ?>
             </h5>
-            <a href="?page=vehicle_inventory" class="btn btn-light btn-sm">
+            <a href="<?php echo $baseQueryString; ?>" class="btn btn-light btn-sm">
                 <i class="bi bi-x"></i>
             </a>
         </div>
@@ -230,7 +237,10 @@ foreach ($vehicleInventory as $item) {
             <div class="card shadow-sm mb-3">
                 <div class="card-body">
                     <form method="GET" class="row g-3">
-                        <input type="hidden" name="page" value="vehicle_inventory">
+                        <input type="hidden" name="page" value="<?php echo htmlspecialchars($currentPageSlug); ?>">
+                        <?php if ($currentSection !== null && $currentSection !== ''): ?>
+                            <input type="hidden" name="section" value="<?php echo htmlspecialchars($currentSection); ?>">
+                        <?php endif; ?>
                         <input type="hidden" name="vehicle_id" value="<?php echo $selectedVehicle['id']; ?>">
                         <div class="col-md-4">
                             <label class="form-label">اسم المنتج</label>
@@ -246,7 +256,7 @@ foreach ($vehicleInventory as $item) {
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">&nbsp;</label>
-                            <a href="?page=vehicle_inventory&vehicle_id=<?php echo $selectedVehicle['id']; ?>" class="btn btn-secondary w-100">
+                            <a href="<?php echo $baseQueryString; ?>&vehicle_id=<?php echo $selectedVehicle['id']; ?>" class="btn btn-secondary w-100">
                                 <i class="bi bi-arrow-clockwise me-2"></i>إعادة تعيين
                             </a>
                         </div>
@@ -323,7 +333,7 @@ foreach ($vehicleInventory as $item) {
                                     </small>
                                 </p>
                                 <?php endif; ?>
-                                <a href="?page=vehicle_inventory&vehicle_id=<?php echo $vehicle['id']; ?>" 
+                                <a href="<?php echo $baseQueryString; ?>&vehicle_id=<?php echo $vehicle['id']; ?>" 
                                    class="btn btn-primary btn-sm w-100">
                                     <i class="bi bi-box-seam me-2"></i>عرض المخزون
                                 </a>

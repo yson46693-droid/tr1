@@ -77,11 +77,6 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                         'url' => getRelativeUrl('dashboard/manager.php?page=customers')
                     ],
                     [
-                        'label' => 'السيارات',
-                        'icon' => 'bi-car-front',
-                        'url' => getRelativeUrl('dashboard/manager.php?page=vehicles')
-                    ],
-                    [
                         'label' => 'نقطة البيع',
                         'icon' => 'bi-cart4',
                         'url' => getRelativeUrl('dashboard/manager.php?page=pos')
@@ -567,15 +562,48 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 ?>
                 
             <?php elseif ($page === 'final_products'): ?>
-                <!-- صفحة مخزن المنتجات النهائية -->
                 <?php 
-                $modulePath = __DIR__ . '/../modules/production/final_products.php';
-                if (file_exists($modulePath)) {
-                    include $modulePath;
-                } else {
-                    echo '<div class="alert alert-warning">صفحة مخزن المنتجات غير متاحة حالياً</div>';
+                $section = $_GET['section'] ?? 'company';
+                $allowedSections = ['company', 'delegates'];
+                if (!in_array($section, $allowedSections, true)) {
+                    $section = 'company';
                 }
                 ?>
+                <div class="page-header mb-4 d-flex flex-wrap justify-content-between align-items-center">
+                    <h2 class="mb-2 mb-md-0"><i class="bi bi-boxes me-2"></i>مخازن المنتجات</h2>
+                </div>
+                <ul class="nav nav-pills gap-2">
+                    <li class="nav-item">
+                        <a class="nav-link <?php echo $section === 'company' ? 'active' : ''; ?>" href="manager.php?page=final_products&section=company">
+                            <i class="bi bi-building me-2"></i>مخزن منتجات الشركة
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?php echo $section === 'delegates' ? 'active' : ''; ?>" href="manager.php?page=final_products&section=delegates">
+                            <i class="bi bi-truck me-2"></i>مخازن المناديب
+                        </a>
+                    </li>
+                </ul>
+                <div class="mt-4">
+                    <?php 
+                    if ($section === 'delegates') {
+                        $delegatesModule = __DIR__ . '/../modules/sales/vehicle_inventory.php';
+                        if (file_exists($delegatesModule)) {
+                            include $delegatesModule;
+                        } else {
+                            echo '<div class="alert alert-warning">صفحة مخازن المناديب غير متاحة حالياً</div>';
+                        }
+                    } else {
+                        $_GET['section'] = 'company';
+                        $modulePath = __DIR__ . '/../modules/production/final_products.php';
+                        if (file_exists($modulePath)) {
+                            include $modulePath;
+                        } else {
+                            echo '<div class="alert alert-warning">صفحة مخزن المنتجات غير متاحة حالياً</div>';
+                        }
+                    }
+                    ?>
+                </div>
                 
             <?php elseif ($page === 'import_packaging'): ?>
                 <!-- صفحة استيراد أدوات التعبئة -->

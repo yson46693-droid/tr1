@@ -214,6 +214,84 @@ $blockedIPs = getBlockedIPs();
 $stats = getLoginAttemptsStats();
 $loginAttempts = getLoginAttempts([], 20);
 
+// بيانات سجل التدقيق
+$auditPerPage = isset($_GET['audit_limit']) ? max(5, min(50, intval($_GET['audit_limit']))) : 20;
+$auditPage = isset($_GET['audit_page']) ? max(1, intval($_GET['audit_page'])) : 1;
+$auditUserFilter = isset($_GET['audit_user']) ? max(0, intval($_GET['audit_user'])) : 0;
+$auditActionFilter = isset($_GET['audit_action']) ? trim($_GET['audit_action']) : '';
+$auditEntityFilter = isset($_GET['audit_entity']) ? trim($_GET['audit_entity']) : '';
+$auditDateFrom = isset($_GET['audit_date_from']) ? trim($_GET['audit_date_from']) : '';
+$auditDateTo = isset($_GET['audit_date_to']) ? trim($_GET['audit_date_to']) : '';
+
+if ($auditUserFilter <= 0) {
+    $auditUserFilter = null;
+}
+
+if ($auditActionFilter === '') {
+    $auditActionFilter = null;
+}
+
+if ($auditEntityFilter === '') {
+    $auditEntityFilter = null;
+}
+
+if ($auditDateFrom && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $auditDateFrom)) {
+    $auditDateFrom = null;
+}
+
+if ($auditDateTo && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $auditDateTo)) {
+    $auditDateTo = null;
+}
+
+$auditFilters = [];
+
+if (!empty($auditUserFilter)) {
+    $auditFilters['user_id'] = $auditUserFilter;
+}
+if ($auditActionFilter) {
+    $auditFilters['action'] = $auditActionFilter;
+}
+if ($auditEntityFilter) {
+    $auditFilters['entity_type'] = $auditEntityFilter;
+}
+if ($auditDateFrom) {
+    $auditFilters['date_from'] = $auditDateFrom;
+}
+if ($auditDateTo) {
+    $auditFilters['date_to'] = $auditDateTo;
+}
+
+$auditOffset = ($auditPage - 1) * $auditPerPage;
+$auditTotal = getAuditLogsCount($auditFilters);
+$auditLogs = $auditTotal > 0 ? getAuditLogs($auditFilters, $auditPerPage, $auditOffset) : [];
+$auditTotalPages = max(1, (int)ceil($auditTotal / $auditPerPage));
+
+$auditUsersList = $db->query("SELECT id, username, full_name FROM users WHERE status = 'active' ORDER BY username ASC");
+$auditActionsList = $db->query("SELECT DISTINCT action FROM audit_logs ORDER BY action ASC");
+$auditEntitiesList = $db->query("SELECT DISTINCT entity_type FROM audit_logs WHERE entity_type IS NOT NULL AND entity_type <> '' ORDER BY entity_type ASC");
+
+$auditQueryBase = [
+    'page' => 'security',
+    'tab' => 'audit',
+    'audit_limit' => $auditPerPage,
+];
+
+if (!empty($auditUserFilter)) {
+    $auditQueryBase['audit_user'] = $auditUserFilter;
+}
+if ($auditActionFilter) {
+    $auditQueryBase['audit_action'] = $auditActionFilter;
+}
+if ($auditEntityFilter) {
+    $auditQueryBase['audit_entity'] = $auditEntityFilter;
+}
+if ($auditDateFrom) {
+    $auditQueryBase['audit_date_from'] = $auditDateFrom;
+}
+if ($auditDateTo) {
+    $auditQueryBase['audit_date_to'] = $auditDateTo;
+}
+
 // تحديد التاب الافتراضي
 $activeTab = $_GET['tab'] ?? 'security';
 ?>
@@ -239,39 +317,89 @@ $activeTab = $_GET['tab'] ?? 'security';
 
 <!-- Bootstrap Tabs -->
 <style>
-/* تحسين التصميم للهاتف */
+#securityTabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    border-bottom: none;
+}
+
+#securityTabs .nav-item {
+    flex: 1 1 180px;
+}
+
+#securityTabs .nav-link {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0.75rem;
+    border: 1px solid transparent;
+    background-color: var(--bs-light);
+    color: var(--bs-body-color);
+    font-weight: 600;
+    padding: 0.75rem 1rem;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    transition: all 0.2s ease-in-out;
+}
+
+#securityTabs .nav-link i {
+    font-size: 1.1rem;
+}
+
+#securityTabs .nav-link:not(.active):hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(15, 23, 42, 0.12);
+}
+
+#securityTabs .nav-link.active {
+    background-color: var(--bs-primary);
+    color: #fff;
+    border-color: var(--bs-primary);
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.25);
+}
+
+.tab-content .card {
+    margin-bottom: 1.5rem;
+}
+
+@media (max-width: 992px) {
+    #securityTabs .nav-item {
+        flex: 1 1 160px;
+    }
+}
+
 @media (max-width: 768px) {
     #securityTabs {
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 0.75rem;
     }
     
     #securityTabs .nav-item {
         width: 100%;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0;
     }
     
     #securityTabs .nav-link {
-        width: 100%;
-        text-align: center;
-        padding: 0.75rem;
         font-size: 0.95rem;
-    }
-    
-    .tab-content .card {
-        margin-bottom: 1rem;
+        padding: 0.65rem 0.75rem;
+        text-align: center;
     }
     
     .table-responsive {
         font-size: 0.875rem;
     }
     
-    .table th, .table td {
+    .table th,
+    .table td {
         padding: 0.5rem;
     }
 }
 </style>
 
-<ul class="nav nav-tabs mb-4 flex-nowrap overflow-auto" id="securityTabs" role="tablist">
+<ul class="nav nav-tabs mb-4" id="securityTabs" role="tablist">
     <li class="nav-item flex-shrink-0" role="presentation">
         <button class="nav-link <?php echo $activeTab === 'security' ? 'active' : ''; ?>" 
                 id="security-tab" 
@@ -294,6 +422,18 @@ $activeTab = $_GET['tab'] ?? 'security';
                 aria-controls="usage-content"
                 aria-selected="<?php echo $activeTab === 'usage' ? 'true' : 'false'; ?>">
             <i class="bi bi-activity me-2"></i><span>مراقبة الاستخدام</span>
+        </button>
+    </li>
+    <li class="nav-item flex-shrink-0" role="presentation">
+        <button class="nav-link <?php echo $activeTab === 'audit' ? 'active' : ''; ?>"
+                id="audit-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#audit-content"
+                type="button"
+                role="tab"
+                aria-controls="audit-content"
+                aria-selected="<?php echo $activeTab === 'audit' ? 'true' : 'false'; ?>">
+            <i class="bi bi-journal-text me-2"></i><span>سجل التدقيق</span>
         </button>
     </li>
     <li class="nav-item flex-shrink-0" role="presentation">
@@ -833,6 +973,239 @@ $activeTab = $_GET['tab'] ?? 'security';
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+    
+    <div class="tab-pane fade <?php echo $activeTab === 'audit' ? 'show active' : ''; ?>"
+         id="audit-content"
+         role="tabpanel"
+         aria-labelledby="audit-tab">
+        <div class="card shadow-sm mb-3">
+            <div class="card-body">
+                <form class="row g-3 align-items-end" method="get">
+                    <input type="hidden" name="page" value="security">
+                    <input type="hidden" name="tab" value="audit">
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">المستخدم</label>
+                        <select name="audit_user" class="form-select">
+                            <option value="">الكل</option>
+                            <?php foreach ($auditUsersList as $auditUserOption): ?>
+                                <option value="<?php echo intval($auditUserOption['id']); ?>"
+                                    <?php echo ($auditUserFilter && intval($auditUserOption['id']) === intval($auditUserFilter)) ? 'selected' : ''; ?>>
+                                    <?php
+                                        $label = $auditUserOption['full_name'] ?: $auditUserOption['username'];
+                                        echo htmlspecialchars($label . ' (' . $auditUserOption['username'] . ')');
+                                    ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">الإجراء</label>
+                        <select name="audit_action" class="form-select">
+                            <option value="">الكل</option>
+                            <?php foreach ($auditActionsList as $actionRow): ?>
+                                <?php if (empty($actionRow['action'])) { continue; } ?>
+                                <option value="<?php echo htmlspecialchars($actionRow['action']); ?>"
+                                    <?php echo ($auditActionFilter && $auditActionFilter === $actionRow['action']) ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($actionRow['action']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">النوع</label>
+                        <select name="audit_entity" class="form-select">
+                            <option value="">الكل</option>
+                            <?php foreach ($auditEntitiesList as $entityRow): ?>
+                                <?php if (empty($entityRow['entity_type'])) { continue; } ?>
+                                <option value="<?php echo htmlspecialchars($entityRow['entity_type']); ?>"
+                                    <?php echo ($auditEntityFilter && $auditEntityFilter === $entityRow['entity_type']) ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($entityRow['entity_type']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">عدد السجلات</label>
+                        <select name="audit_limit" class="form-select">
+                            <?php foreach ([10, 20, 30, 40, 50] as $limitOption): ?>
+                                <option value="<?php echo $limitOption; ?>" <?php echo $auditPerPage === $limitOption ? 'selected' : ''; ?>>
+                                    <?php echo $limitOption; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">من تاريخ</label>
+                        <input type="date" name="audit_date_from" class="form-control" value="<?php echo htmlspecialchars($auditDateFrom ?? ''); ?>">
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">إلى تاريخ</label>
+                        <input type="date" name="audit_date_to" class="form-control" value="<?php echo htmlspecialchars($auditDateTo ?? ''); ?>">
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label">&nbsp;</label>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-filter-circle me-2"></i>
+                            تطبيق الفلاتر
+                        </button>
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <label class="form-label d-none d-md-block">&nbsp;</label>
+                        <a href="?page=security&tab=audit" class="btn btn-outline-secondary w-100">
+                            <i class="bi bi-arrow-counterclockwise me-2"></i>
+                            إعادة التعيين
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2">
+                <div>
+                    <h5 class="mb-0"><i class="bi bi-journal-check me-2"></i>سجل التدقيق</h5>
+                    <small class="text-white-50 d-block">إجمالي السجلات: <?php echo number_format($auditTotal); ?></small>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-list-ul me-1"></i>
+                        صفحة <?php echo $auditPage; ?> من <?php echo $auditTotalPages; ?>
+                    </span>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>المستخدم</th>
+                                <th class="d-none d-lg-table-cell">الدور</th>
+                                <th>الإجراء</th>
+                                <th class="d-none d-md-table-cell">النوع</th>
+                                <th class="d-none d-xl-table-cell">المعرف</th>
+                                <th class="d-none d-lg-table-cell">عنوان IP</th>
+                                <th>التاريخ</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($auditLogs)): ?>
+                                <tr>
+                                    <td colspan="7" class="text-center text-muted py-4">
+                                        <i class="bi bi-clipboard-x me-2"></i>لا توجد سجلات في الفترة المحددة
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php foreach ($auditLogs as $log): ?>
+                                    <tr>
+                                        <td>
+                                            <div class="fw-semibold"><?php echo htmlspecialchars($log['username'] ?? 'غير معروف'); ?></div>
+                                            <?php if (!empty($log['user_id'])): ?>
+                                                <small class="text-muted d-block">#<?php echo intval($log['user_id']); ?></small>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="d-none d-lg-table-cell">
+                                            <?php if (!empty($log['role'])): ?>
+                                                <span class="badge bg-secondary"><?php echo htmlspecialchars($log['role']); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-muted">-</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-primary">
+                                                <?php echo htmlspecialchars($log['action']); ?>
+                                            </span>
+                                            <?php if (!empty($log['new_value'])): ?>
+                                                <small class="text-muted d-block d-xl-none mt-1">تغييرات متوفرة</small>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="d-none d-md-table-cell">
+                                            <?php echo htmlspecialchars($log['entity_type'] ?? '-'); ?>
+                                        </td>
+                                        <td class="d-none d-xl-table-cell">
+                                            <?php echo $log['entity_id'] !== null ? htmlspecialchars((string)$log['entity_id']) : '-'; ?>
+                                        </td>
+                                        <td class="d-none d-lg-table-cell">
+                                            <?php echo !empty($log['ip_address']) ? '<code>' . htmlspecialchars($log['ip_address']) . '</code>' : '<span class="text-muted">-</span>'; ?>
+                                        </td>
+                                        <td>
+                                            <small><?php echo formatDateTime($log['created_at']); ?></small>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+
+                <?php if (!empty($auditLogs)): ?>
+                    <div class="row g-3">
+                        <div class="col-12 col-lg-6">
+                            <div class="alert alert-light border mb-0">
+                                <div class="d-flex align-items-start gap-2">
+                                    <i class="bi bi-info-circle text-primary fs-4"></i>
+                                    <div>
+                                        <strong>تفاصيل إضافية</strong>
+                                        <p class="mb-0 small text-muted">
+                                            لمشاهدة التفاصيل الكاملة لأي سجل (القيمة القديمة والجديدة)، يرجى الرجوع إلى قاعدة البيانات أو تمكين عرض متقدم عند الحاجة.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <?php if ($auditTotalPages > 1): ?>
+                <div class="card-footer bg-light">
+                    <nav aria-label="التنقل بين صفحات سجل التدقيق">
+                        <ul class="pagination justify-content-center flex-wrap mb-0">
+                            <?php
+                                $prevQuery = $auditQueryBase;
+                                $prevQuery['audit_page'] = max(1, $auditPage - 1);
+                                $nextQuery = $auditQueryBase;
+                                $nextQuery['audit_page'] = min($auditTotalPages, $auditPage + 1);
+                            ?>
+                            <li class="page-item <?php echo $auditPage <= 1 ? 'disabled' : ''; ?>">
+                                <a class="page-link" href="<?php echo htmlspecialchars('?' . http_build_query($prevQuery)); ?>" aria-label="السابق">
+                                    <i class="bi bi-chevron-right"></i>
+                                </a>
+                            </li>
+                            <?php
+                                $startPage = max(1, $auditPage - 2);
+                                $endPage = min($auditTotalPages, $auditPage + 2);
+                                if ($startPage > 1) {
+                                    $firstQuery = $auditQueryBase;
+                                    $firstQuery['audit_page'] = 1;
+                                    echo '<li class="page-item"><a class="page-link" href="' . htmlspecialchars('?' . http_build_query($firstQuery)) . '">1</a></li>';
+                                    if ($startPage > 2) {
+                                        echo '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                                    }
+                                }
+                                for ($i = $startPage; $i <= $endPage; $i++) {
+                                    $pageQuery = $auditQueryBase;
+                                    $pageQuery['audit_page'] = $i;
+                                    echo '<li class="page-item ' . ($i === $auditPage ? 'active' : '') . '"><a class="page-link" href="' . htmlspecialchars('?' . http_build_query($pageQuery)) . '">' . $i . '</a></li>';
+                                }
+                                if ($endPage < $auditTotalPages) {
+                                    if ($endPage < $auditTotalPages - 1) {
+                                        echo '<li class="page-item disabled"><span class="page-link">...</span></li>';
+                                    }
+                                    $lastQuery = $auditQueryBase;
+                                    $lastQuery['audit_page'] = $auditTotalPages;
+                                    echo '<li class="page-item"><a class="page-link" href="' . htmlspecialchars('?' . http_build_query($lastQuery)) . '">' . $auditTotalPages . '</a></li>';
+                                }
+                            ?>
+                            <li class="page-item <?php echo $auditPage >= $auditTotalPages ? 'disabled' : ''; ?>">
+                                <a class="page-link" href="<?php echo htmlspecialchars('?' . http_build_query($nextQuery)); ?>" aria-label="التالي">
+                                    <i class="bi bi-chevron-left"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+            <?php endif; ?>
         </div>
     </div>
     

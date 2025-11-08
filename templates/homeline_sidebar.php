@@ -124,13 +124,6 @@ switch ($role) {
                 'badge' => null
             ],
             [
-                'title' => isset($lang['menu_vehicles']) ? $lang['menu_vehicles'] : 'السيارات',
-                'icon' => 'bi-car-front',
-                'url' => $baseUrl . 'manager.php?page=vehicles',
-                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'vehicles'),
-                'badge' => null
-            ],
-            [
                 'title' => 'نقطة البيع',
                 'icon' => 'bi-cart4',
                 'url' => $baseUrl . 'manager.php?page=pos',

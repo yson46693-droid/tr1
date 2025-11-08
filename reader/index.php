@@ -133,11 +133,13 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             align-items: center;
         }
         input[type="text"] {
-            flex: 1 1 320px;
-            padding: 14px 46px 14px 16px;
+            flex: 1 1 280px;
+            max-width: 420px;
+            padding: 10px 22px 10px 14px;
+            min-height: 46px;
             border: 1px solid rgba(59, 130, 246, 0.35);
-            border-radius: 14px;
-            font-size: 1.05rem;
+            border-radius: 12px;
+            font-size: 1rem;
             background: rgba(255, 255, 255, 0.95);
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
@@ -261,9 +263,10 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             }
             .input-group input[type="text"] {
                 width: 100%;
-                max-width: 320px;
-                padding: 10px 14px;
-                font-size: 1rem;
+                max-width: 280px;
+                padding: 8px 14px;
+                min-height: 42px;
+                font-size: 0.95rem;
             }
             .camera-preview {
                 width: 100%;
@@ -606,6 +609,9 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
         let detectionCooldown = false;
         let barcodeInterval = null;
         let barcodeProcessing = false;
+        let zxingReader = null;
+        let zxingActive = false;
+        let zxingScriptPromise = null;
         let ocrInterval = null;
         let ocrProcessing = false;
         let barcodeDetectorInstance = null;
@@ -726,8 +732,20 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 clearInterval(ocrInterval);
                 ocrInterval = null;
             }
+            stopZxingDetection();
             barcodeProcessing = false;
             ocrProcessing = false;
+        }
+
+        function stopZxingDetection() {
+            if (zxingReader && zxingActive) {
+                try {
+                    zxingReader.reset();
+                } catch (error) {
+                    console.debug('ZXing reset error', error);
+                }
+            }
+            zxingActive = false;
         }
 
         function stopCamera() {
@@ -881,6 +899,66 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             }
         }
 
+        async function loadZxingLibrary() {
+            if (window.ZXing?.BrowserMultiFormatReader) {
+                return true;
+            }
+            if (!zxingScriptPromise) {
+                zxingScriptPromise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
+                    script.async = true;
+                    script.onload = () => resolve(true);
+                    script.onerror = () => reject(new Error('تعذر تحميل مكتبة قراءة الباركود الاحتياطية.'));
+                    document.head.appendChild(script);
+                });
+            }
+            try {
+                await zxingScriptPromise;
+                return !!window.ZXing?.BrowserMultiFormatReader;
+            } catch (error) {
+                console.warn(error);
+                return false;
+            }
+        }
+
+        async function startZxingDetection() {
+            if (!await loadZxingLibrary()) {
+                return false;
+            }
+            if (!window.ZXing?.BrowserMultiFormatReader) {
+                return false;
+            }
+            if (!zxingReader) {
+                try {
+                    zxingReader = new ZXing.BrowserMultiFormatReader();
+                } catch (error) {
+                    console.warn('Failed to initialise ZXing reader', error);
+                    zxingReader = null;
+                    return false;
+                }
+            }
+            zxingActive = true;
+            try {
+                await zxingReader.decodeFromVideoDevice(null, video, (result, error) => {
+                    if (!zxingActive || detectionCooldown) {
+                        return;
+                    }
+                    if (result) {
+                        const candidate = normalizeBarcodeValue(result.getText?.() ?? result.text ?? '');
+                        if (candidate) {
+                            completeDetection(candidate);
+                        }
+                    }
+                });
+                return true;
+            } catch (error) {
+                console.warn('ZXing detection error', error);
+                stopZxingDetection();
+                return false;
+            }
+        }
+
         function drawFrameToCanvas() {
             const width = video.videoWidth;
             const height = video.videoHeight;
@@ -910,6 +988,26 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 targetWidth,
                 targetHeight
             );
+            try {
+                const imageData = snapshotContext.getImageData(0, 0, targetWidth, targetHeight);
+                const data = imageData.data;
+                const contrastFactor = 1.35;
+                const brightnessOffset = 12;
+                for (let i = 0; i < data.length; i += 4) {
+                    const r = data[i];
+                    const g = data[i + 1];
+                    const b = data[i + 2];
+                    let gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                    gray = ((gray - 128) * contrastFactor) + 128 + brightnessOffset;
+                    gray = Math.max(0, Math.min(255, gray));
+                    data[i] = gray;
+                    data[i + 1] = gray;
+                    data[i + 2] = gray;
+                }
+                snapshotContext.putImageData(imageData, 0, 0);
+            } catch (processingError) {
+                console.debug('Pre-processing frame failed', processingError);
+            }
             return true;
         }
 
@@ -1014,13 +1112,12 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 barcodeProcessing = false;
                 ocrProcessing = false;
                 const barcodeReady = await startBarcodeDetection();
-                if (!barcodeReady) {
-                    const ocrReady = await startOcrDetection();
-                    if (!ocrReady) {
-                        cameraError.textContent = 'تعذر تشغيل آلية قراءة الباركود. يرجى المحاولة لاحقًا أو استخدام الإدخال اليدوي.';
-                        cameraError.style.display = 'block';
-                        stopCamera();
-                    }
+                const zxingReady = await startZxingDetection();
+                const ocrReady = await startOcrDetection();
+                if (!barcodeReady && !zxingReady && !ocrReady) {
+                    cameraError.textContent = 'تعذر تشغيل آلية قراءة الباركود أو التعرف على النص. يرجى المحاولة لاحقًا أو استخدام الإدخال اليدوي.';
+                    cameraError.style.display = 'block';
+                    stopCamera();
                 }
 
             } catch (error) {

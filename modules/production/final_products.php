@@ -19,6 +19,13 @@ $db = db();
 $error = '';
 $success = '';
 
+$currentPageSlug = $_GET['page'] ?? 'inventory';
+$currentSection = $_GET['section'] ?? null;
+$baseQueryString = '?page=' . urlencode($currentPageSlug);
+if ($currentSection !== null && $currentSection !== '') {
+    $baseQueryString .= '&section=' . urlencode($currentSection);
+}
+
 // التحقق من وجود عمود date أو production_date
 $dateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'date'");
 $productionDateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'production_date'");
@@ -360,7 +367,10 @@ $lang = isset($translations) ? $translations : [];
 <div class="card shadow-sm mb-4">
     <div class="card-body">
         <form method="GET" action="" class="row g-2">
-            <input type="hidden" name="page" value="inventory">
+            <input type="hidden" name="page" value="<?php echo htmlspecialchars($currentPageSlug); ?>">
+            <?php if ($currentSection !== null && $currentSection !== ''): ?>
+                <input type="hidden" name="section" value="<?php echo htmlspecialchars($currentSection); ?>">
+            <?php endif; ?>
             <div class="col-md-2">
                 <label class="form-label">بحث</label>
                 <input type="text" name="search" class="form-control form-control-sm" value="<?php echo htmlspecialchars($search); ?>" placeholder="بحث...">
@@ -464,7 +474,7 @@ $lang = isset($translations) ? $translations : [];
         <nav aria-label="Page navigation" class="mt-3">
             <ul class="pagination justify-content-center flex-wrap">
                 <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?page=inventory&p=<?php echo $pageNum - 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">
+                    <a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $pageNum - 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">
                         <i class="bi bi-chevron-right"></i>
                     </a>
                 </li>
@@ -474,7 +484,7 @@ $lang = isset($translations) ? $translations : [];
                 $endPage = min($totalPages, $pageNum + 2);
                 
                 if ($startPage > 1): ?>
-                    <li class="page-item"><a class="page-link" href="?page=inventory&p=1<?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">1</a></li>
+                    <li class="page-item"><a class="page-link" href="<?php echo $baseQueryString; ?>&p=1<?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">1</a></li>
                     <?php if ($startPage > 2): ?>
                         <li class="page-item disabled"><span class="page-link">...</span></li>
                     <?php endif; ?>
@@ -482,7 +492,7 @@ $lang = isset($translations) ? $translations : [];
                 
                 <?php for ($i = $startPage; $i <= $endPage; $i++): ?>
                     <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
-                        <a class="page-link" href="?page=inventory&p=<?php echo $i; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>"><?php echo $i; ?></a>
+                        <a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $i; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>"><?php echo $i; ?></a>
                     </li>
                 <?php endfor; ?>
                 
@@ -490,11 +500,11 @@ $lang = isset($translations) ? $translations : [];
                     <?php if ($endPage < $totalPages - 1): ?>
                         <li class="page-item disabled"><span class="page-link">...</span></li>
                     <?php endif; ?>
-                    <li class="page-item"><a class="page-link" href="?page=inventory&p=<?php echo $totalPages; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>"><?php echo $totalPages; ?></a></li>
+                    <li class="page-item"><a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $totalPages; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>"><?php echo $totalPages; ?></a></li>
                 <?php endif; ?>
                 
                 <li class="page-item <?php echo $pageNum >= $totalPages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?page=inventory&p=<?php echo $pageNum + 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">
+                    <a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $pageNum + 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">
                         <i class="bi bi-chevron-left"></i>
                     </a>
                 </li>
