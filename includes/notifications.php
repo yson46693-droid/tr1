@@ -11,6 +11,10 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/telegram_notifications.php';
+require_once __DIR__ . '/path_helper.php';
+if (!function_exists('getOfficialWorkTime')) {
+    require_once __DIR__ . '/attendance.php';
+}
 
 /**
  * إنشاء إشعار جديد
@@ -169,5 +173,122 @@ function sendBrowserNotification($title, $body, $icon = null, $tag = null) {
     // يتم إرسال إشعارات المتصفح عبر JavaScript
     // هذه الدالة للإشارة فقط
     return true;
+}
+
+/**
+ * الحصول على رابط صفحة الحضور المناسب للدور
+ */
+function getAttendanceReminderLink($role) {
+    $dashboardUrl = getDashboardUrl($role);
+    $separator = strpos($dashboardUrl, '?') === false ? '?' : '&';
+    return $dashboardUrl . $separator . 'page=attendance';
+}
+
+/**
+ * إنشاء أو تحديث تذكير الحضور/الانصراف
+ */
+function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message) {
+    if (!$userId || !in_array($kind, ['checkin', 'checkout'], true)) {
+        return false;
+    }
+
+    $db = db();
+    $type = 'attendance_' . $kind;
+    $link = getAttendanceReminderLink($role);
+
+    $existing = $db->queryOne(
+        "SELECT id FROM notifications WHERE user_id = ? AND type = ? AND DATE(created_at) = CURDATE()",
+        [$userId, $type]
+    );
+
+    if ($existing) {
+        $db->execute(
+            "UPDATE notifications SET title = ?, message = ?, link = ?, `read` = 0, created_at = NOW() WHERE id = ?",
+            [$title, $message, $link, $existing['id']]
+        );
+        return $existing['id'];
+    }
+
+    return createNotification($userId, $title, $message, $type, $link, false);
+}
+
+/**
+ * إزالة تذكير الحضور/الانصراف للمستخدم
+ */
+function clearAttendanceReminderForUser($userId, $kind) {
+    if (!$userId || !in_array($kind, ['checkin', 'checkout'], true)) {
+        return false;
+    }
+
+    $db = db();
+    $type = 'attendance_' . $kind;
+
+    $db->execute(
+        "DELETE FROM notifications WHERE user_id = ? AND type = ?",
+        [$userId, $type]
+    );
+
+    return true;
+}
+
+/**
+ * التعامل مع تذكيرات الحضور/الانصراف للمستخدم الحالي
+ */
+function handleAttendanceRemindersForUser($user) {
+    if (empty($user) || empty($user['id']) || empty($user['role'])) {
+        return;
+    }
+
+    $role = $user['role'];
+    if (!in_array($role, ['production', 'sales', 'accountant'], true)) {
+        return;
+    }
+
+    $userId = (int) $user['id'];
+    $workTime = getOfficialWorkTime($userId);
+    if (!$workTime || empty($workTime['start']) || empty($workTime['end'])) {
+        return;
+    }
+
+    $now = new DateTime('now');
+    $today = $now->format('Y-m-d');
+
+    $startTime = DateTime::createFromFormat('Y-m-d H:i:s', "{$today} {$workTime['start']}");
+    $endTime = DateTime::createFromFormat('Y-m-d H:i:s', "{$today} {$workTime['end']}");
+
+    if (!$startTime || !$endTime) {
+        return;
+    }
+
+    $checkInRecords = getTodayAttendanceRecords($userId, $today);
+    $hasCheckIn = !empty($checkInRecords);
+    $hasOpenAttendance = false;
+
+    foreach ($checkInRecords as $record) {
+        if (empty($record['check_out_time'])) {
+            $hasOpenAttendance = true;
+            break;
+        }
+    }
+
+    // تذكير تسجيل الحضور
+    $checkInReminderThreshold = (clone $startTime)->modify('-15 minutes');
+    if (!$hasCheckIn && $now >= $checkInReminderThreshold) {
+        $title = 'تنبيه تسجيل الحضور';
+        $message = 'تنبيه هام لتسجيل الحضور لتفادي الخصومات. يرجى تسجيل الحضور الآن.';
+        ensureAttendanceReminderForUser($userId, $role, 'checkin', $title, $message);
+    } else {
+        clearAttendanceReminderForUser($userId, 'checkin');
+    }
+
+    // تذكير تسجيل الانصراف
+    $checkOutReminderThreshold = (clone $endTime)->modify('-15 minutes');
+    if ($hasOpenAttendance && $now >= $checkOutReminderThreshold) {
+        $title = 'تنبيه تسجيل الانصراف';
+        $message = 'تنبيه هام لتسجيل الانصراف لتفادي الخصومات. يرجى تسجيل الانصراف قبل مغادرة العمل.';
+        ensureAttendanceReminderForUser($userId, $role, 'checkout', $title, $message);
+    } else {
+        clearAttendanceReminderForUser($userId, 'checkout');
+    }
 }
 

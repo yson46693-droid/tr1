@@ -285,6 +285,15 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
         }
     }
     
+    try {
+        $db->execute(
+            "DELETE FROM notifications WHERE user_id = ? AND type = 'attendance_checkin'",
+            [$userId]
+        );
+    } catch (Exception $e) {
+        error_log("Failed to clear attendance check-in reminders for user {$userId}: " . $e->getMessage());
+    }
+    
     return [
         'success' => true,
         'record_id' => $recordId,
@@ -430,6 +439,15 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
                 error_log("Error sending check-out notification to Telegram: " . $e->getMessage());
             }
         }
+    }
+    
+    try {
+        $db->execute(
+            "DELETE FROM notifications WHERE user_id = ? AND type = 'attendance_checkout'",
+            [$userId]
+        );
+    } catch (Exception $e) {
+        error_log("Failed to clear attendance checkout reminders for user {$userId}: " . $e->getMessage());
     }
     
     return [

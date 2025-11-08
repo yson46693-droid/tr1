@@ -139,11 +139,90 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                         [$currentUser['id']]
                     );
                 }
+
+                $notifications = getUserNotifications($currentUser['id'], false, 5) ?? [];
+                $tasksTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'tasks'"));
+                $containsText = static function ($text, $needle) {
+                    if ($text === '' || $needle === '') {
+                        return false;
+                    }
+                    if (function_exists('mb_stripos')) {
+                        return mb_stripos($text, $needle) !== false;
+                    }
+                    return stripos($text, $needle) !== false;
+                };
+
+                if (!empty($notifications)) {
+                    $notifications = array_filter(
+                        $notifications,
+                        function ($notification) use ($db, $currentUser, $tasksTableExists, $containsText) {
+                            $title = trim($notification['title'] ?? '');
+                            $message = trim($notification['message'] ?? '');
+
+                            if ($containsText($message, 'كمكتملة')) {
+                                return false;
+                            }
+
+                            if (
+                                $tasksTableExists
+                                && ($containsText($title, 'مهمة جديدة') || $containsText($title, 'مهمة من الإدارة'))
+                                && $message !== ''
+                            ) {
+                                $task = $db->queryOne(
+                                    "SELECT status FROM tasks WHERE assigned_to = ? AND title = ? ORDER BY created_at DESC LIMIT 1",
+                                    [$currentUser['id'], $message]
+                                );
+
+                                if ($task && in_array($task['status'], ['completed', 'cancelled'], true)) {
+                                    return false;
+                                }
+                            }
+
+                            return true;
+                        }
+                    );
+
+                    if (!empty($notifications)) {
+                        $notifications = array_slice(array_values($notifications), 0, 5);
+                    }
+                }
                 ?>
                 
                 <div class="page-header mb-4">
                     <h2><i class="bi bi-speedometer2 me-2"></i><?php echo isset($lang['production_dashboard']) ? $lang['production_dashboard'] : 'لوحة الإنتاج'; ?></h2>
                 </div>
+
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0"><i class="bi bi-bell me-2"></i><?php echo isset($lang['notifications']) ? $lang['notifications'] : 'الإشعارات'; ?></h5>
+                    </div>
+                    <div class="card-body">
+                        <?php if (!empty($notifications)): ?>
+                        <div class="list-group">
+                            <?php foreach ($notifications as $notif): ?>
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <h6 class="mb-1"><?php echo htmlspecialchars($notif['title'] ?? ''); ?></h6>
+                                            <p class="mb-1"><?php echo htmlspecialchars($notif['message'] ?? ''); ?></p>
+                                            <small class="text-muted"><?php echo date('Y-m-d H:i', strtotime($notif['created_at'] ?? 'now')); ?></small>
+                                        </div>
+                                        <?php if (empty($notif['read'])): ?>
+                                            <span class="badge bg-primary"><?php echo isset($lang['new']) ? $lang['new'] : 'جديد'; ?></span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php else: ?>
+                        <p class="text-center text-muted mb-0"><?php echo isset($lang['no_notifications']) ? $lang['no_notifications'] : 'لا توجد إشعارات حالياً'; ?></p>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <script>
+                    window.initialNotifications = <?php echo json_encode($notifications, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+                </script>
                 
                 <!-- بطاقات الإحصائيات -->
                 <div class="row mb-4">
@@ -272,41 +351,6 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                         </div>
                     </div>
                 </div>
-                
-                <!-- الإشعارات -->
-                <?php
-                $notifications = getUserNotifications($currentUser['id'], false, 5);
-                ?>
-                
-                <?php if (!empty($notifications)): ?>
-                <div class="card shadow-sm">
-                    <div class="card-header bg-info text-white">
-                        <h5 class="mb-0"><i class="bi bi-bell me-2"></i><?php echo isset($lang['notifications']) ? $lang['notifications'] : 'الإشعارات'; ?></h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="list-group">
-                            <?php foreach ($notifications as $notif): ?>
-                                <div class="list-group-item">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <h6 class="mb-1"><?php echo htmlspecialchars($notif['title'] ?? ''); ?></h6>
-                                            <p class="mb-1"><?php echo htmlspecialchars($notif['message'] ?? ''); ?></p>
-                                            <small class="text-muted"><?php echo date('Y-m-d H:i', strtotime($notif['created_at'] ?? 'now')); ?></small>
-                                        </div>
-                                        <?php if (empty($notif['read_at'])): ?>
-                                            <span class="badge bg-primary"><?php echo isset($lang['new']) ? $lang['new'] : 'جديد'; ?></span>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-                </div>
-                <?php endif; ?>
-                
-                <script>
-                    window.initialNotifications = <?php echo json_encode($notifications ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
-                </script>
                 
             <?php elseif ($page === 'production'): ?>
                 <!-- صفحة إدارة الإنتاج -->

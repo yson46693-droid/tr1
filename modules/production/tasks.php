@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/notifications.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
@@ -254,7 +255,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($taskId <= 0) {
             $error = 'معرف المهمة غير صحيح';
         } else {
-            $task = $db->queryOne("SELECT assigned_to, status FROM tasks WHERE id = ?", [$taskId]);
+            $task = $db->queryOne("SELECT assigned_to, status, title, created_by FROM tasks WHERE id = ?", [$taskId]);
             if (!$task) {
                 $error = 'المهمة غير موجودة';
             } elseif ($task['assigned_to'] != $currentUser['id']) {
@@ -264,6 +265,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $db->execute("UPDATE tasks SET status = 'completed', completed_at = NOW() WHERE id = ?", [$taskId]);
                     logAudit($currentUser['id'], 'complete_task', 'tasks', $taskId, null, null);
                     $success = 'تم إكمال المهمة بنجاح';
+
+                    try {
+                        $taskTitle = $task['title'] ?? ('مهمة #' . $taskId);
+                        $taskLink = getRelativeUrl('production.php?page=tasks');
+                        createNotification(
+                            $currentUser['id'],
+                            'تم إكمال المهمة',
+                            'تم تسجيل المهمة "' . $taskTitle . '" كمكتملة.',
+                            'success',
+                            $taskLink
+                        );
+
+                        if (!empty($task['created_by']) && $task['created_by'] != $currentUser['id']) {
+                            $creatorLink = getRelativeUrl('manager.php?page=tasks');
+                            $workerName = $currentUser['full_name'] ?? $currentUser['username'] ?? 'عامل الإنتاج';
+                            createNotification(
+                                (int)$task['created_by'],
+                                'تم إكمال مهمة الإنتاج',
+                                $workerName . ' أكمل المهمة "' . $taskTitle . '".',
+                                'success',
+                                $creatorLink
+                            );
+                        }
+                    } catch (Exception $notifyError) {
+                        error_log('Task completion notification error: ' . $notifyError->getMessage());
+                    }
                 } catch (Exception $e) {
                     $error = 'حدث خطأ في إكمال المهمة: ' . $e->getMessage();
                 }
@@ -305,6 +332,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     logAudit($currentUser['id'], 'change_task_status', 'tasks', $taskId, null, ['status' => $status]);
                     $success = 'تم تحديث حالة المهمة بنجاح';
+
+                    if ($status === 'completed') {
+                        try {
+                            $taskDetails = $db->queryOne(
+                                "SELECT assigned_to, title FROM tasks WHERE id = ?",
+                                [$taskId]
+                            );
+                            if ($taskDetails && !empty($taskDetails['assigned_to'])) {
+                                $taskTitle = $taskDetails['title'] ?? ('مهمة #' . $taskId);
+                                createNotification(
+                                    (int)$taskDetails['assigned_to'],
+                                    'تم تحديث حالة المهمة',
+                                    'قام المدير بتعليم المهمة "' . $taskTitle . '" كمكتملة.',
+                                    'success',
+                                    getRelativeUrl('production.php?page=tasks')
+                                );
+                            }
+                        } catch (Exception $notifyError) {
+                            error_log('Manager status change notification error: ' . $notifyError->getMessage());
+                        }
+                    }
                 } catch (Exception $e) {
                     $error = 'حدث خطأ في تحديث حالة المهمة: ' . $e->getMessage();
                 }

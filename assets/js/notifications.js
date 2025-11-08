@@ -244,11 +244,13 @@ async function updateNotificationBadge(count = null) {
     
     const badge = document.getElementById('notificationBadge');
     if (badge) {
-        if (count > 0) {
-            badge.textContent = count;
-            badge.style.display = 'inline-block';
+        const safeCount = Number.isFinite(Number(count)) ? Math.max(0, parseInt(count, 10)) : 0;
+        badge.textContent = safeCount.toString();
+        badge.style.display = 'inline-block';
+        if (safeCount > 0) {
+            badge.classList.add('has-notifications');
         } else {
-            badge.style.display = 'none';
+            badge.classList.remove('has-notifications');
         }
     }
 }
@@ -330,7 +332,9 @@ function updateNotificationList(notifications) {
             'success': 'text-success',
             'warning': 'text-warning',
             'error': 'text-danger',
-            'approval': 'text-primary'
+            'approval': 'text-primary',
+            'attendance_checkin': 'text-warning',
+            'attendance_checkout': 'text-warning'
         }[notification.type] || 'text-info';
         
         const icon = {
@@ -338,7 +342,9 @@ function updateNotificationList(notifications) {
             'success': 'bi-check-circle',
             'warning': 'bi-exclamation-triangle',
             'error': 'bi-x-circle',
-            'approval': 'bi-check-square'
+            'approval': 'bi-check-square',
+            'attendance_checkin': 'bi-alarm',
+            'attendance_checkout': 'bi-door-open'
         }[notification.type] || 'bi-bell';
         
         const unreadClass = isNotificationUnread(notification) ? 'unread' : '';

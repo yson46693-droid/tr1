@@ -16,6 +16,7 @@ if (!defined('HEADER_INCLUDED')) {
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/path_helper.php';
+require_once __DIR__ . '/../includes/notifications.php';
 
 // تحديد اللغة الحالية
 $currentLang = getCurrentLanguage();
@@ -34,6 +35,9 @@ if (!isset($lang) || empty($lang)) {
     $lang = isset($translations) ? $translations : [];
 }
 $currentUser = getCurrentUser();
+if ($currentUser && function_exists('handleAttendanceRemindersForUser')) {
+    handleAttendanceRemindersForUser($currentUser);
+}
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo $currentLang; ?>" dir="<?php echo $dir; ?>">
