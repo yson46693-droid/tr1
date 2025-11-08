@@ -3070,3 +3070,11 @@ document.addEventListener('show.bs.modal', function() {
     }
 });
 </script>
+
+<?php if ($rawMaterialsContext === 'manager'): ?>
+<div class="d-flex justify-content-end mb-3">
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createTemplateModal">
+        <i class="bi bi-plus-circle me-2"></i>إنشاء قالب منتج
+    </button>
+</div>
+<?php endif; ?>
