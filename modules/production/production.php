@@ -2064,7 +2064,7 @@ $lang = isset($translations) ? $translations : [];
 
 <!-- Modal إنشاء إنتاج من قالب -->
 <div class="modal fade" id="createFromTemplateModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable production-template-dialog">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title"><i class="bi bi-file-earmark-text me-2"></i>إنشاء تشغيلة إنتاج</h5>
@@ -2074,26 +2074,26 @@ $lang = isset($translations) ? $translations : [];
                 <input type="hidden" name="action" value="create_from_template">
                 <input type="hidden" name="template_id" id="template_id">
                 <input type="hidden" name="template_mode" id="template_mode" value="legacy">
-                <div class="modal-body">
+                <div class="modal-body production-template-body">
                     <!-- معلومات المنتج -->
-                    <div class="mb-4">
-                        <h6 class="text-primary mb-3"><i class="bi bi-box-seam me-2"></i>معلومات المنتج</h6>
+                    <div class="mb-3 section-block">
+                        <h6 class="text-primary section-heading"><i class="bi bi-box-seam me-2"></i>معلومات المنتج</h6>
                         <div class="mb-3">
                             <label class="form-label fw-bold">اسم المنتج</label>
-                            <input type="text" class="form-control form-control-lg" id="template_product_name" readonly>
+                            <input type="text" class="form-control" id="template_product_name" readonly>
                         </div>
                     </div>
                     
                     <!-- معلومات التشغيلة -->
-                    <div class="mb-4">
-                        <h6 class="text-primary mb-3"><i class="bi bi-info-circle me-2"></i>معلومات التشغيلة</h6>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
+                    <div class="mb-3 section-block">
+                        <h6 class="text-primary section-heading"><i class="bi bi-info-circle me-2"></i>معلومات التشغيلة</h6>
+                        <div class="row g-3">
+                            <div class="col-md-6">
                                 <label class="form-label fw-bold">الكمية المراد إنتاجها <span class="text-danger">*</span></label>
                                 <input type="number" name="quantity" class="form-control" min="1" required value="1">
                                 <small class="text-muted">سيتم إنشاء رقم تشغيلة واحد (LOT) لجميع المنتجات</small>
                             </div>
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-6">
                                 <label class="form-label fw-bold">تاريخ الإنتاج <span class="text-danger">*</span></label>
                                 <input type="date" name="production_date" class="form-control" value="<?php echo date('Y-m-d'); ?>" required>
                             </div>
@@ -2101,12 +2101,12 @@ $lang = isset($translations) ? $translations : [];
                     </div>
                     
                     <!-- الموردين -->
-                    <div class="mb-4" id="legacySupplierSelectors">
-                        <h6 class="text-primary mb-3">
+                    <div class="mb-3 section-block" id="legacySupplierSelectors">
+                        <h6 class="text-primary section-heading">
                             <i class="bi bi-truck me-2"></i>الموردين <span class="text-danger">*</span>
                         </h6>
-                        <div class="row">
-                            <div class="col-md-6 mb-3">
+                        <div class="row g-3">
+                            <div class="col-md-6">
                                 <label class="form-label fw-bold">مورد العسل <span class="text-danger">*</span></label>
                                 <select name="honey_supplier_id" class="form-select" id="honey_supplier_select" required>
                                     <option value="">اختر مورد العسل</option>
@@ -2117,7 +2117,7 @@ $lang = isset($translations) ? $translations : [];
                                     <?php endforeach; ?>
                                 </select>
                             </div>
-                            <div class="col-md-6 mb-3">
+                            <div class="col-md-6">
                                 <label class="form-label fw-bold">مورد مواد التعبئة <span class="text-danger">*</span></label>
                                 <select name="packaging_supplier_id" class="form-select" id="packaging_supplier_select" required>
                                     <option value="">اختر مورد التعبئة</option>
@@ -2131,8 +2131,8 @@ $lang = isset($translations) ? $translations : [];
                         </div>
                     </div>
 
-                    <div class="mb-4 d-none" id="templateSuppliersWrapper">
-                        <h6 class="text-primary mb-3">
+                    <div class="mb-3 section-block d-none" id="templateSuppliersWrapper">
+                        <h6 class="text-primary section-heading">
                             <i class="bi bi-truck me-2"></i>الموردون لكل مادة <span class="text-danger">*</span>
                         </h6>
                         <p class="text-muted small mb-3">يرجى اختيار المورد المناسب لكل مادة خام أو أداة تعبئة سيتم استخدامها في هذه التشغيلة.</p>
@@ -2140,8 +2140,8 @@ $lang = isset($translations) ? $translations : [];
                     </div>
                     
                     <!-- عمال الإنتاج الحاضرين -->
-                    <div class="mb-4">
-                        <h6 class="text-primary mb-3"><i class="bi bi-people me-2"></i>عمال الإنتاج الحاضرين</h6>
+                    <div class="mb-3 section-block">
+                        <h6 class="text-primary section-heading"><i class="bi bi-people me-2"></i>عمال الإنتاج الحاضرين</h6>
                         <?php
                         // الحصول على العمال الحاضرين اليوم
                         $presentWorkersToday = [];
@@ -2186,7 +2186,7 @@ $lang = isset($translations) ? $translations : [];
                     <?php endif; ?>
                     
                     <!-- ملاحظات -->
-                    <div class="mb-3">
+                    <div class="mb-3 section-block">
                         <label class="form-label fw-bold">ملاحظات (اختياري)</label>
                         <textarea name="batch_notes" class="form-control" rows="3" 
                                   placeholder="سيتم إنشاء الملاحظات تلقائياً بناءً على البيانات المحددة"></textarea>
@@ -2393,6 +2393,67 @@ $lang = isset($translations) ? $translations : [];
 </div>
 
 <style>
+/* ⚙️ تحسين عرض نموذج إنشاء التشغيلة */
+.production-template-dialog {
+    max-width: 860px;
+}
+
+.production-template-dialog .modal-content {
+    border-radius: 16px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+}
+
+.production-template-dialog .modal-header,
+.production-template-dialog .modal-footer {
+    padding: 0.75rem 1.25rem;
+}
+
+.production-template-body {
+    padding: 1.2rem;
+}
+
+.production-template-dialog.modal-dialog-scrollable .modal-body {
+    max-height: calc(100vh - 210px);
+}
+
+.production-template-body .section-block {
+    background: #f9fafb;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    margin-bottom: 0.9rem;
+}
+
+.production-template-body .section-heading {
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.production-template-body .form-label {
+    font-size: 0.95rem;
+    margin-bottom: 0.35rem;
+}
+
+.production-template-body .small {
+    font-size: 0.75rem;
+}
+
+.production-template-body .alert {
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 0.9rem;
+}
+
+.production-template-body textarea {
+    min-height: 110px;
+}
+
+.production-template-body .row.g-3 > [class*="col-"] {
+    margin-bottom: 0;
+}
+
 /* 🎯 ضبط تبويبات الصفحة وتقارير الإنتاج */
 .production-tab-toggle {
     display: flex;
