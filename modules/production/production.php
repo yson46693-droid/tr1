@@ -728,8 +728,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // قالب موحد - الحصول على أدوات التعبئة
                     $packagingNameExpression = getColumnSelectExpression('template_packaging', 'packaging_name', 'packaging_name', 'tp');
                     $packagingItems = $db->query(
-                        "SELECT tp.id, tp.packaging_material_id, {$packagingNameExpression}, tp.quantity_per_unit 
+                        "SELECT tp.id, tp.packaging_material_id, {$packagingNameExpression}, tp.quantity_per_unit,
+                                pm.name as packaging_db_name, pm.unit as packaging_unit, pm.product_id as packaging_product_id
                          FROM template_packaging tp 
+                         LEFT JOIN packaging_materials pm ON pm.id = tp.packaging_material_id
                          WHERE tp.template_id = ?",
                         [$templateId]
                     );
@@ -766,10 +768,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
 
                             $packagingQuantityPerUnit = isset($pkg['quantity_per_unit']) ? (float)$pkg['quantity_per_unit'] : 1.0;
+                            $packagingName = $pkg['packaging_name'] ?? $pkg['packaging_db_name'] ?? 'مادة تعبئة';
+                            $packagingUnit = $pkg['packaging_unit'] ?? 'قطعة';
+                            $packagingProductId = isset($pkg['packaging_product_id']) ? (int)$pkg['packaging_product_id'] : null;
                             if (!empty($pkg['packaging_material_id'])) {
                                 $materialsConsumption['packaging'][] = [
                                     'material_id' => (int)$pkg['packaging_material_id'],
-                                    'quantity' => $packagingQuantityPerUnit * $quantity
+                                    'quantity' => $packagingQuantityPerUnit * $quantity,
+                                    'name' => $packagingName,
+                                    'unit' => $packagingUnit,
+                                    'product_id' => $packagingProductId
                                 ];
                             }
                         }
@@ -820,12 +828,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
 
                             $rawQuantityPerUnit = isset($materialRow['quantity']) ? (float)$materialRow['quantity'] : (isset($materialRow['quantity_per_unit']) ? (float)$materialRow['quantity_per_unit'] : 0.0);
+                            $materialUnit = $materialRow['unit'] ?? 'كجم';
                             $materialsConsumption['raw'][] = [
                                 'template_material_id' => (int)$materialRow['id'],
                                 'supplier_id' => $selectedSupplierId,
                                 'material_type' => $materialType,
                                 'material_name' => $materialRow['material_name'] ?? '',
                                 'honey_variety' => $detectedHoneyVariety,
+                                'unit' => $materialUnit,
+                                'display_name' => $materialDisplay,
                                 'quantity' => $rawQuantityPerUnit * $quantity
                             ];
                         }
@@ -847,7 +858,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $hasHoneyVarietyColumn = !empty($honeyVarietyColumnCheck);
                         }
                         
-                        $selectColumns = "DISTINCT supplier_id, material_type, material_name, quantity";
+                        $selectColumns = "DISTINCT supplier_id, material_type, material_name, quantity, unit";
                         if ($hasHoneyVarietyColumn) {
                             $selectColumns .= ", honey_variety";
                         }
@@ -896,6 +907,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         'material_type' => $material['material_type'] ?? '',
                                         'material_name' => $material['material_name'] ?? '',
                                         'honey_variety' => ($hasHoneyVarietyColumn && isset($material['honey_variety'])) ? $material['honey_variety'] : null,
+                                        'unit' => $material['unit'] ?? 'كجم',
+                                        'display_name' => $materialDisplay,
                                         'quantity' => $rawQuantityPerUnit * $quantity
                                     ];
                                 }
@@ -922,9 +935,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     // قالب قديم وأنواع القوالب المبسطة (عسل، زيت، شمع، مشتقات)
                     $packagingMaterials = $db->query(
-                        "SELECT id, packaging_material_id, packaging_name, quantity_per_unit 
-                         FROM product_template_packaging 
-                         WHERE template_id = ?",
+                        "SELECT ptp.id, ptp.packaging_material_id, ptp.packaging_name, ptp.quantity_per_unit,
+                                pm.name as packaging_db_name, pm.unit as packaging_unit, pm.product_id as packaging_product_id
+                         FROM product_template_packaging ptp
+                         LEFT JOIN packaging_materials pm ON pm.id = ptp.packaging_material_id
+                         WHERE ptp.template_id = ?",
                         [$templateId]
                     );
                     $packagingIds = array_filter(array_map(function($p) { return $p['packaging_material_id'] ?? null; }, $packagingMaterials));
@@ -956,9 +971,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
 
                         if (!empty($legacyPkg['packaging_material_id'])) {
+                            $legacyPackagingName = $legacyPkg['packaging_name'] ?? $legacyPkg['packaging_db_name'] ?? 'مادة تعبئة';
+                            $legacyPackagingUnit = $legacyPkg['packaging_unit'] ?? 'قطعة';
+                            $legacyPackagingProductId = isset($legacyPkg['packaging_product_id']) ? (int)$legacyPkg['packaging_product_id'] : null;
                             $materialsConsumption['packaging'][] = [
                                 'material_id' => (int)$legacyPkg['packaging_material_id'],
-                                'quantity' => (float)($legacyPkg['quantity_per_unit'] ?? 1.0) * $quantity
+                                'quantity' => (float)($legacyPkg['quantity_per_unit'] ?? 1.0) * $quantity,
+                                'name' => $legacyPackagingName,
+                                'unit' => $legacyPackagingUnit,
+                                'product_id' => $legacyPackagingProductId
                             ];
                         }
                     }
@@ -1048,6 +1069,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'material_type' => 'honey_filtered',
                                 'material_name' => 'عسل',
                                 'honey_variety' => $selectedHoneyVariety,
+                                'unit' => 'كجم',
+                                'display_name' => 'عسل (' . $selectedHoneyVariety . ')',
                                 'quantity' => (float)($template['honey_quantity'] ?? 0) * $quantity
                             ];
                             }
@@ -1220,6 +1243,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 $batchNumber = $batchResult['batch_number'];
+
+                storeProductionMaterialsUsage($productionId, $materialsConsumption['raw'], $materialsConsumption['packaging']);
 
                 try {
                     foreach ($materialsConsumption['raw'] as $rawItem) {
@@ -3058,6 +3083,43 @@ function isHoneyComponent(component) {
     return key.startsWith('honey_');
 }
 
+function getSuppliersForComponent(component) {
+    const suppliers = window.productionSuppliers || [];
+    if (!component) {
+        return suppliers;
+    }
+    const type = (component.type || '').toString();
+    const key = (component.key || '').toString();
+
+    const filterByTypes = (allowedTypes) => suppliers.filter(supplier => allowedTypes.includes(supplier.type));
+
+    if (isHoneyComponent(component)) {
+        return filterByTypes(['honey']);
+    }
+
+    if (type === 'packaging' || key.startsWith('pack_')) {
+        return filterByTypes(['packaging']);
+    }
+
+    if (type === 'olive_oil' || key.startsWith('olive')) {
+        return filterByTypes(['olive_oil']);
+    }
+
+    if (type === 'beeswax' || key.startsWith('beeswax')) {
+        return filterByTypes(['beeswax']);
+    }
+
+    if (type === 'derivatives' || key.startsWith('derivative')) {
+        return filterByTypes(['derivatives']);
+    }
+
+    if (type === 'nuts' || key.startsWith('nuts')) {
+        return filterByTypes(['nuts']);
+    }
+
+    return suppliers;
+}
+
 function normalizeSupplierKey(value) {
     if (value === null || value === undefined || value === '') {
         return null;
@@ -3217,7 +3279,10 @@ function renderTemplateSuppliers(details) {
         placeholderOption.textContent = component.placeholder || 'اختر المورد';
         select.appendChild(placeholderOption);
 
-        (window.productionSuppliers || []).forEach(function(supplier) {
+        const suppliersForComponent = getSuppliersForComponent(component);
+        const suppliersList = suppliersForComponent.length ? suppliersForComponent : (window.productionSuppliers || []);
+
+        suppliersList.forEach(function(supplier) {
             const option = document.createElement('option');
             option.value = supplier.id;
             option.textContent = supplier.name;
@@ -3226,6 +3291,13 @@ function renderTemplateSuppliers(details) {
             }
             select.appendChild(option);
         });
+        if (suppliersList.length === 0) {
+            const noSupplierOption = document.createElement('option');
+            noSupplierOption.value = '';
+            noSupplierOption.disabled = true;
+            noSupplierOption.textContent = 'لا يوجد مورد مناسب - راجع قائمة الموردين';
+            select.appendChild(noSupplierOption);
+        }
 
         col.appendChild(label);
         if (helper.textContent.trim() !== '') {

@@ -316,6 +316,17 @@ $lang = isset($translations) ? $translations : [];
         <?php echo htmlspecialchars($success); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const toast = document.createElement('div');
+        toast.className = 'template-toast';
+        toast.innerHTML = '<i class="bi bi-check-circle-fill"></i><?php echo htmlspecialchars($success); ?>';
+        document.body.appendChild(toast);
+        requestAnimationFrame(() => toast.classList.add('show'));
+        setTimeout(() => toast.classList.remove('show'), 4000);
+        setTimeout(() => toast.remove(), 4600);
+    });
+    </script>
 <?php endif; ?>
 
 
@@ -461,9 +472,39 @@ $lang = isset($translations) ? $translations : [];
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
 }
 
+.template-toast {
+    position: fixed;
+    bottom: 24px;
+    inset-inline-end: 24px;
+    z-index: 1060;
+    padding: 0.9rem 1.2rem;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(14, 165, 233, 0.95), rgba(6, 95, 212, 0.95));
+    color: #fff;
+    font-weight: 600;
+    box-shadow: 0 18px 35px rgba(15, 23, 42, 0.28);
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+    pointer-events: none;
+}
+
+.template-toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.template-toast i {
+    margin-inline-end: 0.6rem;
+}
+
 @media (max-width: 768px) {
     .template-card {
         margin-bottom: 1rem;
+    }
+    .template-toast {
+        inset-inline: 16px;
+        bottom: 16px;
     }
 }
 </style>

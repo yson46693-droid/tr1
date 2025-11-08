@@ -120,6 +120,151 @@ function linkPackagingToProduction($productionId, $materials) {
 }
 
 /**
+ * التأكد من وجود منتج يمثل مادة خام أو أداة تعبئة
+ */
+function ensureProductionMaterialProductId($name, $category = 'raw_material', $unit = null) {
+    $name = trim((string)$name);
+    if ($name === '') {
+        return null;
+    }
+
+    static $productCache = [];
+    $cacheKey = mb_strtolower($name, 'UTF-8') . '|' . $category;
+    if (isset($productCache[$cacheKey])) {
+        return $productCache[$cacheKey];
+    }
+
+    $db = db();
+
+    try {
+        $existing = $db->queryOne("SELECT id, unit FROM products WHERE name = ? LIMIT 1", [$name]);
+        if ($existing && !empty($existing['id'])) {
+            $productCache[$cacheKey] = (int)$existing['id'];
+            return $productCache[$cacheKey];
+        }
+
+        $unitValue = $unit ?: ($category === 'packaging' ? 'قطعة' : 'كجم');
+        $result = $db->execute(
+            "INSERT INTO products (name, category, unit, status, quantity) VALUES (?, ?, ?, 'active', 0)",
+            [$name, $category, $unitValue]
+        );
+        $productId = (int)($result['insert_id'] ?? 0);
+        $productCache[$cacheKey] = $productId;
+        return $productId ?: null;
+    } catch (Exception $e) {
+        error_log("ensureProductionMaterialProductId error: " . $e->getMessage());
+        return null;
+    }
+}
+
+/**
+ * حفظ المواد المستخدمة في عملية إنتاج داخل جدول production_materials
+ */
+function storeProductionMaterialsUsage($productionId, $rawMaterials = [], $packagingMaterials = []) {
+    $productionId = intval($productionId);
+    if ($productionId <= 0) {
+        return;
+    }
+
+    try {
+        $db = db();
+
+        $tableCheck = $db->queryOne("SHOW TABLES LIKE 'production_materials'");
+        if (empty($tableCheck)) {
+            return;
+        }
+
+        $materialIdColumnCheck = $db->queryOne("SHOW COLUMNS FROM production_materials LIKE 'material_id'");
+        $columnName = !empty($materialIdColumnCheck) ? 'material_id' : 'product_id';
+
+        $materialsMap = [];
+        $addMaterial = function($productId, $quantity) use (&$materialsMap) {
+            $productId = intval($productId);
+            $quantity = (float)$quantity;
+            if ($productId <= 0 || $quantity <= 0) {
+                return;
+            }
+            if (!isset($materialsMap[$productId])) {
+                $materialsMap[$productId] = 0.0;
+            }
+            $materialsMap[$productId] += $quantity;
+        };
+
+        static $packagingTableExists = null;
+        if ($packagingTableExists === null) {
+            $packagingTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'packaging_materials'"));
+        }
+
+        foreach ($packagingMaterials as $packItem) {
+            $quantity = (float)($packItem['quantity'] ?? 0);
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            $productId = isset($packItem['product_id']) ? (int)$packItem['product_id'] : 0;
+            $packagingName = trim((string)($packItem['name'] ?? ''));
+            $packagingUnit = $packItem['unit'] ?? null;
+
+            if (!$productId && !empty($packItem['material_id']) && $packagingTableExists) {
+                $packagingInfo = $db->queryOne(
+                    "SELECT product_id, name, unit FROM packaging_materials WHERE id = ?",
+                    [intval($packItem['material_id'])]
+                );
+                if ($packagingInfo) {
+                    if (!empty($packagingInfo['product_id'])) {
+                        $productId = (int)$packagingInfo['product_id'];
+                    }
+                    if ($packagingName === '' && !empty($packagingInfo['name'])) {
+                        $packagingName = $packagingInfo['name'];
+                    }
+                    if ($packagingUnit === null && !empty($packagingInfo['unit'])) {
+                        $packagingUnit = $packagingInfo['unit'];
+                    }
+                }
+            }
+
+            if (!$productId) {
+                $nameForProduct = $packagingName !== '' ? $packagingName : ('مادة تعبئة #' . ($packItem['material_id'] ?? '?'));
+                $productId = ensureProductionMaterialProductId($nameForProduct, 'packaging', $packagingUnit);
+            }
+
+            $addMaterial($productId, $quantity);
+        }
+
+        foreach ($rawMaterials as $rawItem) {
+            $quantity = (float)($rawItem['quantity'] ?? 0);
+            if ($quantity <= 0) {
+                continue;
+            }
+
+            $productId = isset($rawItem['product_id']) ? (int)$rawItem['product_id'] : 0;
+            $materialName = trim((string)($rawItem['display_name'] ?? $rawItem['material_name'] ?? ''));
+            $materialUnit = $rawItem['unit'] ?? 'كجم';
+
+            if (!$productId) {
+                if ($materialName === '') {
+                    $materialName = 'مادة خام';
+                }
+                $productId = ensureProductionMaterialProductId($materialName, 'raw_material', $materialUnit);
+            }
+
+            $addMaterial($productId, $quantity);
+        }
+
+        $db->execute("DELETE FROM production_materials WHERE production_id = ?", [$productionId]);
+
+        foreach ($materialsMap as $productId => $totalQuantity) {
+            $db->execute(
+                "INSERT INTO production_materials (production_id, {$columnName}, quantity_used) VALUES (?, ?, ?)",
+                [$productionId, $productId, $totalQuantity]
+            );
+        }
+    } catch (Exception $e) {
+        error_log("storeProductionMaterialsUsage error: " . $e->getMessage());
+    }
+}
+
+/**
  * حساب تكلفة الإنتاج بناءً على المواد
  */
 function calculateProductionCost($productionId) {

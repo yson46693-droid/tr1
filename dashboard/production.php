@@ -354,7 +354,8 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                                     'key' => 'pack_' . ($item['packaging_material_id'] ?? $item['id']),
                                     'name' => $name,
                                     'label' => 'مورد أداة التعبئة: ' . $name,
-                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' ' . $unit
+                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' ' . $unit,
+                                    'type' => 'packaging'
                                 ];
                             }
                         };
@@ -423,7 +424,8 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                                     'key' => 'olive_main',
                                     'name' => 'زيت زيتون',
                                     'label' => 'مورد زيت الزيتون',
-                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' لتر'
+                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' لتر',
+                                    'type' => 'olive_oil'
                                 ];
 
                                 $addPackagingComponents('product_template_packaging', $templateId);
@@ -444,7 +446,8 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                                     'key' => 'beeswax_main',
                                     'name' => 'شمع عسل',
                                     'label' => 'مورد شمع العسل',
-                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' كجم'
+                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' كجم',
+                                    'type' => 'beeswax'
                                 ];
 
                                 $addPackagingComponents('product_template_packaging', $templateId);
@@ -466,7 +469,8 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                                     'key' => 'derivative_main',
                                     'name' => $derivativeType,
                                     'label' => 'مورد المشتق: ' . $derivativeType,
-                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' كجم'
+                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' كجم',
+                                    'type' => 'derivatives'
                                 ];
 
                                 $addPackagingComponents('product_template_packaging', $templateId);
@@ -509,12 +513,13 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                                     $name = $material['material_name'] ?? 'مادة خام';
                                     $quantity = number_format((float)($material['quantity_per_unit'] ?? 0), 3);
                                     $unit = $material['unit'] ?? 'وحدة';
-                                    $components[] = [
-                                        'key' => 'raw_' . $material['id'],
-                                        'name' => $name,
-                                        'label' => 'مورد المادة: ' . $name,
-                                        'description' => 'الكمية لكل وحدة: ' . $quantity . ' ' . $unit
-                                    ];
+                                $components[] = [
+                                    'key' => 'raw_' . $material['id'],
+                                    'name' => $name,
+                                    'label' => 'مورد المادة: ' . $name,
+                                    'description' => 'الكمية لكل وحدة: ' . $quantity . ' ' . $unit,
+                                    'type' => 'raw_general'
+                                ];
                                 }
 
                                 $response['hint'] = 'اختر المورد لكل مكون (العسل، المواد الخام، أدوات التعبئة).';
