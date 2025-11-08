@@ -458,7 +458,6 @@ function viewProductDetails(productId) {
     modal.show();
     
     const apiUrl = new URL(window.location.href);
-    apiUrl.searchParams.set('page', 'final_products');
     apiUrl.searchParams.set('ajax', 'product_details');
     apiUrl.searchParams.set('product_id', productId);
     apiUrl.searchParams.delete('production_line_id');

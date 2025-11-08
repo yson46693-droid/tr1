@@ -2294,9 +2294,6 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
 </div>
 
 <script>
-// بيانات الموردين لاستخدامها في JavaScript
-const allSuppliersData = <?php echo json_encode($allSuppliers); ?>;
-
 // دالة لإضافة صف مادة خام جديدة
 let materialRowCount = 0;
 function addMaterialRow() {
@@ -2321,12 +2318,13 @@ function addMaterialRow() {
                             <option value="other">أخرى</option>
                         </select>
                     </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">المورد <span class="text-danger">*</span></label>
-                        <select class="form-select form-select-sm" name="materials[${materialRowCount}][supplier_id]" 
-                                id="supplier_${materialRowCount}" required>
-                            <option value="">اختر المورد</option>
-                        </select>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">المورد</label>
+                        <div class="alert alert-info py-1 px-2 mb-0" role="alert" style="font-size: 0.75rem;">
+                            سيتم اختيار المورد عند إنشاء التشغيلة من هذا القالب.
+                        </div>
+                        <input type="hidden" name="materials[${materialRowCount}][supplier_id]" 
+                               id="supplier_${materialRowCount}" value="">
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">نوع العسل</label>
@@ -2379,11 +2377,11 @@ function removeMaterialRow(rowId) {
 
 // دالة لتحديث قائمة الموردين حسب نوع المادة
 function updateSuppliersForMaterial(rowId, materialType) {
-    const supplierSelect = document.getElementById('supplier_' + rowId);
+    const supplierInput = document.getElementById('supplier_' + rowId);
     const honeyVarietySelect = document.getElementById('honey_variety_' + rowId);
     const honeyVarietyPlaceholder = document.getElementById('honey_variety_placeholder_' + rowId);
     
-    if (!supplierSelect) return;
+    if (!supplierInput) return;
     
     // إظهار/إخفاء حقل نوع العسل
     const isHoneyType = materialType === 'honey_raw' || materialType === 'honey_filtered';
@@ -2396,43 +2394,8 @@ function updateSuppliersForMaterial(rowId, materialType) {
             honeyVarietyPlaceholder.style.display = 'block';
         }
     }
-    
-    // تحديد نوع المورد المطلوب
-    let supplierTypeMap = {
-        'honey_raw': 'honey',
-        'honey_filtered': 'honey',
-        'olive_oil': 'olive_oil',
-        'beeswax': 'beeswax',
-        'derivatives': 'derivatives',
-        'nuts': 'nuts',
-        'other': null
-    };
-    
-    const requiredType = supplierTypeMap[materialType];
-    
-    // تفريغ القائمة
-    supplierSelect.innerHTML = '<option value="">اختر المورد</option>';
-    
-    // تصفية الموردين حسب النوع
-    const filteredSuppliers = requiredType 
-        ? allSuppliersData.filter(s => s.type === requiredType)
-        : allSuppliersData;
-    
-    // إضافة الموردين المناسبين
-    filteredSuppliers.forEach(supplier => {
-        const option = document.createElement('option');
-        option.value = supplier.id;
-        option.textContent = supplier.name;
-        supplierSelect.appendChild(option);
-    });
-    
-    // إضافة خيار "بدون مورد" إذا لم يكن هناك موردون
-    if (filteredSuppliers.length === 0) {
-        const option = document.createElement('option');
-        option.value = '0';
-        option.textContent = '(بدون مورد محدد)';
-        supplierSelect.appendChild(option);
-    }
+    // إعادة تعيين قيمة المورد (سيتم تحديده لاحقاً أثناء إنشاء التشغيلة)
+    supplierInput.value = '';
 }
 
 // إضافة صف واحد عند فتح Modal

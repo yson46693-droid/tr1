@@ -696,6 +696,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // الحصول على أدوات التعبئة والموردين من القالب
                 $packagingIds = [];
                 $allSuppliers = []; // جميع الموردين المستخدمين في المنتج
+                $materialsConsumption = [
+                    'raw' => [],
+                    'packaging' => []
+                ];
                 
                 if ($isUnifiedTemplate) {
                     // قالب موحد - الحصول على أدوات التعبئة
@@ -734,10 +738,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if (!$packagingSupplierId) {
                                 $packagingSupplierId = $supplierInfo['id'];
                             }
+
+                            $packagingQuantityPerUnit = isset($pkg['quantity_per_unit']) ? (float)$pkg['quantity_per_unit'] : 1.0;
+                            if (!empty($pkg['packaging_material_id'])) {
+                                $materialsConsumption['packaging'][] = [
+                                    'material_id' => (int)$pkg['packaging_material_id'],
+                                    'quantity' => $packagingQuantityPerUnit * $quantity
+                                ];
+                            }
                         }
                         
                         $rawSuppliers = $db->query(
-                            "SELECT id, material_name, material_type, honey_variety FROM template_raw_materials WHERE template_id = ?",
+                            "SELECT id, material_name, material_type, honey_variety, quantity FROM template_raw_materials WHERE template_id = ?",
                             [$templateId]
                         );
                         
@@ -772,6 +784,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if (!$honeySupplierId && in_array($materialRow['material_type'], ['honey_raw', 'honey_filtered'])) {
                                 $honeySupplierId = $supplierInfo['id'];
                             }
+
+                            $rawQuantityPerUnit = isset($materialRow['quantity']) ? (float)$materialRow['quantity'] : (isset($materialRow['quantity_per_unit']) ? (float)$materialRow['quantity_per_unit'] : 0.0);
+                            $materialsConsumption['raw'][] = [
+                                'template_material_id' => (int)$materialRow['id'],
+                                'supplier_id' => $selectedSupplierId,
+                                'material_type' => $materialRow['material_type'] ?? '',
+                                'material_name' => $materialRow['material_name'] ?? '',
+                                'quantity' => $rawQuantityPerUnit * $quantity
+                            ];
                         }
 
                         if (!$packagingSupplierId) {
@@ -791,7 +812,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $hasHoneyVarietyColumn = !empty($honeyVarietyColumnCheck);
                         }
                         
-                        $selectColumns = "DISTINCT supplier_id, material_type, material_name";
+                        $selectColumns = "DISTINCT supplier_id, material_type, material_name, quantity";
                         if ($hasHoneyVarietyColumn) {
                             $selectColumns .= ", honey_variety";
                         }
@@ -831,6 +852,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 if (!$honeySupplierId && in_array($supplierInfo['type'], ['honey'])) {
                                     $honeySupplierId = $supplierInfo['id'];
                                 }
+
+                                $rawQuantityPerUnit = isset($material['quantity']) ? (float)$material['quantity'] : 0.0;
+                                if ($rawQuantityPerUnit > 0) {
+                                    $materialsConsumption['raw'][] = [
+                                        'template_material_id' => null,
+                                        'supplier_id' => $material['supplier_id'] ?? null,
+                                        'material_type' => $material['material_type'] ?? '',
+                                        'material_name' => $material['material_name'] ?? '',
+                                        'quantity' => $rawQuantityPerUnit * $quantity
+                                    ];
+                                }
                             }
                         }
                         
@@ -854,7 +886,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     // قالب قديم
                     $packagingMaterials = $db->query(
-                        "SELECT packaging_material_id FROM product_template_packaging WHERE template_id = ?",
+                        "SELECT packaging_material_id, quantity_per_unit FROM product_template_packaging WHERE template_id = ?",
                         [$templateId]
                     );
                     $packagingIds = array_filter(array_map(function($p) { return $p['packaging_material_id'] ?? null; }, $packagingMaterials));
@@ -882,6 +914,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $packSupp = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$packagingSupplierId]);
                         if ($packSupp) {
                             $allSuppliers[] = ['id' => $packSupp['id'], 'name' => $packSupp['name'], 'type' => $packSupp['type'], 'material' => 'تعبئة'];
+                        }
+                    }
+
+                    foreach ($packagingMaterials as $legacyPkg) {
+                        if (!empty($legacyPkg['packaging_material_id'])) {
+                            $materialsConsumption['packaging'][] = [
+                                'material_id' => (int)$legacyPkg['packaging_material_id'],
+                                'quantity' => (float)($legacyPkg['quantity_per_unit'] ?? 1.0) * $quantity
+                            ];
                         }
                     }
                 }
@@ -976,6 +1017,106 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 $batchNumber = $batchResult['batch_number'];
+
+                try {
+                    foreach ($materialsConsumption['raw'] as $rawItem) {
+                        $deductQuantity = (float)($rawItem['quantity'] ?? 0);
+                        if ($deductQuantity <= 0) {
+                            continue;
+                        }
+
+                        $materialType = $rawItem['material_type'] ?? '';
+                        $supplierForDeduction = $rawItem['supplier_id'] ?? null;
+                        $materialName = $rawItem['material_name'] ?? '';
+
+                        switch ($materialType) {
+                            case 'honey_raw':
+                            case 'honey_filtered':
+                                if ($supplierForDeduction) {
+                                    $stockColumn = $materialType === 'honey_raw' ? 'raw_honey_quantity' : 'filtered_honey_quantity';
+                                    $db->execute(
+                                        "UPDATE honey_stock 
+                                         SET {$stockColumn} = GREATEST({$stockColumn} - ?, 0), updated_at = NOW() 
+                                         WHERE supplier_id = ?",
+                                        [$deductQuantity, $supplierForDeduction]
+                                    );
+                                }
+                                break;
+                            case 'olive_oil':
+                                if ($supplierForDeduction) {
+                                    $db->execute(
+                                        "UPDATE olive_oil_stock 
+                                         SET quantity = GREATEST(quantity - ?, 0), updated_at = NOW() 
+                                         WHERE supplier_id = ?",
+                                        [$deductQuantity, $supplierForDeduction]
+                                    );
+                                }
+                                break;
+                            case 'beeswax':
+                                if ($supplierForDeduction) {
+                                    $db->execute(
+                                        "UPDATE beeswax_stock 
+                                         SET weight = GREATEST(weight - ?, 0), updated_at = NOW() 
+                                         WHERE supplier_id = ?",
+                                        [$deductQuantity, $supplierForDeduction]
+                                    );
+                                }
+                                break;
+                            case 'derivatives':
+                                if ($supplierForDeduction) {
+                                    $db->execute(
+                                        "UPDATE derivatives_stock 
+                                         SET weight = GREATEST(weight - ?, 0), updated_at = NOW() 
+                                         WHERE supplier_id = ?",
+                                        [$deductQuantity, $supplierForDeduction]
+                                    );
+                                }
+                                break;
+                            case 'nuts':
+                                if ($supplierForDeduction) {
+                                    $db->execute(
+                                        "UPDATE nuts_stock 
+                                         SET quantity = GREATEST(quantity - ?, 0), updated_at = NOW() 
+                                         WHERE supplier_id = ?",
+                                        [$deductQuantity, $supplierForDeduction]
+                                    );
+                                }
+                                break;
+                            case 'legacy':
+                                // لا يوجد تعريف واضح للمورد في القوالب القديمة، يتم تجاهل الخصم تلقائياً
+                                break;
+                            default:
+                                if ($materialName !== '') {
+                                    $matchedProduct = $db->queryOne(
+                                        "SELECT id FROM products WHERE name = ? LIMIT 1",
+                                        [$materialName]
+                                    );
+                                    if ($matchedProduct) {
+                                        $db->execute(
+                                            "UPDATE products SET quantity = GREATEST(quantity - ?, 0) WHERE id = ?",
+                                            [$deductQuantity, $matchedProduct['id']]
+                                        );
+                                    }
+                                }
+                                break;
+                        }
+                    }
+
+                    foreach ($materialsConsumption['packaging'] as $packItem) {
+                        $packMaterialId = $packItem['material_id'] ?? null;
+                        $packQuantity = (float)($packItem['quantity'] ?? 0);
+                        if ($packMaterialId && $packQuantity > 0) {
+                            $db->execute(
+                                "UPDATE packaging_materials 
+                                 SET quantity = GREATEST(quantity - ?, 0), updated_at = NOW() 
+                                 WHERE id = ?",
+                                [$packQuantity, $packMaterialId]
+                            );
+                        }
+                    }
+                } catch (Exception $stockWarning) {
+                    error_log('Production stock deduction warning: ' . $stockWarning->getMessage());
+                }
                 
                 // إنشاء باركودات متعددة حسب الكمية
                 $batchNumbersToPrint = [];
