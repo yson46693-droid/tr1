@@ -336,6 +336,58 @@ $backups = array_slice($allBackups, $offset, $perPage);
 </div>
 
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+    const successMessage = sessionStorage.getItem('backupSuccessMessage');
+    if (successMessage) {
+        showBackupAlert('success', successMessage);
+        sessionStorage.removeItem('backupSuccessMessage');
+    }
+
+    const errorMessage = sessionStorage.getItem('backupErrorMessage');
+    if (errorMessage) {
+        showBackupAlert('danger', errorMessage);
+        sessionStorage.removeItem('backupErrorMessage');
+    }
+});
+
+function showBackupAlert(type, message) {
+    if (!message) {
+        return;
+    }
+    const icons = {
+        success: 'bi-check-circle-fill',
+        danger: 'bi-exclamation-triangle-fill',
+        warning: 'bi-exclamation-circle-fill',
+        info: 'bi-info-circle-fill'
+    };
+    const alertType = ['success', 'danger', 'warning', 'info'].includes(type) ? type : 'info';
+    const icon = icons[alertType] || icons.info;
+
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${alertType} alert-dismissible fade show mb-4`;
+    alertDiv.innerHTML = `
+        <i class="bi ${icon} me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+
+    const preferredContainer = document.querySelector('.card.shadow-sm');
+    const fallbackContainer = document.querySelector('.row.mb-4') || document.querySelector('.d-flex.justify-content-between.align-items-center.mb-4');
+    const container = preferredContainer || fallbackContainer;
+
+    if (container && container.parentNode) {
+        container.parentNode.insertBefore(alertDiv, container);
+    } else {
+        document.body.insertBefore(alertDiv, document.body.firstChild);
+    }
+
+    setTimeout(() => {
+        if (alertDiv && alertDiv.parentNode) {
+            alertDiv.remove();
+        }
+    }, 6000);
+}
+
 async function createBackup(evt) {
     if (!confirm('هل تريد إنشاء نسخة احتياطية الآن؟')) {
         return;
@@ -391,24 +443,11 @@ async function createBackup(evt) {
             if (btn) {
                 btn.innerHTML = '<i class="bi bi-check-circle me-2"></i>تم الإنشاء';
             }
-            // إظهار رسالة نجاح
-            const alertDiv = document.createElement('div');
-            alertDiv.className = 'alert alert-success alert-dismissible fade show mb-4';
-            alertDiv.innerHTML = `
-                <i class="bi bi-check-circle-fill me-2"></i>
-                ${data.message || 'تم إنشاء النسخة الاحتياطية بنجاح'}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            `;
-            const container = document.querySelector('.card.shadow-sm') || document.querySelector('.row.mb-4');
-            if (container) {
-                container.parentNode.insertBefore(alertDiv, container);
-                setTimeout(() => {
-                    alertDiv.remove();
-                }, 5000);
-            }
+            const message = data.message || 'تم إنشاء النسخة الاحتياطية بنجاح';
+            sessionStorage.setItem('backupSuccessMessage', message);
             setTimeout(() => {
                 location.reload();
-            }, 1500);
+            }, 600);
         } else {
             if (btn) {
                 btn.disabled = false;
@@ -417,21 +456,7 @@ async function createBackup(evt) {
             
             // إظهار رسالة خطأ مفصلة
             const errorMessage = data.error || data.message || 'حدث خطأ غير معروف';
-            const alertDiv = document.createElement('div');
-            alertDiv.className = 'alert alert-danger alert-dismissible fade show mb-4';
-            alertDiv.innerHTML = `
-                <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                <strong>فشل إنشاء النسخة الاحتياطية:</strong><br>
-                ${errorMessage}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            `;
-            const container = document.querySelector('.card.shadow-sm') || document.querySelector('.row.mb-4');
-            if (container) {
-                container.parentNode.insertBefore(alertDiv, container);
-            } else {
-                document.body.insertBefore(alertDiv, document.body.firstChild);
-            }
-            
+            showBackupAlert('danger', `<strong>فشل إنشاء النسخة الاحتياطية:</strong><br>${errorMessage}`);
             console.error('Backup creation error:', data);
         }
     } catch (error) {
@@ -585,24 +610,11 @@ async function deleteBackup(backupId, evt) {
             if (btn) {
                 btn.innerHTML = '<i class="bi bi-check-circle me-2"></i>تم الحذف';
             }
-            // إظهار رسالة نجاح
-            const alertDiv = document.createElement('div');
-            alertDiv.className = 'alert alert-success alert-dismissible fade show mb-4';
-            alertDiv.innerHTML = `
-                <i class="bi bi-check-circle-fill me-2"></i>
-                ${data.message || 'تم حذف النسخة الاحتياطية بنجاح'}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            `;
-            const container = document.querySelector('.card.shadow-sm');
-            if (container) {
-                container.parentNode.insertBefore(alertDiv, container);
-                setTimeout(() => {
-                    alertDiv.remove();
-                }, 5000);
-            }
+            const message = data.message || 'تم حذف النسخة الاحتياطية بنجاح';
+            sessionStorage.setItem('backupSuccessMessage', message);
             setTimeout(() => {
                 location.reload();
-            }, 1000);
+            }, 600);
         } else {
             if (btn) {
                 btn.disabled = false;
