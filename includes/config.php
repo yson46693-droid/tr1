@@ -366,35 +366,4 @@ function getSuccessMessage() {
 // ملاحظة: تم نقل كود الإصلاح التلقائي إلى نهاية ملف db.php
 // Note: Auto-fix code moved to end of db.php file
 
-// تضمين نظام المصادقة لضمان توفر دوال CSRF
-require_once __DIR__ . '/auth.php';
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $csrfHeader = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? null;
-    $csrfField = $_POST[CSRF_TOKEN_NAME] ?? null;
-    $csrfTokenToCheck = $csrfField ?: $csrfHeader;
-
-    if (empty($csrfTokenToCheck) || !verifyCSRFToken($csrfTokenToCheck)) {
-        http_response_code(403);
-
-        $responsePayload = [
-            'success' => false,
-            'error' => 'Invalid or missing CSRF token.',
-        ];
-
-        $acceptHeader = $_SERVER['HTTP_ACCEPT'] ?? '';
-        $isAjax = (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
-        $wantsJson = stripos($acceptHeader, 'application/json') !== false;
-
-        if ($isAjax || $wantsJson) {
-            if (!headers_sent()) {
-                header('Content-Type: application/json; charset=UTF-8');
-            }
-            echo json_encode($responsePayload, JSON_UNESCAPED_UNICODE);
-        } else {
-            echo '403 Forbidden - CSRF token validation failed.';
-        }
-        exit;
-    }
-}
 

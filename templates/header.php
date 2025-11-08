@@ -34,7 +34,6 @@ if (!isset($lang) || empty($lang)) {
     $lang = isset($translations) ? $translations : [];
 }
 $currentUser = getCurrentUser();
-$csrfToken = generateCSRFToken();
 ?>
 <!DOCTYPE html>
 <html lang="<?php echo $currentLang; ?>" dir="<?php echo $dir; ?>">
@@ -108,7 +107,6 @@ $csrfToken = generateCSRFToken();
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="<?php echo APP_NAME; ?>">
     <link rel="apple-touch-icon" href="<?php echo ASSETS_URL; ?>icons/icon-192x192.png">
-    <meta name="csrf-token" content="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
     
     <!-- Manifest -->
     <?php
@@ -116,11 +114,6 @@ $csrfToken = generateCSRFToken();
     $manifestPath = getRelativeUrl('manifest.php');
     ?>
 <link rel="manifest" href="<?php echo $manifestPath; ?>">
-    <script>
-        window.APP_CSRF_TOKEN = <?php echo json_encode($csrfToken, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
-        window.APP_CSRF_FIELD = <?php echo json_encode(CSRF_TOKEN_NAME, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
-    </script>
-    <script src="<?php echo $assetsUrl; ?>js/csrf-protection.js?v=<?php echo $cacheVersion; ?>"></script>
     
     <!-- 🎬 Page Loading Animation CSS -->
     <style>

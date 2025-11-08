@@ -82,17 +82,6 @@ try {
     error_log('Manager task page users query error: ' . $e->getMessage());
 }
 
-try {
-    $products = $db->query("
-        SELECT id, name
-        FROM products
-        WHERE status = 'active'
-        ORDER BY name
-    ");
-} catch (Exception $e) {
-    error_log('Manager task page products query error: ' . $e->getMessage());
-}
-
 $allowedTypes = ['general', 'production', 'quality', 'maintenance'];
 $allowedPriorities = ['low', 'normal', 'high', 'urgent'];
 
@@ -108,9 +97,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $priority = $_POST['priority'] ?? 'normal';
         $priority = in_array($priority, $allowedPriorities, true) ? $priority : 'normal';
         $dueDate = $_POST['due_date'] ?? '';
-        $productId = intval($_POST['product_id'] ?? 0);
-        $quantity = (float)($_POST['quantity'] ?? 0);
-        $notes = trim($_POST['notes'] ?? '');
         $assignees = $_POST['assigned_to'] ?? [];
 
         if (!is_array($assignees)) {
@@ -127,27 +113,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'يجب اختيار عامل واحد على الأقل لاستلام المهمة.';
         } elseif ($taskType === 'general' && $title === '') {
             $error = 'يرجى إدخال عنوان للمهمة.';
-        } elseif ($taskType === 'production' && $productId <= 0) {
-            $error = 'يرجى اختيار المنتج المطلوب إنتاجه.';
-        } elseif ($taskType === 'production' && $quantity <= 0) {
-            $error = 'يرجى إدخال كمية صحيحة.';
-        } elseif ($dueDate && !preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $dueDate)) {
+        } elseif ($dueDate && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
             $error = 'صيغة تاريخ الاستحقاق غير صحيحة.';
         } else {
             try {
                 $db->beginTransaction();
 
-                $productName = '';
                 $relatedTypeValue = 'manager_' . $taskType;
-                if ($taskType === 'production' && $productId > 0) {
-                    $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$productId]);
-                    if (!$product) {
-                        throw new Exception('لم يتم العثور على المنتج المحدد.');
-                    }
-                    $productName = $product['name'];
-                    if ($title === '') {
-                        $title = 'إنتاج ' . $productName;
-                    }
+
+                if ($title === '') {
+                    $title = $taskType === 'production' ? 'مهمة إنتاج جديدة' : 'مهمة جديدة';
                 }
 
                 $insertedTaskIds = [];
@@ -165,24 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($dueDate) {
                         $columns[] = 'due_date';
                         $values[] = $dueDate;
-                        $placeholders[] = '?';
-                    }
-
-                    if ($taskType === 'production' && $productId > 0) {
-                        $columns[] = 'product_id';
-                        $values[] = $productId;
-                        $placeholders[] = '?';
-                    }
-
-                    if ($taskType === 'production' && $quantity > 0) {
-                        $columns[] = 'quantity';
-                        $values[] = $quantity;
-                        $placeholders[] = '?';
-                    }
-
-                    if ($notes !== '') {
-                        $columns[] = 'notes';
-                        $values[] = $notes;
                         $placeholders[] = '?';
                     }
 
@@ -212,13 +169,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $notificationTitle = 'مهمة جديدة من الإدارة';
                     $notificationMessage = $title;
-
-                    if ($taskType === 'production' && $productName) {
-                        $notificationMessage .= ' - المنتج: ' . $productName;
-                        if ($quantity > 0) {
-                            $notificationMessage .= ' - الكمية: ' . number_format($quantity, 2);
-                        }
-                    }
 
                     try {
                         createNotification(
@@ -315,9 +265,6 @@ try {
             <h2 class="mb-1"><i class="bi bi-list-task me-2"></i>إرسال مهام لقسم الإنتاج</h2>
             <p class="text-muted mb-0">قم بإنشاء مهام موجهة لعمال الإنتاج مع تتبّع الحالة في صفحة المهام الخاصة بهم.</p>
         </div>
-        <a href="<?php echo htmlspecialchars(getRelativeUrl('production.php?page=tasks')); ?>" class="btn btn-outline-primary">
-            <i class="bi bi-box-arrow-up-right me-1"></i>عرض صفحة مهام الإنتاج
-        </a>
     </div>
 
     <?php if ($error): ?>
@@ -427,28 +374,11 @@ try {
                     <div class="col-md-6">
                         <label class="form-label">عنوان المهمة</label>
                         <input type="text" class="form-control" name="title" placeholder="مثال: تنظيف خط الإنتاج">
-                        <div class="form-text">إذا كانت المهمة إنتاج منتج، سيتم توليد العنوان تلقائياً في حال تركه فارغاً.</div>
+                        <div class="form-text">يمكنك ترك العنوان فارغاً وسيتم توليد عنوان افتراضي للمهمة الإنتاجية.</div>
                     </div>
                     <div class="col-12">
                         <label class="form-label">وصف وتفاصيل المهمة</label>
                         <textarea class="form-control" name="details" rows="4" placeholder="أدخل التفاصيل والتعليمات اللازمة للعمال."></textarea>
-                    </div>
-                    <div class="col-md-6 task-production-field d-none">
-                        <label class="form-label">المنتج المطلوب</label>
-                        <select class="form-select" name="product_id">
-                            <option value="0">اختر المنتج</option>
-                            <?php foreach ($products as $product): ?>
-                                <option value="<?php echo (int)$product['id']; ?>"><?php echo htmlspecialchars($product['name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-6 task-production-field d-none">
-                        <label class="form-label">الكمية المطلوبة</label>
-                        <input type="number" class="form-control" name="quantity" step="0.01" min="0">
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label">ملاحظات إضافية (اختياري)</label>
-                        <textarea class="form-control" name="notes" rows="2" placeholder="ملاحظات داخلية أو مرجع إضافي"></textarea>
                     </div>
                 </div>
                 <div class="d-flex justify-content-end mt-4 gap-2">
@@ -528,23 +458,22 @@ try {
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const taskTypeSelect = document.getElementById('taskTypeSelect');
-    const productionFields = document.querySelectorAll('.task-production-field');
-    const titleInput = document.querySelector('input[name=\"title\"]');
+    const titleInput = document.querySelector('input[name="title"]');
 
-    function toggleProductionFields() {
-        const isProduction = taskTypeSelect.value === 'production';
-        productionFields.forEach(function (field) {
-            field.classList.toggle('d-none', !isProduction);
-        });
-        if (isProduction && !titleInput.value.trim()) {
-            titleInput.placeholder = 'سيتم توليد العنوان تلقائياً بناءً على المنتج';
-        } else {
-            titleInput.placeholder = 'مثال: تنظيف خط الإنتاج';
+    function updateTitlePlaceholder() {
+        if (!titleInput) {
+            return;
         }
+        const isProduction = taskTypeSelect && taskTypeSelect.value === 'production';
+        titleInput.placeholder = isProduction
+            ? 'يمكنك ترك العنوان فارغاً وسيتم توليد عنوان افتراضي للمهمة الإنتاجية.'
+            : 'مثال: تنظيف خط الإنتاج';
     }
 
-    taskTypeSelect.addEventListener('change', toggleProductionFields);
-    toggleProductionFields();
+    if (taskTypeSelect) {
+        taskTypeSelect.addEventListener('change', updateTitlePlaceholder);
+    }
+    updateTitlePlaceholder();
 });
 </script>
 

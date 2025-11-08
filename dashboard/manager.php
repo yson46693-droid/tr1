@@ -49,37 +49,37 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                     [
                         'label' => 'مهام الإنتاج',
                         'icon' => 'bi-list-task',
-                        'url' => getRelativeUrl('manager.php?page=production_tasks')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=production_tasks')
                     ],
                     [
                         'label' => 'مخزن أدوات التعبئة',
                         'icon' => 'bi-box-seam',
-                        'url' => getRelativeUrl('manager.php?page=packaging_warehouse')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=packaging_warehouse')
                     ],
                     [
                         'label' => 'مخزن الخامات',
                         'icon' => 'bi-box2-heart',
-                        'url' => getRelativeUrl('manager.php?page=raw_materials_warehouse')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=raw_materials_warehouse')
                     ],
                     [
                         'label' => 'الموردين',
                         'icon' => 'bi-truck',
-                        'url' => getRelativeUrl('manager.php?page=suppliers')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=suppliers')
                     ],
                     [
                         'label' => 'العملاء',
                         'icon' => 'bi-people',
-                        'url' => getRelativeUrl('manager.php?page=customers')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=customers')
                     ],
                     [
                         'label' => 'السيارات',
                         'icon' => 'bi-car-front',
-                        'url' => getRelativeUrl('manager.php?page=vehicles')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=vehicles')
                     ],
                     [
                         'label' => 'نقطة البيع',
                         'icon' => 'bi-cart4',
-                        'url' => getRelativeUrl('manager.php?page=pos')
+                        'url' => getRelativeUrl('dashboard/manager.php?page=pos')
                     ]
                 ];
                 ?>
