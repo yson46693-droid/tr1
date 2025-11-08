@@ -531,7 +531,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $materialSuppliers[$key] = intval($value);
                     }
                 }
-                $templateMode = $_POST['template_mode'] ?? 'legacy';
+
+                if (empty($materialSuppliers)) {
+                    throw new Exception('يرجى اختيار المورد المناسب لكل مادة قبل إنشاء التشغيلة.');
+                }
+
+                $templateMode = $_POST['template_mode'] ?? 'advanced';
+                if ($templateMode !== 'advanced') {
+                    $templateMode = 'advanced';
+                }
+                $templateType = trim($_POST['template_type'] ?? 'legacy');
 
                 // محاولة الحصول على القالب الموحد أولاً
                 $unifiedTemplate = $db->queryOne(
@@ -717,7 +726,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $honeySupplierId = null;
                     $packagingSupplierId = null;
                     $honeyVariety = null;
-                    $usingSubmittedSuppliers = ($templateMode === 'advanced' && !empty($materialSuppliers));
+                    $usingSubmittedSuppliers = !empty($materialSuppliers);
                     
                     if ($usingSubmittedSuppliers) {
                         // الموردون المحددون من النموذج المتقدم
@@ -796,6 +805,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'supplier_id' => $selectedSupplierId,
                                 'material_type' => $materialRow['material_type'] ?? '',
                                 'material_name' => $materialRow['material_name'] ?? '',
+                                'honey_variety' => $materialRow['honey_variety'] ?? null,
                                 'quantity' => $rawQuantityPerUnit * $quantity
                             ];
                         }
@@ -865,6 +875,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         'supplier_id' => $material['supplier_id'] ?? null,
                                         'material_type' => $material['material_type'] ?? '',
                                         'material_name' => $material['material_name'] ?? '',
+                                        'honey_variety' => ($hasHoneyVarietyColumn && isset($material['honey_variety'])) ? $material['honey_variety'] : null,
                                         'quantity' => $rawQuantityPerUnit * $quantity
                                     ];
                                 }
@@ -889,45 +900,197 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 } else {
-                    // قالب قديم
+                    // قالب قديم وأنواع القوالب المبسطة (عسل، زيت، شمع، مشتقات)
                     $packagingMaterials = $db->query(
-                        "SELECT packaging_material_id, quantity_per_unit FROM product_template_packaging WHERE template_id = ?",
+                        "SELECT id, packaging_material_id, packaging_name, quantity_per_unit 
+                         FROM product_template_packaging 
+                         WHERE template_id = ?",
                         [$templateId]
                     );
                     $packagingIds = array_filter(array_map(function($p) { return $p['packaging_material_id'] ?? null; }, $packagingMaterials));
-                    
-                    // الحصول على الموردين من POST (النظام القديم)
-                    $honeySupplierId = !empty($_POST['honey_supplier_id']) ? intval($_POST['honey_supplier_id']) : null;
-                    $packagingSupplierId = !empty($_POST['packaging_supplier_id']) ? intval($_POST['packaging_supplier_id']) : null;
-                    
-                    // التحقق من وجود الموردين
-                    if (!$honeySupplierId) {
-                        throw new Exception('يجب اختيار مورد العسل');
-                    }
-                    if (!$packagingSupplierId) {
-                        throw new Exception('يجب اختيار مورد مواد التعبئة');
-                    }
-                    
-                    // إضافة الموردين للقائمة
-                    if ($honeySupplierId) {
-                        $honeySupp = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$honeySupplierId]);
-                        if ($honeySupp) {
-                            $allSuppliers[] = ['id' => $honeySupp['id'], 'name' => $honeySupp['name'], 'type' => $honeySupp['type'], 'material' => 'عسل'];
-                        }
-                    }
-                    if ($packagingSupplierId) {
-                        $packSupp = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$packagingSupplierId]);
-                        if ($packSupp) {
-                            $allSuppliers[] = ['id' => $packSupp['id'], 'name' => $packSupp['name'], 'type' => $packSupp['type'], 'material' => 'تعبئة'];
-                        }
-                    }
+
+                    $packagingSupplierId = null;
 
                     foreach ($packagingMaterials as $legacyPkg) {
+                        $pkgKey = 'pack_' . ($legacyPkg['packaging_material_id'] ?? $legacyPkg['id']);
+                        $selectedSupplierId = $materialSuppliers[$pkgKey] ?? 0;
+                        if (empty($selectedSupplierId)) {
+                            throw new Exception('يرجى اختيار مورد لكل أداة تعبئة مستخدمة في القالب.');
+                        }
+
+                        $supplierInfo = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$selectedSupplierId]);
+                        if (!$supplierInfo) {
+                            throw new Exception('مورد غير صالح لأداة التعبئة: ' . ($legacyPkg['packaging_name'] ?? 'غير معروف'));
+                        }
+
+                        $materialLabel = $legacyPkg['packaging_name'] ?? 'أداة تعبئة';
+                        $allSuppliers[] = [
+                            'id' => $supplierInfo['id'],
+                            'name' => $supplierInfo['name'],
+                            'type' => $supplierInfo['type'],
+                            'material' => $materialLabel
+                        ];
+
+                        if (!$packagingSupplierId) {
+                            $packagingSupplierId = $supplierInfo['id'];
+                        }
+
                         if (!empty($legacyPkg['packaging_material_id'])) {
                             $materialsConsumption['packaging'][] = [
                                 'material_id' => (int)$legacyPkg['packaging_material_id'],
                                 'quantity' => (float)($legacyPkg['quantity_per_unit'] ?? 1.0) * $quantity
                             ];
+                        }
+                    }
+
+                    // معالجة المواد الرئيسية حسب نوع القالب
+                    switch ($templateType) {
+                        case 'olive_oil':
+                            $oliveSupplierId = $materialSuppliers['olive_main'] ?? 0;
+                            if (empty($oliveSupplierId)) {
+                                throw new Exception('يرجى اختيار مورد زيت الزيتون.');
+                            }
+                            $oliveSupplier = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$oliveSupplierId]);
+                            if (!$oliveSupplier) {
+                                throw new Exception('مورد زيت الزيتون غير صالح.');
+                            }
+                            $allSuppliers[] = [
+                                'id' => $oliveSupplier['id'],
+                                'name' => $oliveSupplier['name'],
+                                'type' => $oliveSupplier['type'],
+                                'material' => 'زيت زيتون'
+                            ];
+                            break;
+
+                        case 'beeswax':
+                            $beeswaxSupplierId = $materialSuppliers['beeswax_main'] ?? 0;
+                            if (empty($beeswaxSupplierId)) {
+                                throw new Exception('يرجى اختيار مورد شمع العسل.');
+                            }
+                            $beeswaxSupplier = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$beeswaxSupplierId]);
+                            if (!$beeswaxSupplier) {
+                                throw new Exception('مورد شمع العسل غير صالح.');
+                            }
+                            $allSuppliers[] = [
+                                'id' => $beeswaxSupplier['id'],
+                                'name' => $beeswaxSupplier['name'],
+                                'type' => $beeswaxSupplier['type'],
+                                'material' => 'شمع عسل'
+                            ];
+                            break;
+
+                        case 'derivatives':
+                            $derivativeSupplierId = $materialSuppliers['derivative_main'] ?? 0;
+                            if (empty($derivativeSupplierId)) {
+                                throw new Exception('يرجى اختيار مورد المشتق.');
+                            }
+                            $derivativeSupplier = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$derivativeSupplierId]);
+                            if (!$derivativeSupplier) {
+                                throw new Exception('مورد المشتق غير صالح.');
+                            }
+                            $allSuppliers[] = [
+                                'id' => $derivativeSupplier['id'],
+                                'name' => $derivativeSupplier['name'],
+                                'type' => $derivativeSupplier['type'],
+                                'material' => 'مشتق'
+                            ];
+                            break;
+
+                        case 'honey':
+                        case 'legacy':
+                        default:
+                            $honeySupplierIdSelected = $materialSuppliers['honey_main'] ?? 0;
+                            if ((float)($template['honey_quantity'] ?? 0) > 0) {
+                                if (empty($honeySupplierIdSelected)) {
+                                    throw new Exception('يرجى اختيار مورد العسل.');
+                                }
+                                $honeySupp = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$honeySupplierIdSelected]);
+                                if (!$honeySupp) {
+                                    throw new Exception('مورد العسل غير صالح.');
+                                }
+                                $honeySupplierId = $honeySupp['id'];
+                                $allSuppliers[] = [
+                                    'id' => $honeySupp['id'],
+                                    'name' => $honeySupp['name'],
+                                    'type' => $honeySupp['type'],
+                                    'material' => 'عسل'
+                                ];
+                            }
+                            break;
+                    }
+
+                    // المواد الخام الإضافية المرتبطة بالقالب القديم
+                    $legacyRawMaterials = $db->query(
+                        "SELECT id, material_name, quantity_per_unit, unit 
+                         FROM product_template_raw_materials 
+                         WHERE template_id = ?",
+                        [$templateId]
+                    );
+
+                    foreach ($legacyRawMaterials as $legacyRaw) {
+                        $rawKey = 'raw_' . $legacyRaw['id'];
+                        $selectedSupplierId = $materialSuppliers[$rawKey] ?? 0;
+                        if (empty($selectedSupplierId)) {
+                            throw new Exception('يرجى اختيار مورد للمادة الخام: ' . ($legacyRaw['material_name'] ?? 'مادة خام'));
+                        }
+
+                        $supplierInfo = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$selectedSupplierId]);
+                        if (!$supplierInfo) {
+                            throw new Exception('مورد غير صالح للمادة الخام: ' . ($legacyRaw['material_name'] ?? 'غير معروف'));
+                        }
+
+                        $allSuppliers[] = [
+                            'id' => $supplierInfo['id'],
+                            'name' => $supplierInfo['name'],
+                            'type' => $supplierInfo['type'],
+                            'material' => $legacyRaw['material_name'] ?? 'مادة خام'
+                        ];
+                    }
+                }
+                
+                // التحقق من توفر نوع العسل لدى المورد المحدد
+                $honeyStockTableCheck = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
+                foreach ($materialsConsumption['raw'] as $rawItem) {
+                    $materialType = $rawItem['material_type'] ?? '';
+                    if (!in_array($materialType, ['honey_raw', 'honey_filtered'], true)) {
+                        continue;
+                    }
+                    
+                    $supplierForHoney = $rawItem['supplier_id'] ?? null;
+                    $requiredHoneyQuantity = (float)($rawItem['quantity'] ?? 0);
+                    if (!$supplierForHoney || $requiredHoneyQuantity <= 0) {
+                        continue;
+                    }
+                    
+                    if ($honeyStockTableCheck) {
+                        $stockColumn = $materialType === 'honey_raw' ? 'raw_honey_quantity' : 'filtered_honey_quantity';
+                        $params = [$supplierForHoney];
+                        $honeySql = "SELECT {$stockColumn} AS available_quantity, honey_variety 
+                                     FROM honey_stock 
+                                     WHERE supplier_id = ?";
+                        
+                        if (!empty($rawItem['honey_variety'])) {
+                            $honeySql .= " AND honey_variety = ?";
+                            $params[] = $rawItem['honey_variety'];
+                        }
+                        
+                        $honeySql .= " ORDER BY {$stockColumn} DESC LIMIT 1";
+                        $supplierHoney = $db->queryOne($honeySql, $params);
+                        
+                        if (!$supplierHoney) {
+                            $varietyLabel = $rawItem['honey_variety'] ?: ($rawItem['material_name'] ?: 'العسل المطلوب');
+                            throw new Exception('المورد المحدد لا يمتلك مخزوناً من نوع العسل: ' . $varietyLabel);
+                        }
+                        
+                        $availableHoney = (float)($supplierHoney['available_quantity'] ?? 0);
+                        if ($availableHoney < $requiredHoneyQuantity) {
+                            $varietyLabel = $supplierHoney['honey_variety'] ?? $rawItem['honey_variety'] ?? ($rawItem['material_name'] ?: 'العسل المطلوب');
+                            throw new Exception(sprintf(
+                                'الكمية المتاحة من %s لدى المورد المختار غير كافية. مطلوب %.2f كجم، متوفر %.2f كجم.',
+                                $varietyLabel,
+                                $requiredHoneyQuantity,
+                                $availableHoney
+                            ));
                         }
                     }
                 }
@@ -2077,7 +2240,7 @@ $lang = isset($translations) ? $translations : [];
             <form method="POST" id="createFromTemplateForm">
                 <input type="hidden" name="action" value="create_from_template">
                 <input type="hidden" name="template_id" id="template_id">
-                <input type="hidden" name="template_mode" id="template_mode" value="legacy">
+                <input type="hidden" name="template_mode" id="template_mode" value="advanced">
                 <input type="hidden" name="template_type" id="template_type" value="">
                 <div class="modal-body production-template-body">
                     <!-- معلومات المنتج -->
@@ -2370,12 +2533,16 @@ $lang = isset($translations) ? $translations : [];
 <style>
 /* ⚙️ تحسين عرض نموذج إنشاء التشغيلة */
 .production-template-dialog {
-    max-width: 860px;
+    max-width: 820px;
+    margin: 1.25rem auto;
 }
 
 .production-template-dialog .modal-content {
     border-radius: 16px;
     box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
 }
 
 .production-template-dialog .modal-header,
@@ -2384,19 +2551,21 @@ $lang = isset($translations) ? $translations : [];
 }
 
 .production-template-body {
-    padding: 1.2rem;
+    padding: 1rem 1.1rem;
+    flex: 1 1 auto;
+    overflow-y: auto;
 }
 
 .production-template-dialog.modal-dialog-scrollable .modal-body {
-    max-height: calc(100vh - 210px);
+    max-height: none;
 }
 
 .production-template-body .section-block {
     background: #f9fafb;
     border: 1px solid rgba(148, 163, 184, 0.25);
     border-radius: 12px;
-    padding: 1rem 1.1rem;
-    margin-bottom: 0.9rem;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.75rem;
 }
 
 .production-template-body .section-heading {
@@ -2419,10 +2588,6 @@ $lang = isset($translations) ? $translations : [];
 .production-template-body .alert {
     margin-bottom: 0.75rem;
     padding: 0.75rem 0.9rem;
-}
-
-.production-template-body textarea {
-    min-height: 110px;
 }
 
 .production-template-body .row.g-3 > [class*="col-"] {

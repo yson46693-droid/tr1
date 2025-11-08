@@ -203,40 +203,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         }
                     }
                     
-                    // إنشاء طلب السلفة
-                    $result = $db->execute(
-                        "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
-                         VALUES (?, ?, ?, ?, 'pending')",
-                        [$currentUser['id'], $amount, $reason ?: null, date('Y-m-d')]
-                    );
-                    
-                    $requestId = $result['insert_id'];
-                    
-                    // إرسال إشعار للمحاسب
-                    $accountants = $db->query("SELECT id FROM users WHERE role = 'accountant' AND status = 'active'");
-                    foreach ($accountants as $accountant) {
-                        createNotification(
-                            $accountant['id'],
-                            'طلب سلفة جديد',
-                            'طلب سلفة من ' . ($currentUser['full_name'] ?? $currentUser['username']) . ' بقيمة ' . formatCurrency($amount),
-                            'warning',
-                            getDashboardUrl('accountant') . '?page=salaries&view=advances',
-                            false
+                    try {
+                        // إنشاء طلب السلفة
+                        $result = $db->execute(
+                            "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
+                             VALUES (?, ?, ?, ?, 'pending')",
+                            [$currentUser['id'], $amount, $reason ?: null, date('Y-m-d')]
                         );
+                        
+                        $requestId = $result['insert_id'];
+                        
+                        // إرسال إشعار للمحاسب
+                        $accountants = $db->query("SELECT id FROM users WHERE role = 'accountant' AND status = 'active'");
+                        foreach ($accountants as $accountant) {
+                            createNotification(
+                                $accountant['id'],
+                                'طلب سلفة جديد',
+                                'طلب سلفة من ' . ($currentUser['full_name'] ?? $currentUser['username']) . ' بقيمة ' . formatCurrency($amount),
+                                'warning',
+                                getDashboardUrl('accountant') . '?page=salaries&view=advances',
+                                false
+                            );
+                        }
+                        
+                        logAudit($currentUser['id'], 'request_advance', 'salary_advance', $requestId, null, [
+                            'amount' => $amount
+                        ]);
+                        
+                        // منع التكرار باستخدام redirect
+                        $successMessage = 'تم إرسال طلب السلفة بنجاح. سيتم مراجعته من قبل المحاسب والمدير.';
+                        $redirectParams = [
+                            'page' => 'my_salary',
+                            'month' => $month,
+                            'year' => $year
+                        ];
+                        preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+                    } catch (Exception $e) {
+                        error_log("Salary advance insert error: " . $e->getMessage());
+                        
+                        // محاولة معالجة الأخطاء الشائعة وتقديم رسالة مفيدة للمستخدم
+                        if (stripos($e->getMessage(), 'salary_advances') !== false) {
+                            $error = 'تعذر حفظ طلب السلفة بسبب عدم جاهزية قاعدة البيانات. يرجى إبلاغ المحاسب للتأكد من إنشاء جدول السلف.';
+                        } else {
+                            $error = 'حدث خطأ أثناء حفظ طلب السلفة. يرجى المحاولة مرة أخرى، وإذا استمرت المشكلة تواصل مع الإدارة.';
+                        }
                     }
-                    
-                    logAudit($currentUser['id'], 'request_advance', 'salary_advance', $requestId, null, [
-                        'amount' => $amount
-                    ]);
-                    
-                    // منع التكرار باستخدام redirect
-                    $successMessage = 'تم إرسال طلب السلفة بنجاح. سيتم مراجعته من قبل المحاسب والمدير.';
-                    $redirectParams = [
-                        'page' => 'my_salary',
-                        'month' => $month,
-                        'year' => $year
-                    ];
-                    preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
                 }
             }
         }
