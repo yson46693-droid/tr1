@@ -78,7 +78,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'product_details') {
         }
 
         $detailsSql .= " WHERE " . implode(' AND ', $whereDetails) . "
-                         ORDER BY p.$dateColumn DESC";
+                         ORDER BY p.$dateColumn ASC";
 
         $details = $db->query($detailsSql, $detailsParams);
 
@@ -262,7 +262,7 @@ if ($userIdColumn) {
 
 $sql .= " WHERE $whereClause
         GROUP BY p.product_id
-        ORDER BY MAX(p.$dateColumn) DESC, pr.name ASC
+        ORDER BY MIN(p.$dateColumn) ASC, pr.name ASC
         LIMIT ? OFFSET ?";
 
 $params[] = $perPage;
@@ -321,7 +321,7 @@ if (!empty($finalProducts)) {
 
         $detailsSql .= " WHERE p.product_id IN ($placeholders)
                          AND (p.status = 'completed' OR p.status = 'approved')
-                         ORDER BY p.product_id, p.$dateColumn DESC";
+                         ORDER BY p.product_id, p.$dateColumn ASC";
 
         $detailsRows = $db->query($detailsSql, $productIds);
 
