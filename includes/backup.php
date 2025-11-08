@@ -339,12 +339,21 @@ function restoreDatabase($backupId) {
                 
                 if (
                     strpos($lowerError, 'already exists') !== false &&
-                    preg_match('/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?([a-z0-9_]+)`?/i', $query, $matches)
+                    preg_match(
+                        '/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(?:([a-z0-9_]+)`?\.)?`?([a-z0-9_]+)`?/i',
+                        $query,
+                        $matches
+                    )
                 ) {
-                    $tableName = $matches[1];
-                    $connection->query("DROP TABLE IF EXISTS `$tableName`");
+                    $schemaName = !empty($matches[1]) ? $matches[1] : null;
+                    $tableName = $matches[2] ?? $matches[1];
+                    
+                    $dropTarget = $schemaName ? "`{$schemaName}`.`{$tableName}`" : "`{$tableName}`";
+                    $connection->query("DROP TABLE IF EXISTS {$dropTarget}");
                     if (!$connection->query($query)) {
-                        throw new Exception($connection->error ?: 'فشل إعادة إنشاء الجدول ' . $tableName);
+                        throw new Exception(
+                            $connection->error ?: 'فشل إعادة إنشاء الجدول ' . ($schemaName ? "{$schemaName}." : '') . $tableName
+                        );
                     }
                     continue;
                 }

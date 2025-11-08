@@ -644,6 +644,113 @@ if (isset($_GET['edit'])) {
     </div>
 </div>
 
+<?php
+$historyTypeLabels = [
+    'topup' => 'إضافة رصيد',
+    'payment' => 'تسجيل سداد'
+];
+?>
+
+<div class="card shadow-sm mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>سجل الحركات المالية للموردين</h5>
+        <span class="badge bg-light text-dark">آخر <?php echo $historyLimit; ?> سجلات</span>
+    </div>
+    <div class="card-body">
+        <?php if (empty($balanceHistory)): ?>
+            <div class="text-center text-muted py-4">
+                <i class="bi bi-inbox me-2"></i>لا توجد حركات مالية مسجلة بعد.
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>التاريخ</th>
+                            <th>المورد</th>
+                            <th>نوع العملية</th>
+                            <th>المبلغ</th>
+                            <th>الرصيد قبل / بعد</th>
+                            <th>ملاحظات</th>
+                            <th>تسجيل بواسطة</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($balanceHistory as $index => $item): ?>
+                            <?php
+                                $changeAmount = cleanFinancialValue($item['change_amount']);
+                                $previousBalance = cleanFinancialValue($item['previous_balance']);
+                                $newBalance = cleanFinancialValue($item['new_balance']);
+                                $typeLabel = $historyTypeLabels[$item['type']] ?? $item['type'];
+                                $isPositive = $changeAmount >= 0;
+                            ?>
+                            <tr>
+                                <td data-label="#"><?php echo $historyOffset + $index + 1; ?></td>
+                                <td data-label="التاريخ"><?php echo date('Y-m-d H:i', strtotime($item['created_at'])); ?></td>
+                                <td data-label="المورد"><strong><?php echo htmlspecialchars($item['supplier_name'] ?? 'غير معروف'); ?></strong></td>
+                                <td data-label="نوع العملية">
+                                    <span class="badge bg-<?php echo $isPositive ? 'success' : 'warning'; ?>">
+                                        <i class="bi bi-<?php echo $isPositive ? 'arrow-up-circle' : 'arrow-down-circle'; ?> me-1"></i><?php echo $typeLabel; ?>
+                                    </span>
+                                </td>
+                                <td data-label="المبلغ">
+                                    <span class="text-<?php echo $isPositive ? 'success' : 'danger'; ?> fw-bold">
+                                        <?php echo ($isPositive ? '+' : '-') . formatCurrency(abs($changeAmount)); ?>
+                                    </span>
+                                </td>
+                                <td data-label="الرصيد قبل / بعد">
+                                    <div class="small text-muted">قبل: <?php echo formatCurrency($previousBalance); ?></div>
+                                    <div class="fw-semibold">بعد: <?php echo formatCurrency($newBalance); ?></div>
+                                </td>
+                                <td data-label="ملاحظات"><?php echo htmlspecialchars($item['notes'] ?? '—'); ?></td>
+                                <td data-label="تسجيل بواسطة"><?php echo htmlspecialchars($item['user_name'] ?? 'غير معروف'); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <?php if ($historyTotalPages > 1): ?>
+            <nav aria-label="Supplier history pagination" class="mt-3">
+                <ul class="pagination justify-content-center flex-wrap">
+                    <li class="page-item <?php echo $historyPage <= 1 ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?page=suppliers&history_page=<?php echo $historyPage - 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . urlencode($statusFilter) : ''; ?>">
+                            <i class="bi bi-chevron-right"></i>
+                        </a>
+                    </li>
+                    <?php
+                    $historyStart = max(1, $historyPage - 2);
+                    $historyEnd = min($historyTotalPages, $historyPage + 2);
+                    if ($historyStart > 1): ?>
+                        <li class="page-item"><a class="page-link" href="?page=suppliers&history_page=1<?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . urlencode($statusFilter) : ''; ?>">1</a></li>
+                        <?php if ($historyStart > 2): ?>
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                    <?php for ($i = $historyStart; $i <= $historyEnd; $i++): ?>
+                        <li class="page-item <?php echo $i == $historyPage ? 'active' : ''; ?>">
+                            <a class="page-link" href="?page=suppliers&history_page=<?php echo $i; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . urlencode($statusFilter) : ''; ?>"><?php echo $i; ?></a>
+                        </li>
+                    <?php endfor; ?>
+                    <?php if ($historyEnd < $historyTotalPages): ?>
+                        <?php if ($historyEnd < $historyTotalPages - 1): ?>
+                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <?php endif; ?>
+                        <li class="page-item"><a class="page-link" href="?page=suppliers&history_page=<?php echo $historyTotalPages; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . urlencode($statusFilter) : ''; ?>"><?php echo $historyTotalPages; ?></a></li>
+                    <?php endif; ?>
+                    <li class="page-item <?php echo $historyPage >= $historyTotalPages ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?page=suppliers&history_page=<?php echo $historyPage + 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $statusFilter ? '&status=' . urlencode($statusFilter) : ''; ?>">
+                            <i class="bi bi-chevron-left"></i>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+</div>
+
 <!-- Add Supplier Modal -->
 <div class="modal fade" id="addSupplierModal" tabindex="-1">
     <div class="modal-dialog">
