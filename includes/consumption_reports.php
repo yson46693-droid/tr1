@@ -186,6 +186,11 @@ function getConsumptionSummary($dateFrom, $dateTo)
             'total_in' => 0,
             'net' => 0,
             'sub_totals' => []
+        ],
+        'packaging_damage' => [
+            'total' => 0,
+            'items' => [],
+            'logs' => []
         ]
     ];
     foreach ($rows as $row) {
@@ -239,6 +244,67 @@ function getConsumptionSummary($dateFrom, $dateTo)
     foreach ($summary['raw']['sub_totals'] as $key => $row) {
         $summary['raw']['sub_totals'][$key]['net'] = consumptionFormatNumber($row['total_out'] - $row['total_in']);
     }
+
+    // معالجة التلفيات في أدوات التعبئة
+    try {
+        $damageTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_damage_logs'");
+        if (!empty($damageTableCheck)) {
+            $damageLogs = $db->query(
+                "SELECT l.*, 
+                        COALESCE(l.material_name, pm.name, pr.name, CONCAT('أداة #', l.material_id)) AS material_label,
+                        u.full_name AS recorded_by_name
+                 FROM packaging_damage_logs l
+                 LEFT JOIN packaging_materials pm ON l.source_table = 'packaging_materials' AND pm.id = l.material_id
+                 LEFT JOIN products pr ON l.source_table = 'products' AND pr.id = l.material_id
+                 LEFT JOIN users u ON l.recorded_by = u.id
+                 WHERE DATE(l.created_at) BETWEEN ? AND ?
+                 ORDER BY l.created_at DESC",
+                [$from, $to]
+            );
+
+            $aggregated = [];
+            foreach ($damageLogs as $log) {
+                $key = $log['source_table'] . ':' . intval($log['material_id'] ?? 0);
+                if (!isset($aggregated[$key])) {
+                    $aggregated[$key] = [
+                        'material_id' => intval($log['material_id'] ?? 0),
+                        'source_table' => $log['source_table'] ?? 'packaging_materials',
+                        'name' => $log['material_label'] ?? ('أداة #' . ($log['material_id'] ?? '')),
+                        'unit' => $log['unit'] ?? 'وحدة',
+                        'total_damaged' => 0,
+                        'entries' => 0,
+                        'last_reason' => null,
+                        'last_recorded_at' => null,
+                        'last_recorded_by' => null
+                    ];
+                }
+                $aggregated[$key]['total_damaged'] += (float)($log['damaged_quantity'] ?? 0);
+                $aggregated[$key]['entries'] += 1;
+
+                $currentLast = $aggregated[$key]['last_recorded_at'];
+                if ($currentLast === null || strtotime($log['created_at']) > strtotime($currentLast)) {
+                    $aggregated[$key]['last_recorded_at'] = $log['created_at'];
+                    $aggregated[$key]['last_reason'] = $log['reason'] ?? null;
+                    $aggregated[$key]['last_recorded_by'] = $log['recorded_by_name'] ?? null;
+                }
+            }
+
+            foreach ($aggregated as $item) {
+                $item['total_damaged'] = consumptionFormatNumber($item['total_damaged']);
+                $summary['packaging_damage']['items'][] = $item;
+                $summary['packaging_damage']['total'] += $item['total_damaged'];
+            }
+
+            usort($summary['packaging_damage']['items'], function($a, $b) {
+                return $b['total_damaged'] <=> $a['total_damaged'];
+            });
+
+            $summary['packaging_damage']['logs'] = $damageLogs;
+        }
+    } catch (Exception $e) {
+        error_log('Consumption summary damage aggregation error: ' . $e->getMessage());
+    }
+
     return $summary;
 }
 

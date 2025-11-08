@@ -72,6 +72,34 @@ function renderConsumptionTable($items, $includeCategory = false)
     echo '</tbody></table></div>';
 }
 
+function renderPackagingDamageTable($items)
+{
+    if (empty($items)) {
+        echo '<div class="text-center text-muted py-4">لا توجد تسجيلات تالف في الفترة المحددة</div>';
+        return;
+    }
+    echo '<div class="table-responsive">';
+    echo '<table class="table table-hover align-middle">';
+    echo '<thead class="table-light"><tr>';
+    echo '<th>أداة التعبئة</th><th>الكمية التالفة</th><th>عدد السجلات</th><th>آخر سبب</th><th>آخر تسجيل</th>';
+    echo '</tr></thead><tbody>';
+    foreach ($items as $item) {
+        $lastRecordedAt = !empty($item['last_recorded_at']) ? date('Y-m-d H:i', strtotime($item['last_recorded_at'])) : '-';
+        $lastReason = $item['last_reason'] ? htmlspecialchars($item['last_reason']) : '-';
+        if (!empty($item['last_recorded_by'])) {
+            $lastReason .= '<br><small class="text-muted">بواسطة: ' . htmlspecialchars($item['last_recorded_by']) . '</small>';
+        }
+        echo '<tr>';
+        echo '<td>' . htmlspecialchars($item['name']) . '<br><small class="text-muted">' . htmlspecialchars($item['unit'] ?? 'وحدة') . '</small></td>';
+        echo '<td class="text-danger fw-semibold">' . number_format($item['total_damaged'], 3) . '</td>';
+        echo '<td>' . intval($item['entries']) . '</td>';
+        echo '<td>' . $lastReason . '</td>';
+        echo '<td><span class="badge bg-light text-dark">' . $lastRecordedAt . '</span></td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table></div>';
+}
+
 $csrfToken = generateCSRFToken();
 
 ?>
@@ -126,6 +154,7 @@ function renderSummaryCards($label, $summary)
     echo '<div class="col-md-3"><div class="border rounded-3 p-3 h-100"><div class="text-muted small mb-1">استهلاك المواد الخام</div><div class="fs-4 fw-semibold text-primary">' . number_format($summary['raw']['total_out'], 3) . '</div></div></div>';
     echo '<div class="col-md-3"><div class="border rounded-3 p-3 h-100"><div class="text-muted small mb-1">الصافي الكلي</div><div class="fs-4 fw-semibold text-success">' . number_format($summary['packaging']['net'] + $summary['raw']['net'], 3) . '</div></div></div>';
     echo '<div class="col-md-3"><div class="border rounded-3 p-3 h-100"><div class="text-muted small mb-1">إجمالي الحركات</div><div class="fs-4 fw-semibold text-secondary">' . number_format(array_sum(array_column($summary['packaging']['items'], 'movements')) + array_sum(array_column($summary['raw']['items'], 'movements'))) . '</div></div></div>';
+    echo '<div class="col-md-3"><div class="border rounded-3 p-3 h-100 border-danger-subtle bg-danger-subtle bg-opacity-10"><div class="text-muted small mb-1">التالف من أدوات التعبئة</div><div class="fs-4 fw-semibold text-danger">' . number_format($summary['packaging_damage']['total'], 3) . '</div></div></div>';
     echo '</div>';
     echo '</div></div>';
 }
@@ -141,7 +170,15 @@ renderSummaryCards('تقرير اليوم', $todaySummary);
         <?php renderConsumptionTable($todaySummary['packaging']['items']); ?>
     </div>
 </div>
-
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-exclamation-octagon me-2"></i>التالف من أدوات التعبئة اليوم</span>
+        <span class="badge bg-light text-dark">الإجمالي: <?php echo number_format($todaySummary['packaging_damage']['total'], 3); ?></span>
+    </div>
+    <div class="card-body">
+        <?php renderPackagingDamageTable($todaySummary['packaging_damage']['items']); ?>
+    </div>
+</div>
 <div class="card mb-5 shadow-sm">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
         <span><i class="bi bi-droplet-half me-2"></i>المواد الخام المستهلكة اليوم</span>
@@ -163,7 +200,15 @@ renderSummaryCards('تقرير الشهر الحالي', $monthSummary);
         <?php renderConsumptionTable($monthSummary['packaging']['items']); ?>
     </div>
 </div>
-
+<div class="card mb-4 shadow-sm">
+    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-exclamation-octagon me-2"></i>التالف من أدوات التعبئة للشهر الحالي</span>
+        <span class="badge bg-light text-dark">الإجمالي: <?php echo number_format($monthSummary['packaging_damage']['total'], 3); ?></span>
+    </div>
+    <div class="card-body">
+        <?php renderPackagingDamageTable($monthSummary['packaging_damage']['items']); ?>
+    </div>
+</div>
 <div class="card shadow-sm">
     <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
         <span><i class="bi bi-droplet-half me-2"></i>المواد الخام للشهر الحالي</span>

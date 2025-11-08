@@ -568,6 +568,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sectionRedirect = $_POST['redirect_section'] ?? $materialCategory;
             
             $validCategories = ['honey', 'olive_oil', 'beeswax', 'derivatives', 'nuts'];
+            if (!in_array($sectionRedirect, $validCategories, true)) {
+                $sectionRedirect = $materialCategory;
+            }
             if (!in_array($materialCategory, $validCategories, true)) {
                 $error = 'نوع المادة غير صالح';
             } elseif ($stockId <= 0) {
@@ -1472,11 +1475,18 @@ if ($section === 'honey') {
                                     <td class="text-center"><strong class="text-warning"><?php echo number_format($stock['raw_honey_quantity'], 2); ?></strong> كجم</td>
                                     <td class="text-center"><strong class="text-success"><?php echo number_format($stock['filtered_honey_quantity'], 2); ?></strong> كجم</td>
                                     <td class="text-center">
-                                        <button class="btn btn-sm btn-warning" 
-                                                onclick="filterHoney(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety']); ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
-                                                <?php echo $stock['raw_honey_quantity'] <= 0 ? 'disabled' : ''; ?>>
-                                            <i class="bi bi-funnel"></i> تصفية
-                                        </button>
+                                        <div class="btn-group-vertical btn-group-sm" role="group">
+                                            <button class="btn btn-warning btn-sm mb-1" 
+                                                    onclick="filterHoney(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety']); ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
+                                                    <?php echo $stock['raw_honey_quantity'] <= 0 ? 'disabled' : ''; ?>>
+                                                <i class="bi bi-funnel"></i> تصفية
+                                            </button>
+                                            <button class="btn btn-danger btn-sm"
+                                                    onclick="openHoneyDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety']); ?>', <?php echo $stock['raw_honey_quantity']; ?>, <?php echo $stock['filtered_honey_quantity']; ?>)"
+                                                    <?php echo ($stock['raw_honey_quantity'] <= 0 && $stock['filtered_honey_quantity'] <= 0) ? 'disabled' : ''; ?>>
+                                                <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
+                                            </button>
+                                        </div>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -1590,7 +1600,61 @@ if ($section === 'honey') {
         </div>
     </div>
     
+<!-- Modal تسجيل تالف للعسل -->
+<div class="modal fade" id="damageHoneyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>تسجيل تالف للعسل</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="record_damage">
+                <input type="hidden" name="material_category" value="honey">
+                <input type="hidden" name="redirect_section" value="honey">
+                <input type="hidden" name="stock_id" id="damage_honey_stock_id">
+                <input type="hidden" name="damage_unit" value="كجم">
+                <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="damage_honey_supplier" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">نوع العسل</label>
+                        <input type="text" class="form-control" id="damage_honey_variety" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">حالة العسل</label>
+                        <select class="form-select" name="honey_type" id="damage_honey_type">
+                            <option value="raw">عسل خام</option>
+                            <option value="filtered">عسل مصفى</option>
+                        </select>
+                        <small class="text-muted d-block mt-1">الكمية المتاحة: <span id="damage_honey_available">0.000 كجم</span></small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية التالفة (كجم)</label>
+                        <input type="number" class="form-control" name="damage_quantity" id="damage_honey_quantity" step="0.001" min="0.001" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">سبب التلف <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="damage_reason" id="damage_honey_reason" rows="3" placeholder="اكتب سبب التلف بالتفصيل" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-danger" id="damage_honey_submit">
+                        <i class="bi bi-check-circle me-1"></i>تسجيل
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
     <script>
+    let honeyDamageMax = { raw: 0, filtered: 0 };
+
     function filterHoney(id, supplier, variety, available) {
         document.getElementById('filter_stock_id').value = id;
         document.getElementById('filter_supplier').value = supplier;
@@ -1598,6 +1662,62 @@ if ($section === 'honey') {
         document.getElementById('filter_available').value = parseFloat(available).toFixed(2) + ' كجم';
         new bootstrap.Modal(document.getElementById('filterHoneyModal')).show();
     }
+
+    function openHoneyDamageModal(id, supplier, variety, rawQty, filteredQty) {
+        honeyDamageMax.raw = parseFloat(rawQty) || 0;
+        honeyDamageMax.filtered = parseFloat(filteredQty) || 0;
+
+        document.getElementById('damage_honey_stock_id').value = id;
+        document.getElementById('damage_honey_supplier').value = supplier;
+        document.getElementById('damage_honey_variety').value = variety;
+        document.getElementById('damage_honey_reason').value = '';
+        document.getElementById('damage_honey_quantity').value = '';
+
+        const typeSelect = document.getElementById('damage_honey_type');
+        const rawOption = typeSelect.querySelector('option[value="raw"]');
+        const filteredOption = typeSelect.querySelector('option[value="filtered"]');
+
+        rawOption.disabled = honeyDamageMax.raw <= 0;
+        filteredOption.disabled = honeyDamageMax.filtered <= 0;
+
+        if (!rawOption.disabled) {
+            typeSelect.value = 'raw';
+        } else if (!filteredOption.disabled) {
+            typeSelect.value = 'filtered';
+        } else {
+            typeSelect.value = '';
+        }
+
+        updateHoneyDamageAvailable();
+        new bootstrap.Modal(document.getElementById('damageHoneyModal')).show();
+    }
+
+    function updateHoneyDamageAvailable() {
+        const typeSelect = document.getElementById('damage_honey_type');
+        const quantityInput = document.getElementById('damage_honey_quantity');
+        const availableLabel = document.getElementById('damage_honey_available');
+        const submitButton = document.getElementById('damage_honey_submit');
+
+        let max = 0;
+        if (typeSelect.value === 'raw') {
+            max = honeyDamageMax.raw;
+        } else if (typeSelect.value === 'filtered') {
+            max = honeyDamageMax.filtered;
+        }
+
+        availableLabel.textContent = max.toFixed(3) + ' كجم';
+        if (max > 0) {
+            quantityInput.max = max.toFixed(3);
+            quantityInput.disabled = false;
+            submitButton.disabled = false;
+        } else {
+            quantityInput.value = '';
+            quantityInput.disabled = true;
+            submitButton.disabled = true;
+        }
+    }
+
+    document.getElementById('damage_honey_type')?.addEventListener('change', updateHoneyDamageAvailable);
     </script>
     
     <?php
@@ -1672,6 +1792,7 @@ if ($section === 'honey') {
                                     <tr>
                                         <th>المورد</th>
                                         <th class="text-center">الكمية (لتر)</th>
+                                        <th class="text-center">الإجراءات</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1684,6 +1805,13 @@ if ($section === 'honey') {
                                                 <?php endif; ?>
                                             </td>
                                             <td class="text-center"><strong class="text-success"><?php echo number_format($stock['quantity'], 2); ?></strong></td>
+                                            <td class="text-center">
+                                                <button class="btn btn-sm btn-danger"
+                                                        onclick="openOliveOilDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', <?php echo $stock['quantity']; ?>)"
+                                                        <?php echo $stock['quantity'] <= 0 ? 'disabled' : ''; ?>>
+                                                    <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
+                                                </button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -1730,6 +1858,66 @@ if ($section === 'honey') {
         </div>
     </div>
     
+<!-- Modal تسجيل تالف زيت الزيتون -->
+<div class="modal fade" id="damageOliveOilModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-octagon me-2"></i>تسجيل تالف زيت الزيتون</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="record_damage">
+                <input type="hidden" name="material_category" value="olive_oil">
+                <input type="hidden" name="redirect_section" value="olive_oil">
+                <input type="hidden" name="stock_id" id="damage_oil_stock_id">
+                <input type="hidden" name="damage_unit" value="لتر">
+                <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="damage_oil_supplier" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية المتاحة</label>
+                        <input type="text" class="form-control" id="damage_oil_available" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية التالفة (لتر)</label>
+                        <input type="number" class="form-control" name="damage_quantity" id="damage_oil_quantity" step="0.01" min="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">سبب التلف <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="damage_reason" id="damage_oil_reason" rows="3" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-danger" id="damage_oil_submit">
+                        <i class="bi bi-check-circle me-1"></i>تسجيل
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openOliveOilDamageModal(id, supplier, quantity) {
+        const qty = parseFloat(quantity) || 0;
+        document.getElementById('damage_oil_stock_id').value = id;
+        document.getElementById('damage_oil_supplier').value = supplier;
+        document.getElementById('damage_oil_available').value = qty.toFixed(2) + ' لتر';
+        const qtyInput = document.getElementById('damage_oil_quantity');
+        qtyInput.value = '';
+        qtyInput.max = qty > 0 ? qty.toFixed(2) : null;
+        qtyInput.disabled = qty <= 0;
+        document.getElementById('damage_oil_reason').value = '';
+        document.getElementById('damage_oil_submit').disabled = qty <= 0;
+        new bootstrap.Modal(document.getElementById('damageOliveOilModal')).show();
+    }
+</script>
+
     <?php
 } elseif ($section === 'beeswax') {
     // جلب موردي شمع العسل
@@ -1802,6 +1990,7 @@ if ($section === 'honey') {
                                     <tr>
                                         <th>المورد</th>
                                         <th class="text-center">الوزن (كجم)</th>
+                                        <th class="text-center">الإجراءات</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1814,6 +2003,13 @@ if ($section === 'honey') {
                                                 <?php endif; ?>
                                             </td>
                                             <td class="text-center"><strong class="text-warning"><?php echo number_format($stock['weight'], 2); ?></strong></td>
+                                            <td class="text-center">
+                                                <button class="btn btn-sm btn-danger"
+                                                        onclick="openBeeswaxDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', <?php echo $stock['weight']; ?>)"
+                                                        <?php echo $stock['weight'] <= 0 ? 'disabled' : ''; ?>>
+                                                    <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
+                                                </button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -1860,6 +2056,66 @@ if ($section === 'honey') {
         </div>
     </div>
     
+<!-- Modal تسجيل تالف شمع العسل -->
+<div class="modal fade" id="damageBeeswaxModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-square me-2"></i>تسجيل تالف شمع العسل</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="record_damage">
+                <input type="hidden" name="material_category" value="beeswax">
+                <input type="hidden" name="redirect_section" value="beeswax">
+                <input type="hidden" name="stock_id" id="damage_wax_stock_id">
+                <input type="hidden" name="damage_unit" value="كجم">
+                <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="damage_wax_supplier" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية المتاحة</label>
+                        <input type="text" class="form-control" id="damage_wax_available" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية التالفة (كجم)</label>
+                        <input type="number" class="form-control" name="damage_quantity" id="damage_wax_quantity" step="0.01" min="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">سبب التلف <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="damage_reason" id="damage_wax_reason" rows="3" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-danger" id="damage_wax_submit">
+                        <i class="bi bi-check-circle me-1"></i>تسجيل
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openBeeswaxDamageModal(id, supplier, quantity) {
+        const qty = parseFloat(quantity) || 0;
+        document.getElementById('damage_wax_stock_id').value = id;
+        document.getElementById('damage_wax_supplier').value = supplier;
+        document.getElementById('damage_wax_available').value = qty.toFixed(2) + ' كجم';
+        const qtyInput = document.getElementById('damage_wax_quantity');
+        qtyInput.value = '';
+        qtyInput.max = qty > 0 ? qty.toFixed(2) : null;
+        qtyInput.disabled = qty <= 0;
+        document.getElementById('damage_wax_reason').value = '';
+        document.getElementById('damage_wax_submit').disabled = qty <= 0;
+        new bootstrap.Modal(document.getElementById('damageBeeswaxModal')).show();
+    }
+</script>
+
     <?php
 } elseif ($section === 'derivatives') {
     // جلب موردي المشتقات
@@ -1949,6 +2205,7 @@ if ($section === 'honey') {
                                         <th>النوع</th>
                                         <th>المورد</th>
                                         <th class="text-center">الوزن (كجم)</th>
+                                        <th class="text-center">الإجراءات</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1962,6 +2219,13 @@ if ($section === 'honey') {
                                                 <?php endif; ?>
                                             </td>
                                             <td class="text-center"><strong class="text-info"><?php echo number_format($stock['weight'], 2); ?></strong></td>
+                                            <td class="text-center">
+                                                <button class="btn btn-sm btn-danger"
+                                                        onclick="openDerivativeDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['derivative_type']); ?>', <?php echo $stock['weight']; ?>)"
+                                                        <?php echo $stock['weight'] <= 0 ? 'disabled' : ''; ?>>
+                                                    <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
+                                                </button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -2012,6 +2276,71 @@ if ($section === 'honey') {
         </div>
     </div>
     
+<!-- Modal تسجيل تالف للمشتقات -->
+<div class="modal fade" id="damageDerivativeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-diamond me-2"></i>تسجيل تالف للمشتقات</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="record_damage">
+                <input type="hidden" name="material_category" value="derivatives">
+                <input type="hidden" name="redirect_section" value="derivatives">
+                <input type="hidden" name="stock_id" id="damage_derivative_stock_id">
+                <input type="hidden" name="damage_unit" value="كجم">
+                <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="damage_derivative_supplier" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">نوع المشتق</label>
+                        <input type="text" class="form-control" id="damage_derivative_type" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية المتاحة</label>
+                        <input type="text" class="form-control" id="damage_derivative_available" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية التالفة (كجم)</label>
+                        <input type="number" class="form-control" name="damage_quantity" id="damage_derivative_quantity" step="0.01" min="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">سبب التلف <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="damage_reason" id="damage_derivative_reason" rows="3" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-danger" id="damage_derivative_submit">
+                        <i class="bi bi-check-circle me-1"></i>تسجيل
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openDerivativeDamageModal(id, supplier, derivativeType, quantity) {
+        const qty = parseFloat(quantity) || 0;
+        document.getElementById('damage_derivative_stock_id').value = id;
+        document.getElementById('damage_derivative_supplier').value = supplier;
+        document.getElementById('damage_derivative_type').value = derivativeType;
+        document.getElementById('damage_derivative_available').value = qty.toFixed(2) + ' كجم';
+        const qtyInput = document.getElementById('damage_derivative_quantity');
+        qtyInput.value = '';
+        qtyInput.max = qty > 0 ? qty.toFixed(2) : null;
+        qtyInput.disabled = qty <= 0;
+        document.getElementById('damage_derivative_reason').value = '';
+        document.getElementById('damage_derivative_submit').disabled = qty <= 0;
+        new bootstrap.Modal(document.getElementById('damageDerivativeModal')).show();
+    }
+</script>
+
     <?php
 } elseif ($section === 'nuts') {
     // جلب موردي المكسرات (جميع الموردين النشطين)
@@ -2106,6 +2435,7 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
                                         <th>النوع</th>
                                         <th>المورد</th>
                                         <th class="text-center">الكمية (كجم)</th>
+                                        <th class="text-center">الإجراءات</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -2119,6 +2449,13 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
                                                 <?php endif; ?>
                                             </td>
                                             <td class="text-center"><strong style="color: #8b6f47;"><?php echo number_format($stock['quantity'], 3); ?></strong></td>
+                                            <td class="text-center">
+                                                <button class="btn btn-sm btn-danger"
+                                                        onclick="openNutsDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['nut_type']); ?>', <?php echo $stock['quantity']; ?>)"
+                                                        <?php echo $stock['quantity'] <= 0 ? 'disabled' : ''; ?>>
+                                                    <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
+                                                </button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -2129,6 +2466,71 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
             </div>
         </div>
         
+<!-- Modal تسجيل تالف للمكسرات المنفردة -->
+<div class="modal fade" id="damageNutsModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="bi bi-exclamation-diamond me-2"></i>تسجيل تالف للمكسرات</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="record_damage">
+                <input type="hidden" name="material_category" value="nuts">
+                <input type="hidden" name="redirect_section" value="nuts">
+                <input type="hidden" name="stock_id" id="damage_nuts_stock_id">
+                <input type="hidden" name="damage_unit" value="كجم">
+                <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="damage_nuts_supplier" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">نوع المكسرات</label>
+                        <input type="text" class="form-control" id="damage_nuts_type" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية المتاحة</label>
+                        <input type="text" class="form-control" id="damage_nuts_available" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية التالفة (كجم)</label>
+                        <input type="number" class="form-control" name="damage_quantity" id="damage_nuts_quantity" step="0.001" min="0.001" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">سبب التلف <span class="text-danger">*</span></label>
+                        <textarea class="form-control" name="damage_reason" id="damage_nuts_reason" rows="3" required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-danger" id="damage_nuts_submit">
+                        <i class="bi bi-check-circle me-1"></i>تسجيل
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function openNutsDamageModal(id, supplier, nutType, quantity) {
+        const qty = parseFloat(quantity) || 0;
+        document.getElementById('damage_nuts_stock_id').value = id;
+        document.getElementById('damage_nuts_supplier').value = supplier;
+        document.getElementById('damage_nuts_type').value = nutType;
+        document.getElementById('damage_nuts_available').value = qty.toFixed(3) + ' كجم';
+        const qtyInput = document.getElementById('damage_nuts_quantity');
+        qtyInput.value = '';
+        qtyInput.max = qty > 0 ? qty.toFixed(3) : null;
+        qtyInput.disabled = qty <= 0;
+        document.getElementById('damage_nuts_reason').value = '';
+        document.getElementById('damage_nuts_submit').disabled = qty <= 0;
+        new bootstrap.Modal(document.getElementById('damageNutsModal')).show();
+    }
+</script>
+
         <!-- المكسرات المشكلة -->
         <div class="col-lg-6 mb-4">
             <div class="card shadow-sm">
