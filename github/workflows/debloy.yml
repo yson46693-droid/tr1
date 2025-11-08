@@ -3,54 +3,47 @@ name: Deploy to InfinityFree
 on:
   push:
     branches: ["main"]
-  workflow_dispatch: # يسمح بالتشغيل اليدوي
+  workflow_dispatch: # للرفع اليدوي
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # حد زمني للعملية
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # جلب جميع الـ commits للمقارنة
 
-      - name: Upload via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v4
+      - name: Upload via FTP (Incremental)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.3
         with:
           server: ftpupload.net
           username: if0_40239608
           password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: /htdocs/
+          server-dir: /htdocs/v1/
           local-dir: ./
+          # الخيارات لرفع التعديلات فقط (افتراضي)
+          dry-run: false
+          # استبعاد الملفات غير الضرورية
           exclude: |
             **/.git*
             **/.git*/**
-            **/.github/**
-            **/.cursor/**
             **/node_modules/**
-            **/.DS_Store
-            **/Thumbs.db
             **/.env
-            **/.env.local
-            **/.env.*.local
+            **/.env.*
             **/README.md
-            **/README*.md
-            **/INSTALLATION_GUIDE.md
-            **/QUICK_START.md
-            **/NEXT_STEPS.md
-            **/LOGIN_CREDENTIALS.md
-            **/github/**
+            **/.github/**
             **/.vscode/**
             **/.idea/**
-            **/backups/**
-            # Exclude PWA reader assets from deployment per request
-            reader/**
-            v1/reader/**
             **/*.log
-            **/composer.json
-            **/composer.lock
-            **/package.json
-            **/package-lock.json
-            **/start-localhost.bat
-            **/.htaccess.backup
-            **/uploads/.htaccess
-          log-level: verbose
+            **/backups/**
+            **/temp/**
+            **/tmp/**
+            git-push.*
+            quick-push.*
+            .gitignore
+            .editorconfig
+            .DS_Store
+            Thumbs.db
