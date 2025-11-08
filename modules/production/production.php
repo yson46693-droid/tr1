@@ -2266,7 +2266,7 @@ $lang = isset($translations) ? $translations : [];
 
 <!-- Modal إنشاء إنتاج من قالب -->
 <div class="modal fade" id="createFromTemplateModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable production-template-dialog">
+    <div class="modal-dialog modal-xl production-template-dialog">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title"><i class="bi bi-file-earmark-text me-2"></i>إنشاء تشغيلة إنتاج</h5>
@@ -2568,14 +2568,17 @@ $lang = isset($translations) ? $translations : [];
 <style>
 /* ⚙️ تحسين عرض نموذج إنشاء التشغيلة */
 .production-template-dialog {
-    max-width: 820px;
-    margin: 1.25rem auto;
+    width: min(960px, 94vw);
+    height: calc(100vh - 2rem);
+    margin: 1rem auto;
+    display: flex;
+    flex-direction: column;
 }
 
 .production-template-dialog .modal-content {
     border-radius: 16px;
     box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
-    max-height: calc(100vh - 32px);
+    height: 100%;
     display: flex;
     flex-direction: column;
 }
@@ -2583,6 +2586,7 @@ $lang = isset($translations) ? $translations : [];
 .production-template-dialog .modal-header,
 .production-template-dialog .modal-footer {
     padding: 0.75rem 1.25rem;
+    flex-shrink: 0;
 }
 
 .production-template-body {
@@ -2591,8 +2595,17 @@ $lang = isset($translations) ? $translations : [];
     overflow-y: auto;
 }
 
-.production-template-dialog.modal-dialog-scrollable .modal-body {
-    max-height: none;
+@media (max-width: 991.98px) {
+    .production-template-dialog {
+        width: 100%;
+        height: 100vh;
+        margin: 0;
+        border-radius: 0;
+    }
+
+    .production-template-dialog .modal-content {
+        border-radius: 0;
+    }
 }
 
 .production-template-body .section-block {
@@ -3254,6 +3267,7 @@ function renderTemplateSuppliers(details) {
 
             select.addEventListener('change', function() {
                 honeyInput.dataset.defaultApplied = '';
+                honeyInput.dataset.defaultValue = '';
                 populateHoneyVarietyOptions(honeyInput, datalist, this.value, component);
             });
 
@@ -3448,6 +3462,13 @@ document.getElementById('createFromTemplateForm')?.addEventListener('submit', fu
         alert('يرجى إدخال كمية صحيحة أكبر من الصفر');
         document.querySelector('input[name="quantity"]').focus();
         return false;
+    }
+});
+
+document.getElementById('createFromTemplateModal')?.addEventListener('shown.bs.modal', function() {
+    const modalBody = document.querySelector('#createFromTemplateModal .production-template-body');
+    if (modalBody) {
+        modalBody.scrollTop = 0;
     }
 });
 
