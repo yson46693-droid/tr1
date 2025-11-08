@@ -323,62 +323,108 @@ function renderSummaryCards($label, $summary)
     echo '</div></div>';
 }
 
-renderSummaryCards('تقرير اليوم', $todaySummary);
+$availablePeriods = ['current_month', 'previous_month', 'day'];
+$selectedPeriod = $_GET['period'] ?? 'current_month';
+if (!in_array($selectedPeriod, $availablePeriods, true)) {
+    $selectedPeriod = 'current_month';
+}
+
+$selectedDateInput = $_GET['date'] ?? $today;
+$dateObject = DateTime::createFromFormat('Y-m-d', $selectedDateInput);
+if (!$dateObject) {
+    $dateObject = new DateTime($today);
+}
+$selectedDateValue = $dateObject->format('Y-m-d');
+
+switch ($selectedPeriod) {
+    case 'previous_month':
+        $prevStart = new DateTime('first day of last month');
+        $prevEnd = new DateTime('last day of last month');
+        $rangeStart = $prevStart->format('Y-m-d');
+        $rangeEnd = $prevEnd->format('Y-m-d');
+        $rangeLabel = 'الشهر السابق';
+        break;
+    case 'day':
+        $rangeStart = $selectedDateValue;
+        $rangeEnd = $selectedDateValue;
+        $rangeLabel = 'اليوم (' . $selectedDateValue . ')';
+        break;
+    case 'current_month':
+    default:
+        $rangeStart = date('Y-m-01');
+        $rangeEnd = $today;
+        $rangeLabel = 'الشهر الحالي';
+        break;
+}
+
+$rangeDisplay = $rangeStart === $rangeEnd
+    ? $rangeStart
+    : $rangeStart . ' — ' . $rangeEnd;
+
+$selectedSummary = getConsumptionSummary($rangeStart, $rangeEnd);
+$combinedData = buildCombinedReportRows($selectedSummary);
+$combinedRows = $combinedData['rows'];
+$combinedTotals = $combinedData['totals'];
+$recordsCount = count($combinedRows);
 ?>
 
 <div class="card mb-4 shadow-sm">
-    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة المستهلكة اليوم</span>
-    </div>
     <div class="card-body">
-        <?php renderConsumptionTable($todaySummary['packaging']['items']); ?>
-    </div>
-</div>
-<div class="card mb-4 shadow-sm">
-    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-exclamation-octagon me-2"></i>التالف من أدوات التعبئة اليوم</span>
-        <span class="badge bg-light text-dark">الإجمالي: <?php echo number_format($todaySummary['packaging_damage']['total'], 3); ?></span>
-    </div>
-    <div class="card-body">
-        <?php renderPackagingDamageTable($todaySummary['packaging_damage']['items']); ?>
-    </div>
-</div>
-<div class="card mb-5 shadow-sm">
-    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-droplet-half me-2"></i>المواد الخام المستهلكة اليوم</span>
-    </div>
-    <div class="card-body">
-        <?php renderConsumptionTable($todaySummary['raw']['items'], true); ?>
+        <form method="get" class="row g-3 align-items-end">
+            <input type="hidden" name="page" value="production_reports">
+            <div class="col-md-4">
+                <label class="form-label">الفترة</label>
+                <select class="form-select" id="reportPeriod" name="period">
+                    <option value="current_month" <?php echo $selectedPeriod === 'current_month' ? 'selected' : ''; ?>>الشهر الحالي</option>
+                    <option value="previous_month" <?php echo $selectedPeriod === 'previous_month' ? 'selected' : ''; ?>>الشهر السابق</option>
+                    <option value="day" <?php echo $selectedPeriod === 'day' ? 'selected' : ''; ?>>يوم محدد</option>
+                </select>
+            </div>
+            <div class="col-md-4 <?php echo $selectedPeriod === 'day' ? '' : 'd-none'; ?>" id="dayFilterField">
+                <label class="form-label">اختر اليوم</label>
+                <input type="date" class="form-control" name="date" value="<?php echo htmlspecialchars($selectedDateValue); ?>">
+            </div>
+            <div class="col-md-4 col-lg-3">
+                <label class="form-label">&nbsp;</label>
+                <button class="btn btn-secondary w-100">
+                    <i class="bi bi-filter-circle me-1"></i>تطبيق الفلتر
+                </button>
+            </div>
+        </form>
+        <div class="mt-3 text-muted small">
+            <i class="bi bi-calendar-range me-1"></i>الفترة المختارة: <?php echo htmlspecialchars($rangeDisplay); ?>
+        </div>
     </div>
 </div>
 
-<?php
-renderSummaryCards('تقرير الشهر الحالي', $monthSummary);
-?>
+<?php renderSummaryCards('ملخص ' . $rangeLabel, $selectedSummary); ?>
 
-<div class="card mb-4 shadow-sm">
-    <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة للشهر الحالي</span>
-    </div>
-    <div class="card-body">
-        <?php renderConsumptionTable($monthSummary['packaging']['items']); ?>
-    </div>
-</div>
-<div class="card mb-4 shadow-sm">
-    <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-exclamation-octagon me-2"></i>التالف من أدوات التعبئة للشهر الحالي</span>
-        <span class="badge bg-light text-dark">الإجمالي: <?php echo number_format($monthSummary['packaging_damage']['total'], 3); ?></span>
-    </div>
-    <div class="card-body">
-        <?php renderPackagingDamageTable($monthSummary['packaging_damage']['items']); ?>
-    </div>
-</div>
 <div class="card shadow-sm">
     <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-droplet-half me-2"></i>المواد الخام للشهر الحالي</span>
+        <span><i class="bi bi-table me-2"></i>الجدول الموحد للفترة: <?php echo htmlspecialchars($rangeLabel); ?></span>
+        <span class="badge bg-primary-subtle text-primary">عدد السجلات: <?php echo number_format($recordsCount); ?></span>
     </div>
     <div class="card-body">
-        <?php renderConsumptionTable($monthSummary['raw']['items'], true); ?>
+        <?php renderCombinedReportTable($combinedRows, $combinedTotals); ?>
     </div>
 </div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const periodSelect = document.getElementById('reportPeriod');
+        const dayField = document.getElementById('dayFilterField');
+        if (!periodSelect || !dayField) {
+            return;
+        }
+        const toggleDayField = () => {
+            if (periodSelect.value === 'day') {
+                dayField.classList.remove('d-none');
+            } else {
+                dayField.classList.add('d-none');
+            }
+        };
+        periodSelect.addEventListener('change', toggleDayField);
+        toggleDayField();
+    });
+</script>
 

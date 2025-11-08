@@ -477,7 +477,7 @@ function formatFileSize($bytes) {
     }
 }
 
-function formatInsertRow(mysqli $connection, array $columns, array $row): string {
+function formatInsertRow(\mysqli $connection, array $columns, array $row): string {
     $values = [];
 
     foreach ($columns as $column) {

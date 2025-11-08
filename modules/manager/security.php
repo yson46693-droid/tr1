@@ -716,6 +716,7 @@ $activeTab = $_GET['tab'] ?? 'security';
                                                 $isOverThreshold = $usageThresholdUser && $totalRequests >= $usageThresholdUser;
                                                 $userId = intval($usage['user_id']);
                                                 $detailUrlParams = [
+                                                    'page' => 'security',
                                                     'tab' => 'usage',
                                                     'usage_date' => $usageDate,
                                                     'usage_limit' => $usageLimit,
@@ -874,6 +875,7 @@ $activeTab = $_GET['tab'] ?? 'security';
                                                 $actionHtml = '-';
                                                 if ($isUserAlert) {
                                                     $alertUrl = '?' . http_build_query([
+                                                        'page' => 'security',
                                                         'tab' => 'usage',
                                                         'usage_date' => $usageDate,
                                                         'usage_limit' => $usageLimit,
