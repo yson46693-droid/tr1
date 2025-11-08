@@ -51,7 +51,6 @@ function processDailyPackagingAlert(): void {
     if ($processed) {
         return;
     }
-    $processed = true;
 
     if (!function_exists('isLoggedIn') || !isLoggedIn()) {
         return;
@@ -60,6 +59,8 @@ function processDailyPackagingAlert(): void {
     if (!isTelegramConfigured()) {
         return;
     }
+
+    $processed = true;
 
     packagingAlertEnsureJobTable();
 

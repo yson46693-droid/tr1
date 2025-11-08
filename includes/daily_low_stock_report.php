@@ -140,7 +140,8 @@ function dailyLowStockNormalizePdfText(string $text): string
 {
     $text = str_replace(["\r\n", "\r"], "\n", $text);
     $text = preg_replace('/\s+/', ' ', $text);
-    return trim($text);
+    $text = trim($text);
+    return dailyLowStockShapeArabic($text);
 }
 
 function dailyLowStockUtf16beText(string $text, bool $withBom = false): string
@@ -149,6 +150,103 @@ function dailyLowStockUtf16beText(string $text, bool $withBom = false): string
     $directional = "\u{202B}" . $text . "\u{202C}";
     $result .= mb_convert_encoding($directional, 'UTF-16BE', 'UTF-8');
     return $result;
+}
+
+function dailyLowStockShapeArabic(string $text): string
+{
+    static $map = null;
+    if ($map === null) {
+        $map = [
+            "\u{0621}" => ['iso' => "\u{FE80}", 'fin' => "\u{FE80}", 'ini' => null, 'med' => null, 'join_prev' => false, 'join_next' => false],
+            "\u{0622}" => ['iso' => "\u{FE81}", 'fin' => "\u{FE82}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0623}" => ['iso' => "\u{FE83}", 'fin' => "\u{FE84}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0624}" => ['iso' => "\u{FE85}", 'fin' => "\u{FE86}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0625}" => ['iso' => "\u{FE87}", 'fin' => "\u{FE88}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0626}" => ['iso' => "\u{FE89}", 'fin' => "\u{FE8A}", 'ini' => "\u{FE8B}", 'med' => "\u{FE8C}", 'join_prev' => true, 'join_next' => true],
+            "\u{0627}" => ['iso' => "\u{FE8D}", 'fin' => "\u{FE8E}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0628}" => ['iso' => "\u{FE8F}", 'fin' => "\u{FE90}", 'ini' => "\u{FE91}", 'med' => "\u{FE92}", 'join_prev' => true, 'join_next' => true],
+            "\u{0629}" => ['iso' => "\u{FE93}", 'fin' => "\u{FE94}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{062A}" => ['iso' => "\u{FE95}", 'fin' => "\u{FE96}", 'ini' => "\u{FE97}", 'med' => "\u{FE98}", 'join_prev' => true, 'join_next' => true],
+            "\u{062B}" => ['iso' => "\u{FE99}", 'fin' => "\u{FE9A}", 'ini' => "\u{FE9B}", 'med' => "\u{FE9C}", 'join_prev' => true, 'join_next' => true],
+            "\u{062C}" => ['iso' => "\u{FE9D}", 'fin' => "\u{FE9E}", 'ini' => "\u{FE9F}", 'med' => "\u{FEA0}", 'join_prev' => true, 'join_next' => true],
+            "\u{062D}" => ['iso' => "\u{FEA1}", 'fin' => "\u{FEA2}", 'ini' => "\u{FEA3}", 'med' => "\u{FEA4}", 'join_prev' => true, 'join_next' => true],
+            "\u{062E}" => ['iso' => "\u{FEA5}", 'fin' => "\u{FEA6}", 'ini' => "\u{FEA7}", 'med' => "\u{FEA8}", 'join_prev' => true, 'join_next' => true],
+            "\u{062F}" => ['iso' => "\u{FEA9}", 'fin' => "\u{FEAA}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0630}" => ['iso' => "\u{FEAB}", 'fin' => "\u{FEAC}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0631}" => ['iso' => "\u{FEAD}", 'fin' => "\u{FEAE}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0632}" => ['iso' => "\u{FEAF}", 'fin' => "\u{FEB0}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0633}" => ['iso' => "\u{FEB1}", 'fin' => "\u{FEB2}", 'ini' => "\u{FEB3}", 'med' => "\u{FEB4}", 'join_prev' => true, 'join_next' => true],
+            "\u{0634}" => ['iso' => "\u{FEB5}", 'fin' => "\u{FEB6}", 'ini' => "\u{FEB7}", 'med' => "\u{FEB8}", 'join_prev' => true, 'join_next' => true],
+            "\u{0635}" => ['iso' => "\u{FEB9}", 'fin' => "\u{FEBA}", 'ini' => "\u{FEBB}", 'med' => "\u{FEBC}", 'join_prev' => true, 'join_next' => true],
+            "\u{0636}" => ['iso' => "\u{FEBD}", 'fin' => "\u{FEBE}", 'ini' => "\u{FEBF}", 'med' => "\u{FEC0}", 'join_prev' => true, 'join_next' => true],
+            "\u{0637}" => ['iso' => "\u{FEC1}", 'fin' => "\u{FEC2}", 'ini' => "\u{FEC3}", 'med' => "\u{FEC4}", 'join_prev' => true, 'join_next' => true],
+            "\u{0638}" => ['iso' => "\u{FEC5}", 'fin' => "\u{FEC6}", 'ini' => "\u{FEC7}", 'med' => "\u{FEC8}", 'join_prev' => true, 'join_next' => true],
+            "\u{0639}" => ['iso' => "\u{FEC9}", 'fin' => "\u{FECA}", 'ini' => "\u{FECB}", 'med' => "\u{FECC}", 'join_prev' => true, 'join_next' => true],
+            "\u{063A}" => ['iso' => "\u{FECD}", 'fin' => "\u{FECE}", 'ini' => "\u{FECF}", 'med' => "\u{FED0}", 'join_prev' => true, 'join_next' => true],
+            "\u{0641}" => ['iso' => "\u{FED1}", 'fin' => "\u{FED2}", 'ini' => "\u{FED3}", 'med' => "\u{FED4}", 'join_prev' => true, 'join_next' => true],
+            "\u{0642}" => ['iso' => "\u{FED5}", 'fin' => "\u{FED6}", 'ini' => "\u{FED7}", 'med' => "\u{FED8}", 'join_prev' => true, 'join_next' => true],
+            "\u{0643}" => ['iso' => "\u{FED9}", 'fin' => "\u{FEDA}", 'ini' => "\u{FEDB}", 'med' => "\u{FEDC}", 'join_prev' => true, 'join_next' => true],
+            "\u{0644}" => ['iso' => "\u{FEDD}", 'fin' => "\u{FEDE}", 'ini' => "\u{FEDF}", 'med' => "\u{FEE0}", 'join_prev' => true, 'join_next' => true],
+            "\u{0645}" => ['iso' => "\u{FEE1}", 'fin' => "\u{FEE2}", 'ini' => "\u{FEE3}", 'med' => "\u{FEE4}", 'join_prev' => true, 'join_next' => true],
+            "\u{0646}" => ['iso' => "\u{FEE5}", 'fin' => "\u{FEE6}", 'ini' => "\u{FEE7}", 'med' => "\u{FEE8}", 'join_prev' => true, 'join_next' => true],
+            "\u{0647}" => ['iso' => "\u{FEE9}", 'fin' => "\u{FEEA}", 'ini' => "\u{FEEB}", 'med' => "\u{FEEC}", 'join_prev' => true, 'join_next' => true],
+            "\u{0648}" => ['iso' => "\u{FEED}", 'fin' => "\u{FEEE}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
+            "\u{0649}" => ['iso' => "\u{FEEF}", 'fin' => "\u{FEF0}", 'ini' => "\u{FBE8}", 'med' => "\u{FBE9}", 'join_prev' => true, 'join_next' => true],
+            "\u{064A}" => ['iso' => "\u{FEF1}", 'fin' => "\u{FEF2}", 'ini' => "\u{FEF3}", 'med' => "\u{FEF4}", 'join_prev' => true, 'join_next' => true],
+            "\u{0620}" => ['iso' => "\u{FE8B}", 'fin' => "\u{FE8C}", 'ini' => "\u{FE8B}", 'med' => "\u{FE8C}", 'join_prev' => true, 'join_next' => true],
+            "\u{0640}" => ['iso' => "\u{0640}", 'fin' => "\u{0640}", 'ini' => "\u{0640}", 'med' => "\u{0640}", 'join_prev' => true, 'join_next' => true],
+        ];
+    }
+
+    $chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY);
+    $count = count($chars);
+
+    for ($i = 0; $i < $count; $i++) {
+        $current = $chars[$i];
+        if (!isset($map[$current])) {
+            continue;
+        }
+        $data = $map[$current];
+
+        $prevJoin = false;
+        if ($data['join_prev'] && $i > 0) {
+            $prevChar = $chars[$i - 1];
+            if (isset($map[$prevChar]) && $map[$prevChar]['join_next']) {
+                $prevJoin = true;
+            }
+        }
+
+        $nextJoin = false;
+        if ($data['join_next'] && $i < $count - 1) {
+            $nextChar = $chars[$i + 1];
+            if (isset($map[$nextChar]) && $map[$nextChar]['join_prev']) {
+                $nextJoin = true;
+            }
+        }
+
+        if ($prevJoin && $nextJoin && !empty($data['med'])) {
+            $chars[$i] = $data['med'];
+        } elseif ($prevJoin && !empty($data['fin'])) {
+            $chars[$i] = $data['fin'];
+        } elseif ($nextJoin && !empty($data['ini'])) {
+            $chars[$i] = $data['ini'];
+        } else {
+            $chars[$i] = $data['iso'];
+        }
+    }
+
+    $shaped = implode('', $chars);
+
+    // Handle lam-alef ligatures for better appearance
+    $ligatures = [
+        "\u{0644}\u{FE8E}" => "\u{FEFB}", // lam + alef
+        "\u{0644}\u{FE82}" => "\u{FEF5}", // lam + alef with madda
+        "\u{0644}\u{FE84}" => "\u{FEF7}", // lam + alef with hamza above
+        "\u{0644}\u{FE88}" => "\u{FEF9}", // lam + alef with hamza below
+    ];
+    $shaped = str_replace(array_keys($ligatures), array_values($ligatures), $shaped);
+
+    return $shaped;
 }
 
 function dailyLowStockBuildToUnicodeCMap(): string
