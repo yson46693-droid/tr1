@@ -25,13 +25,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!verifyCSRFToken($token)) {
         $_SESSION['error_message'] = 'رمز الأمان غير صالح. يرجى إعادة المحاولة.';
     } else {
-        $scope = $_POST['report_scope'] ?? 'daily';
-        if ($scope === 'daily') {
-            $result = sendConsumptionReport($today, $today, 'التقرير اليومي');
-        } elseif ($scope === 'monthly') {
-            $result = sendConsumptionReport($monthStart, $today, 'تقرير الشهر الحالي');
-        } else {
-            $result = ['success' => false, 'message' => 'نوع التقرير غير معروف.'];
+        $scope = $_POST['report_scope'] ?? 'day';
+        $reportDate = $_POST['report_date'] ?? $today;
+
+        switch ($scope) {
+            case 'day':
+                $dateObj = DateTime::createFromFormat('Y-m-d', $reportDate);
+                $reportDay = $dateObj ? $dateObj->format('Y-m-d') : $today;
+                $result = sendConsumptionReport($reportDay, $reportDay, 'تقرير اليوم');
+                break;
+            case 'current_month':
+                $result = sendConsumptionReport($monthStart, $today, 'تقرير الشهر الحالي');
+                break;
+            case 'previous_month':
+                $prevStart = new DateTime('first day of last month');
+                $prevEnd = new DateTime('last day of last month');
+                $result = sendConsumptionReport($prevStart->format('Y-m-d'), $prevEnd->format('Y-m-d'), 'تقرير الشهر السابق');
+                break;
+            default:
+                $result = ['success' => false, 'message' => 'نوع التقرير غير معروف.'];
+                break;
         }
         if ($result['success']) {
             $_SESSION['success_message'] = $result['message'] ?? 'تم إرسال التقرير.';
@@ -39,7 +52,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['error_message'] = $result['message'] ?? 'تعذر إنشاء التقرير.';
         }
     }
-    preventDuplicateSubmission(null, ['page' => 'reports', 'section' => 'production_reports'], null, 'manager');
+    preventDuplicateSubmission(
+        null,
+        [
+            'page' => 'reports',
+            'section' => 'production_reports',
+            'period' => $_GET['period'] ?? 'current_month',
+            'date' => $_GET['date'] ?? $today
+        ],
+        null,
+        'manager'
+    );
 }
 
 function renderConsumptionTable($items, $includeCategory = false)
@@ -271,24 +294,28 @@ $csrfToken = generateCSRFToken();
         <h2 class="mb-1"><i class="bi bi-graph-up-arrow me-2"></i>تقارير الإنتاج</h2>
         <p class="text-muted mb-0">متابعة استهلاك أدوات التعبئة والمواد الخام</p>
     </div>
-    <div class="d-flex gap-2">
-        <form method="post" class="d-inline">
-            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-            <input type="hidden" name="section" value="production_reports">
-            <input type="hidden" name="report_scope" value="daily">
-            <button class="btn btn-primary">
-                <i class="bi bi-send-check me-1"></i>إرسال تقرير اليوم
+    <form method="post" class="row g-2 align-items-end">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+        <input type="hidden" name="section" value="production_reports">
+        <div class="col-sm-5 col-lg-4">
+            <label class="form-label">نوع التقرير</label>
+            <select class="form-select" name="report_scope" id="reportScopeSelect">
+                <option value="day">تقرير عن يوم محدد</option>
+                <option value="current_month" selected>تقرير الشهر الحالي</option>
+                <option value="previous_month">تقرير الشهر السابق</option>
+            </select>
+        </div>
+        <div class="col-sm-4 col-lg-3 d-none" id="reportScopeDateField">
+            <label class="form-label">اختر اليوم</label>
+            <input type="date" class="form-control" name="report_date" value="<?php echo htmlspecialchars($today); ?>">
+        </div>
+        <div class="col-sm-3 col-lg-2">
+            <label class="form-label">&nbsp;</label>
+            <button class="btn btn-primary w-100">
+                <i class="bi bi-send-check me-1"></i>إرسال التقرير
             </button>
-        </form>
-        <form method="post" class="d-inline">
-            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-            <input type="hidden" name="section" value="production_reports">
-            <input type="hidden" name="report_scope" value="monthly">
-            <button class="btn btn-outline-primary">
-                <i class="bi bi-send-fill me-1"></i>إرسال تقرير الشهر
-            </button>
-        </form>
-    </div>
+        </div>
+    </form>
 </div>
 
 <?php if ($errorMessage): ?>
@@ -416,8 +443,27 @@ $recordsCount = count($combinedRows);
     document.addEventListener('DOMContentLoaded', function () {
         const periodSelect = document.getElementById('reportPeriod');
         const dayField = document.getElementById('dayFilterField');
+        const scopeSelect = document.getElementById('reportScopeSelect');
+        const scopeDateField = document.getElementById('reportScopeDateField');
         const params = new URLSearchParams(window.location.search);
         const targetSection = document.getElementById('productionReportsSection');
+
+        const toggleScopeDateField = () => {
+            if (!scopeSelect || !scopeDateField) {
+                return;
+            }
+            if (scopeSelect.value === 'day') {
+                scopeDateField.classList.remove('d-none');
+            } else {
+                scopeDateField.classList.add('d-none');
+            }
+        };
+
+        if (scopeSelect) {
+            scopeSelect.addEventListener('change', toggleScopeDateField);
+            toggleScopeDateField();
+        }
+
         if (!periodSelect || !dayField) {
             if (params.get('section') === 'production_reports' && targetSection) {
                 targetSection.scrollIntoView({ behavior: 'smooth', block: 'start' });

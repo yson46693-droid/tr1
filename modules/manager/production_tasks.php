@@ -70,6 +70,7 @@ try {
  */
 $productionUsers = [];
 $products = [];
+$allowedProductIds = [];
 
 try {
     $productionUsers = $db->query("
@@ -80,6 +81,22 @@ try {
     ");
 } catch (Exception $e) {
     error_log('Manager task page users query error: ' . $e->getMessage());
+}
+
+try {
+    $products = $db->query("
+        SELECT id, name
+        FROM products
+        ORDER BY name ASC
+    ");
+    $allowedProductIds = array_map(static function ($row) {
+        return isset($row['id']) ? (int)$row['id'] : 0;
+    }, $products);
+    $allowedProductIds = array_filter($allowedProductIds);
+} catch (Exception $e) {
+    error_log('Manager task page products query error: ' . $e->getMessage());
+    $products = [];
+    $allowedProductIds = [];
 }
 
 $allowedTypes = ['general', 'production', 'quality', 'maintenance'];
@@ -98,6 +115,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $priority = in_array($priority, $allowedPriorities, true) ? $priority : 'normal';
         $dueDate = $_POST['due_date'] ?? '';
         $assignees = $_POST['assigned_to'] ?? [];
+        $selectedProductId = intval($_POST['product_id'] ?? 0);
+        $selectedProductId = ($selectedProductId > 0 && in_array($selectedProductId, $allowedProductIds, true)) ? $selectedProductId : 0;
+
+        $productQuantityInput = isset($_POST['product_quantity']) ? trim((string)$_POST['product_quantity']) : '';
+        $productQuantity = null;
+        if ($productQuantityInput !== '') {
+            $normalizedQuantity = str_replace(',', '.', $productQuantityInput);
+            if (!is_numeric($normalizedQuantity)) {
+                $error = 'يرجى إدخال كمية صحيحة أو ترك الحقل فارغاً.';
+            } else {
+                $productQuantity = (float)$normalizedQuantity;
+                if ($productQuantity < 0) {
+                    $error = 'لا يمكن أن تكون الكمية سالبة.';
+                }
+            }
+        }
+        if ($productQuantity !== null && $productQuantity <= 0) {
+            $productQuantity = null;
+        }
 
         if (!is_array($assignees)) {
             $assignees = [$assignees];
@@ -109,7 +145,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }, $productionUsers);
         $assignees = array_values(array_intersect($assignees, $allowedAssignees));
 
-        if (empty($assignees)) {
+        if ($error !== '') {
+            // تم ضبط رسالة الخطأ أعلاه (مثل التحقق من الكمية)
+        } elseif (empty($assignees)) {
             $error = 'يجب اختيار عامل واحد على الأقل لاستلام المهمة.';
         } elseif ($taskType === 'general' && $title === '') {
             $error = 'يرجى إدخال عنوان للمهمة.';
@@ -143,6 +181,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $placeholders[] = '?';
                     }
 
+                    if ($selectedProductId > 0) {
+                        $columns[] = 'product_id';
+                        $values[] = $selectedProductId;
+                        $placeholders[] = '?';
+                    }
+
+                    if ($productQuantity !== null) {
+                        $columns[] = 'quantity';
+                        $values[] = $productQuantity;
+                        $placeholders[] = '?';
+                    }
+
                     $sql = "INSERT INTO tasks (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $placeholders) . ")";
                     $result = $db->execute($sql, $values);
                     $taskId = $result['insert_id'] ?? 0;
@@ -163,7 +213,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'task_type' => $taskType,
                             'assigned_to' => $assignedId,
                             'priority' => $priority,
-                            'due_date' => $dueDate
+                            'due_date' => $dueDate,
+                            'product_id' => $selectedProductId ?: null,
+                            'quantity' => $productQuantity
                         ]
                     );
 
@@ -190,6 +242,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->rollback();
                 error_log('Manager production task creation error: ' . $e->getMessage());
                 $error = 'حدث خطأ أثناء إنشاء المهام. يرجى المحاولة مرة أخرى.';
+            }
+        }
+    } elseif ($action === 'cancel_task') {
+        $taskId = intval($_POST['task_id'] ?? 0);
+
+        if ($taskId <= 0) {
+            $error = 'معرف المهمة غير صحيح.';
+        } else {
+            try {
+                $db->beginTransaction();
+
+                $task = $db->queryOne(
+                    "SELECT id, title, status FROM tasks WHERE id = ? AND created_by = ? LIMIT 1",
+                    [$taskId, $currentUser['id']]
+                );
+
+                if (!$task) {
+                    throw new Exception('المهمة غير موجودة أو ليست من إنشائك.');
+                }
+
+                if ($task['status'] === 'cancelled') {
+                    throw new Exception('المهمة ملغاة مسبقاً.');
+                }
+
+                $db->execute(
+                    "UPDATE tasks SET status = 'cancelled', updated_at = NOW() WHERE id = ?",
+                    [$taskId]
+                );
+
+                // تعليم الإشعارات القديمة كمقروءة
+                $db->execute(
+                    "UPDATE notifications SET `read` = 1 WHERE message = ? AND type IN ('info','success','warning')",
+                    [$task['title']]
+                );
+
+                // إرسال إشعار عاجل لجميع عمال الإنتاج
+                $workers = $db->query("SELECT id FROM users WHERE status = 'active' AND role = 'production'");
+                $alertTitle = 'تنبيه هام: تم إلغاء مهمة';
+                $alertMessage = 'تم إلغاء المهمة "' . $task['title'] . '" من قبل الإدارة. يرجى تجاهلها.';
+                $alertLink = getRelativeUrl('production.php?page=tasks');
+
+                foreach ($workers as $worker) {
+                    try {
+                        createNotification(
+                            (int)$worker['id'],
+                            $alertTitle,
+                            $alertMessage,
+                            'error',
+                            $alertLink
+                        );
+                    } catch (Exception $notifyError) {
+                        error_log('Cancel task notification error: ' . $notifyError->getMessage());
+                    }
+                }
+
+                logAudit(
+                    $currentUser['id'],
+                    'cancel_task',
+                    'tasks',
+                    $taskId,
+                    null,
+                    ['title' => $task['title']]
+                );
+
+                $db->commit();
+                $success = 'تم إلغاء المهمة وإخطار عمال الإنتاج بنجاح.';
+            } catch (Exception $cancelError) {
+                $db->rollBack();
+                $error = 'تعذر إلغاء المهمة: ' . $cancelError->getMessage();
             }
         }
     }
@@ -385,6 +506,31 @@ try {
                             <label class="form-label">وصف وتفاصيل المهمة</label>
                             <textarea class="form-control" name="details" rows="4" placeholder="أدخل التفاصيل والتعليمات اللازمة للعمال."></textarea>
                         </div>
+                        <?php if (!empty($products)): ?>
+                        <div class="col-md-6 d-none" id="productFieldWrapper">
+                            <label class="form-label">نوع المنتج (اختياري)</label>
+                            <select class="form-select" name="product_id" id="productSelect">
+                                <option value="">اختر المنتج</option>
+                                <?php foreach ($products as $product): ?>
+                                    <option value="<?php echo (int)$product['id']; ?>">
+                                        <?php echo htmlspecialchars($product['name'] ?? 'منتج بدون اسم'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">اختياري: اختر المنتج المرتبط بالمهمة الإنتاجية.</div>
+                        </div>
+                        <div class="col-md-6 d-none" id="quantityFieldWrapper">
+                            <label class="form-label">الكمية المطلوبة (اختياري)</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="product_quantity" id="productQuantityInput" step="0.01" min="0" placeholder="مثال: 120">
+                                <span class="input-group-text">وحدة</span>
+                            </div>
+                            <div class="form-text">اختياري: أدخل الكمية المرتبطة بالمهمة.</div>
+                        </div>
+                        <?php else: ?>
+                        <input type="hidden" name="product_id" value="">
+                        <input type="hidden" name="product_quantity" value="">
+                        <?php endif; ?>
                     </div>
                     <div class="d-flex justify-content-end mt-4 gap-2">
                         <button type="reset" class="btn btn-secondary"><i class="bi bi-arrow-counterclockwise me-1"></i>إعادة تعيين</button>
@@ -411,6 +557,7 @@ try {
                             <th>الأولوية</th>
                             <th>تاريخ الاستحقاق</th>
                             <th>تاريخ الإنشاء</th>
+                            <th>إجراءات</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -451,6 +598,19 @@ try {
                                     </td>
                                     <td><?php echo $task['due_date'] ? htmlspecialchars($task['due_date']) : '<span class="text-muted">غير محدد</span>'; ?></td>
                                     <td><?php echo htmlspecialchars($task['created_at']); ?></td>
+                                    <td>
+                                        <?php if (in_array($task['status'], ['completed', 'cancelled'], true)): ?>
+                                            <span class="text-muted small">لا يوجد إجراء</span>
+                                        <?php else: ?>
+                                            <form method="post" class="d-inline" onsubmit="return confirm('هل أنت متأكد من إلغاء هذه المهمة؟');">
+                                                <input type="hidden" name="action" value="cancel_task">
+                                                <input type="hidden" name="task_id" value="<?php echo (int)$task['id']; ?>">
+                                                <button type="submit" class="btn btn-outline-danger btn-sm">
+                                                    <i class="bi bi-x-circle me-1"></i>إلغاء المهمة
+                                                </button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -465,21 +625,39 @@ try {
 document.addEventListener('DOMContentLoaded', function () {
     const taskTypeSelect = document.getElementById('taskTypeSelect');
     const titleInput = document.querySelector('input[name="title"]');
+    const productWrapper = document.getElementById('productFieldWrapper');
+    const quantityWrapper = document.getElementById('quantityFieldWrapper');
+    const productSelect = document.getElementById('productSelect');
+    const quantityInput = document.getElementById('productQuantityInput');
 
-    function updateTitlePlaceholder() {
+    function updateTaskTypeUI() {
         if (!titleInput) {
-            return;
+            // continue to toggle other fields even إن لم يوجد العنوان
         }
         const isProduction = taskTypeSelect && taskTypeSelect.value === 'production';
-        titleInput.placeholder = isProduction
-            ? 'يمكنك ترك العنوان فارغاً وسيتم توليد عنوان افتراضي للمهمة الإنتاجية.'
-            : 'مثال: تنظيف خط الإنتاج';
+        if (titleInput) {
+            titleInput.placeholder = isProduction
+                ? 'يمكنك ترك العنوان فارغاً وسيتم توليد عنوان افتراضي للمهمة الإنتاجية.'
+                : 'مثال: تنظيف خط الإنتاج';
+        }
+        if (productWrapper) {
+            productWrapper.classList.toggle('d-none', !isProduction);
+            if (!isProduction && productSelect) {
+                productSelect.value = '';
+            }
+        }
+        if (quantityWrapper) {
+            quantityWrapper.classList.toggle('d-none', !isProduction);
+            if (!isProduction && quantityInput) {
+                quantityInput.value = '';
+            }
+        }
     }
 
     if (taskTypeSelect) {
-        taskTypeSelect.addEventListener('change', updateTitlePlaceholder);
+        taskTypeSelect.addEventListener('change', updateTaskTypeUI);
     }
-    updateTitlePlaceholder();
+    updateTaskTypeUI();
 });
 </script>
 

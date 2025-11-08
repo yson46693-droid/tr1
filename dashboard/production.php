@@ -256,16 +256,21 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                         <?php if (!empty($notifications)): ?>
                         <div class="list-group">
                             <?php foreach ($notifications as $notif): ?>
-                                <div class="list-group-item">
-                                    <div class="d-flex justify-content-between align-items-start">
-                                        <div>
-                                            <h6 class="mb-1"><?php echo htmlspecialchars($notif['title'] ?? ''); ?></h6>
-                                            <p class="mb-1"><?php echo htmlspecialchars($notif['message'] ?? ''); ?></p>
-                                            <small class="text-muted"><?php echo date('Y-m-d H:i', strtotime($notif['created_at'] ?? 'now')); ?></small>
-                                        </div>
+                                <div class="list-group-item production-dashboard-notification" data-notification-id="<?php echo (int)($notif['id'] ?? 0); ?>">
+                                    <div class="d-flex justify-content-between align-items-start gap-3">
+                                    <div>
+                                        <h6 class="mb-1"><?php echo htmlspecialchars($notif['title'] ?? ''); ?></h6>
+                                        <p class="mb-1"><?php echo htmlspecialchars($notif['message'] ?? ''); ?></p>
+                                        <small class="text-muted"><?php echo date('Y-m-d H:i', strtotime($notif['created_at'] ?? 'now')); ?></small>
+                                    </div>
+                                    <div class="text-end">
                                         <?php if (empty($notif['read'])): ?>
-                                            <span class="badge bg-primary"><?php echo isset($lang['new']) ? $lang['new'] : 'جديد'; ?></span>
+                                            <span class="badge bg-primary d-block mb-2"><?php echo isset($lang['new']) ? $lang['new'] : 'جديد'; ?></span>
                                         <?php endif; ?>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary mark-dashboard-notification" data-id="<?php echo (int)($notif['id'] ?? 0); ?>">
+                                            <i class="bi bi-check2 me-1"></i>تم الرؤية
+                                        </button>
+                                    </div>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
@@ -278,6 +283,31 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
 
                 <script>
                     window.initialNotifications = <?php echo json_encode($notifications, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+                </script>
+                <script>
+                    document.addEventListener('DOMContentLoaded', function() {
+                        document.querySelectorAll('.mark-dashboard-notification').forEach(function(button) {
+                            button.addEventListener('click', function() {
+                                const notificationId = this.getAttribute('data-id');
+                                if (!notificationId) {
+                                    return;
+                                }
+
+                                const parentItem = this.closest('.production-dashboard-notification');
+                                const listGroup = parentItem ? parentItem.parentElement : null;
+                                markNotificationAsRead(notificationId).then(function() {
+                                    if (parentItem) {
+                                        parentItem.remove();
+                                    }
+                                    if (listGroup && !listGroup.querySelector('.production-dashboard-notification')) {
+                                        listGroup.innerHTML = '<p class="text-center text-muted mb-0">لا توجد إشعارات حالياً</p>';
+                                    }
+                                }).catch(function(err) {
+                                    console.error('Mark notification as read failed:', err);
+                                });
+                            });
+                        });
+                    });
                 </script>
                 
                 <!-- بطاقات الإحصائيات -->

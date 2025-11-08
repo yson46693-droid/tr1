@@ -5,6 +5,7 @@
 let notificationCheckInterval = null;
 const seenNotificationIds = new Set();
 const NOTIFICATION_DEFAULT_LIMIT = 10;
+const CANCELLATION_KEYWORDS = ['تم إلغاء المهمة', 'المهمة الملغية'];
 
 function filterDisplayableNotifications(notifications) {
     if (!Array.isArray(notifications)) {
@@ -12,7 +13,9 @@ function filterDisplayableNotifications(notifications) {
     }
 
     const completionKeywords = ['كمكتملة', 'تم إكمال', 'status=completed'];
+    const fiveMinutes = 5 * 60 * 1000;
     const filtered = [];
+    const now = Date.now();
 
     notifications.forEach(notification => {
         if (!notification) {
@@ -22,6 +25,7 @@ function filterDisplayableNotifications(notifications) {
         const title = (notification.title || '').toString();
         const message = (notification.message || '').toString();
         const link = (notification.link || '').toString();
+        const timestamp = getNotificationTimestamp(notification);
 
         const containsKeyword = text => {
             if (typeof text !== 'string' || text.trim() === '') {
@@ -35,6 +39,17 @@ function filterDisplayableNotifications(notifications) {
                 markNotificationAsRead(notification.id, { silent: true }).catch(console.error);
             }
             return;
+        }
+
+        const isCancellation = CANCELLATION_KEYWORDS.some(keyword => title.includes(keyword) || message.includes(keyword));
+        if (isCancellation && timestamp) {
+            const age = now - timestamp.getTime();
+            if (age >= fiveMinutes) {
+                if (notification.id) {
+                    markNotificationAsRead(notification.id, { silent: true }).catch(console.error);
+                }
+                return;
+            }
         }
 
         filtered.push(notification);
@@ -406,8 +421,11 @@ function updateNotificationList(notifications) {
                         <div class="small text-muted mt-1">${timeAgo}</div>
                     </div>
                     <div class="notification-actions">
-                        <button type="button" class="btn btn-sm btn-link text-danger notification-delete" data-id="${notificationId}" title="حذف">
-                            <i class="bi bi-x-lg"></i>
+                        <button type="button" class="btn btn-sm btn-outline-secondary notification-mark-read" data-id="${notificationId}" title="تمت الرؤية">
+                            <i class="bi bi-check2 me-1"></i>تم الرؤية
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-danger notification-delete" data-id="${notificationId}" title="حذف الإشعار">
+                            <i class="bi bi-trash me-1"></i>حذف
                         </button>
                     </div>
                 </div>
@@ -430,11 +448,35 @@ function updateNotificationList(notifications) {
         });
     });
 
+    list.querySelectorAll('.notification-mark-read').forEach(button => {
+        button.addEventListener('click', function(event) {
+            event.stopPropagation();
+            const notificationId = this.getAttribute('data-id');
+            markNotificationAsRead(notificationId).then(() => {
+                const item = this.closest('.notification-item');
+                if (item) {
+                    item.remove();
+                }
+                if (!list.querySelector('.notification-item')) {
+                    list.innerHTML = '<small class="text-muted">لا توجد إشعارات</small>';
+                }
+            }).catch(console.error);
+        });
+    });
+
     list.querySelectorAll('.notification-delete').forEach(button => {
         button.addEventListener('click', function(event) {
             event.stopPropagation();
             const notificationId = this.getAttribute('data-id');
-            deleteNotification(notificationId);
+            deleteNotification(notificationId).then(() => {
+                const item = this.closest('.notification-item');
+                if (item) {
+                    item.remove();
+                }
+                if (!list.querySelector('.notification-item')) {
+                    list.innerHTML = '<small class="text-muted">لا توجد إشعارات</small>';
+                }
+            }).catch(console.error);
         });
     });
 }
@@ -459,7 +501,7 @@ async function markNotificationAsRead(notificationId, options = {}) {
 
     try {
         const apiPath = getApiPath('api/notifications.php');
-        await fetch(apiPath, {
+        const response = await fetch(apiPath, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -474,6 +516,8 @@ async function markNotificationAsRead(notificationId, options = {}) {
         if (!silent) {
             loadNotifications();
         }
+
+        return response;
     } catch (error) {
         // تجاهل أخطاء CORS بصمت
         if (error.name === 'TypeError' && error.message.includes('CORS')) {

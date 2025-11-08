@@ -405,6 +405,8 @@ if ($search) {
 if ($statusFilter) {
     $whereConditions[] = "t.status = ?";
     $params[] = $statusFilter;
+} else {
+    $whereConditions[] = "t.status != 'cancelled'";
 }
 
 if ($priorityFilter) {
