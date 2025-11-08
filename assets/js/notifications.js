@@ -66,22 +66,23 @@ function filterDisplayableNotifications(notifications) {
  * دالة مساعدة لحساب المسار الصحيح لـ API
  */
 function getApiPath(endpoint) {
-    // احصل على المسار الحالي
-    const currentPath = window.location.pathname;
-    
-    // قسم المسار وأزل الأجزاء الفارغة
-    const parts = currentPath.split('/').filter(p => p);
-    
-    // ابحث عن أول جزء من المسار (مثل 'tr')
-    // تخطى 'dashboard' وملفات PHP و 'api'
-    const basePath = parts.find(p => p !== 'dashboard' && p !== 'api' && !p.endsWith('.php')) || '';
-    
-    // إذا كان هناك basePath، استخدمه، وإلا استخدم المسار المطلق
-    // تأكد من أن المسار يبدأ بـ /
-    const apiPath = basePath ? '/' + basePath + '/' + endpoint : '/' + endpoint;
-    
-    // تأكد من عدم وجود مسارات مكررة
-    return apiPath.replace(/\/+/g, '/');
+    const cleanEndpoint = String(endpoint || '').replace(/^\/+/, '');
+    const currentPath = window.location.pathname || '/';
+    const parts = currentPath.split('/').filter(Boolean);
+    const stopSegments = new Set(['dashboard', 'modules', 'api', 'assets', 'includes']);
+    const baseParts = [];
+
+    for (const part of parts) {
+        if (stopSegments.has(part) || part.endsWith('.php')) {
+            break;
+        }
+        baseParts.push(part);
+    }
+
+    const basePath = baseParts.length ? '/' + baseParts.join('/') : '';
+    const apiPath = (basePath + '/' + cleanEndpoint).replace(/\/+/g, '/');
+
+    return apiPath.startsWith('/') ? apiPath : '/' + apiPath;
 }
 
 /**
