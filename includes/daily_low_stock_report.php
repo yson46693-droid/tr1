@@ -97,7 +97,7 @@ function dailyLowStockBuildPdf(array $lines): ?string
         $prepared = dailyLowStockNormalizePdfText($line);
         $hex = strtoupper(bin2hex(dailyLowStockUtf16beText($prepared, true)));
 
-        $contentParts[] = "BT\n/F1 {$fontSize} Tf\n1 0 0 1 " . ($pageWidth - $marginX) . " {$yPos} Tm\n<{$hex}> Tj\nET\n";
+        $contentParts[] = "BT\n/F1 {$fontSize} Tf\n-1 0 0 1 " . ($pageWidth - $marginX) . " {$yPos} Tm\n<{$hex}> Tj\nET\n";
         $yPos -= $lineSpacing;
     }
 
