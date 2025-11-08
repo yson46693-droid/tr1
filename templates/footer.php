@@ -1,15 +1,4 @@
-            const versionUtils = {
-                normalize(versionString) {
-                    return (versionString || '').toString().trim();
-                },
-                latest(serverVersion) {
-                    const stored = localStorage.getItem(VERSION_STORAGE_KEY);
-                    if (serverVersion) {
-                        return serverVersion;
-                    }
-                    return stored || 'جديد';
-                }
-            };
+            
 <?php
 
 
@@ -171,11 +160,12 @@ if (!defined('ACCESS_ALLOWED')) {
                     if (data.success) {
                         const currentHash = data.content_hash || data.version || data.last_modified;
                         const storedHash = localStorage.getItem(STORAGE_KEY);
-                        const serverVersion = data.version || '';
-                        let displayVersion = versionUtils.latest(serverVersion);
+                        const storedDisplay = localStorage.getItem(VERSION_STORAGE_KEY) || '';
+                        const serverVersion = (data.version || '').toString().trim();
+                        let displayVersion = storedDisplay || serverVersion || 'جديد';
 
                         if (storedHash && storedHash !== currentHash) {
-                            displayVersion = versionUtils.normalize(serverVersion) || 'جديد';
+                            displayVersion = serverVersion || 'جديد';
                             showUpdateAvailableNotification(displayVersion);
                         }
 
@@ -203,7 +193,7 @@ if (!defined('ACCESS_ALLOWED')) {
                 notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
                 notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);';
                 
-                const displayVersion = versionUtils.normalize(version) || 'جديد';
+                const displayVersion = (version || '').toString().trim() || 'جديد';
                 localStorage.setItem(VERSION_STORAGE_KEY, displayVersion);
                 
                 notification.innerHTML = `
