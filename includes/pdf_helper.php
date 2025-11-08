@@ -7,7 +7,27 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
-require_once __DIR__ . '/../vendor/autoload.php';
+$autoloadCandidates = [
+    realpath(__DIR__ . '/../vendor/autoload.php'),
+    realpath(dirname(__DIR__, 2) . '/vendor/autoload.php'),
+    realpath(__DIR__ . '/vendor/autoload.php'),
+];
+
+$autoloadLoaded = false;
+
+foreach ($autoloadCandidates as $candidate) {
+    if ($candidate !== false && is_readable($candidate)) {
+        require_once $candidate;
+        $autoloadLoaded = true;
+        break;
+    }
+}
+
+if (!$autoloadLoaded) {
+    throw new RuntimeException(
+        'تعذر تحميل ملف Composer autoload. تأكد من رفع مجلد vendor أو تثبيت الاعتمادات باستخدام: composer install'
+    );
+}
 
 use Mpdf\Config\ConfigVariables;
 use Mpdf\Config\FontVariables;
