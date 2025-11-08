@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/batch_numbers.php';
 require_once __DIR__ . '/../../includes/simple_barcode.php';
+require_once __DIR__ . '/../../includes/consumption_reports.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
@@ -1321,6 +1322,66 @@ if (!empty($packagingTableCheck)) {
     );
 }
 
+$productionReportsTodayDate = date('Y-m-d');
+$productionReportsMonthStart = date('Y-m-01');
+$productionReportsToday = getConsumptionSummary($productionReportsTodayDate, $productionReportsTodayDate);
+$productionReportsMonth = getConsumptionSummary($productionReportsMonthStart, $productionReportsTodayDate);
+
+if (!function_exists('productionPageRenderConsumptionTable')) {
+    function productionPageRenderConsumptionTable(array $items, bool $includeCategory = false): void
+    {
+        if (empty($items)) {
+            echo '<div class="text-center text-muted py-4">لا توجد بيانات متاحة للفترة المحددة.</div>';
+            return;
+        }
+
+        echo '<div class="table-responsive">';
+        echo '<table class="table table-hover align-middle">';
+        echo '<thead class="table-light"><tr>';
+        echo '<th>المادة</th>';
+        if ($includeCategory) {
+            echo '<th>الفئة</th>';
+        }
+        echo '<th>الاستهلاك</th><th>الوارد</th><th>الصافي</th><th>الحركات</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($items as $item) {
+            $name = htmlspecialchars($item['name'] ?? 'غير معروف', ENT_QUOTES, 'UTF-8');
+            $category = htmlspecialchars($item['sub_category'] ?? '-', ENT_QUOTES, 'UTF-8');
+            $totalOut = number_format((float)($item['total_out'] ?? 0), 3);
+            $totalIn = number_format((float)($item['total_in'] ?? 0), 3);
+            $net = number_format((float)($item['net'] ?? 0), 3);
+            $movements = (int)($item['movements'] ?? 0);
+
+            echo '<tr>';
+            echo '<td>' . $name . '</td>';
+            if ($includeCategory) {
+                echo '<td><span class="badge bg-secondary text-white">' . $category . '</span></td>';
+            }
+            echo '<td>' . $totalOut . '</td>';
+            echo '<td>' . $totalIn . '</td>';
+            echo '<td>' . $net . '</td>';
+            echo '<td>' . $movements . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table></div>';
+    }
+}
+
+if (!function_exists('productionPageSumMovements')) {
+    function productionPageSumMovements(array $items): int
+    {
+        if (empty($items)) {
+            return 0;
+        }
+
+        return array_sum(array_map(static function ($row) {
+            return (int)($row['movements'] ?? 0);
+        }, $items));
+    }
+}
+
 require_once __DIR__ . '/../../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = isset($translations) ? $translations : [];
 ?>
@@ -1347,6 +1408,29 @@ $lang = isset($translations) ? $translations : [];
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
+
+<div class="mb-4">
+    <div class="btn-group" role="tablist" aria-label="التنقل بين أقسام صفحة الإنتاج">
+        <button type="button"
+                class="btn btn-outline-primary active"
+                data-production-tab="records"
+                aria-pressed="true"
+                aria-controls="productionRecordsSection">
+            <i class="bi bi-list-task me-1"></i>
+            سجلات الإنتاج
+        </button>
+        <button type="button"
+                class="btn btn-outline-primary"
+                data-production-tab="reports"
+                aria-pressed="false"
+                aria-controls="productionReportsSection">
+            <i class="bi bi-graph-up-arrow me-1"></i>
+            تقارير الإنتاج
+        </button>
+    </div>
+</div>
+
+<div id="productionRecordsSection">
 
 <!-- جدول الإنتاج -->
 <div class="card shadow-sm">
@@ -1551,6 +1635,179 @@ $lang = isset($translations) ? $translations : [];
             </a>
         </div>
     <?php endif; ?>
+</div>
+
+</div>
+
+</div>
+
+<div id="productionReportsSection" class="d-none">
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div>
+                    <h4 class="mb-1"><i class="bi bi-calendar-day me-2"></i>ملخص اليوم</h4>
+                    <p class="text-muted mb-0">
+                        <?php echo htmlspecialchars($productionReportsToday['date_from'] ?? $productionReportsTodayDate); ?>
+                        —
+                        <?php echo htmlspecialchars($productionReportsToday['date_to'] ?? $productionReportsTodayDate); ?>
+                    </p>
+                </div>
+                <span class="badge bg-light text-primary border border-primary-subtle">
+                    آخر تحديث: <?php echo htmlspecialchars($productionReportsToday['generated_at'] ?? date('Y-m-d H:i:s')); ?>
+                </span>
+            </div>
+            <div class="row g-3 mt-3">
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">استهلاك أدوات التعبئة</div>
+                        <div class="fs-4 fw-semibold text-primary">
+                            <?php echo number_format((float)($productionReportsToday['packaging']['total_out'] ?? 0), 3); ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">استهلاك المواد الخام</div>
+                        <div class="fs-4 fw-semibold text-primary">
+                            <?php echo number_format((float)($productionReportsToday['raw']['total_out'] ?? 0), 3); ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">الصافي الكلي</div>
+                        <div class="fs-4 fw-semibold text-success">
+                            <?php
+                            $todayNet = (float)($productionReportsToday['packaging']['net'] ?? 0) + (float)($productionReportsToday['raw']['net'] ?? 0);
+                            echo number_format($todayNet, 3);
+                            ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">إجمالي الحركات</div>
+                        <div class="fs-4 fw-semibold text-secondary">
+                            <?php
+                            $todayMovements = productionPageSumMovements($productionReportsToday['packaging']['items'] ?? [])
+                                + productionPageSumMovements($productionReportsToday['raw']['items'] ?? []);
+                            echo number_format($todayMovements);
+                            ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة المستهلكة اليوم</span>
+        </div>
+        <div class="card-body">
+            <?php productionPageRenderConsumptionTable($productionReportsToday['packaging']['items'] ?? []); ?>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-5">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-droplet-half me-2"></i>المواد الخام المستهلكة اليوم</span>
+        </div>
+        <div class="card-body">
+            <?php productionPageRenderConsumptionTable($productionReportsToday['raw']['items'] ?? [], true); ?>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                <div>
+                    <h4 class="mb-1"><i class="bi bi-calendar-month me-2"></i>ملخص الشهر الحالي</h4>
+                    <p class="text-muted mb-0">
+                        <?php echo htmlspecialchars($productionReportsMonth['date_from'] ?? $productionReportsMonthStart); ?>
+                        —
+                        <?php echo htmlspecialchars($productionReportsMonth['date_to'] ?? $productionReportsTodayDate); ?>
+                    </p>
+                </div>
+                <span class="badge bg-light text-primary border border-primary-subtle">
+                    آخر تحديث: <?php echo htmlspecialchars($productionReportsMonth['generated_at'] ?? date('Y-m-d H:i:s')); ?>
+                </span>
+            </div>
+            <div class="row g-3 mt-3">
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">إجمالي استهلاك التعبئة</div>
+                        <div class="fs-4 fw-semibold text-primary">
+                            <?php echo number_format((float)($productionReportsMonth['packaging']['total_out'] ?? 0), 3); ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">إجمالي استهلاك المواد الخام</div>
+                        <div class="fs-4 fw-semibold text-primary">
+                            <?php echo number_format((float)($productionReportsMonth['raw']['total_out'] ?? 0), 3); ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">الصافي الشهري</div>
+                        <div class="fs-4 fw-semibold text-success">
+                            <?php
+                            $monthNet = (float)($productionReportsMonth['packaging']['net'] ?? 0) + (float)($productionReportsMonth['raw']['net'] ?? 0);
+                            echo number_format($monthNet, 3);
+                            ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 col-sm-6">
+                    <div class="border rounded-3 p-3 h-100">
+                        <div class="text-muted small mb-1">إجمالي الحركات</div>
+                        <div class="fs-4 fw-semibold text-secondary">
+                            <?php
+                            $monthMovements = productionPageSumMovements($productionReportsMonth['packaging']['items'] ?? [])
+                                + productionPageSumMovements($productionReportsMonth['raw']['items'] ?? []);
+                            echo number_format($monthMovements);
+                            ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة للشهر الحالي</span>
+        </div>
+        <div class="card-body">
+            <?php productionPageRenderConsumptionTable($productionReportsMonth['packaging']['items'] ?? []); ?>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-droplet-half me-2"></i>المواد الخام للشهر الحالي</span>
+        </div>
+        <div class="card-body">
+            <?php if (!empty($productionReportsMonth['raw']['sub_totals'])): ?>
+                <div class="mb-3">
+                    <div class="d-flex flex-wrap gap-2">
+                        <?php foreach ($productionReportsMonth['raw']['sub_totals'] as $subTotal): ?>
+                            <span class="badge bg-light text-dark border">
+                                <?php echo htmlspecialchars($subTotal['label'] ?? 'غير مصنف'); ?>:
+                                <?php echo number_format((float)($subTotal['total_out'] ?? 0), 3); ?>
+                                (صافي <?php echo number_format((float)($subTotal['net'] ?? 0), 3); ?>)
+                            </span>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <?php productionPageRenderConsumptionTable($productionReportsMonth['raw']['items'] ?? [], true); ?>
+        </div>
+    </div>
 </div>
 
 <!-- Modal إنشاء إنتاج من قالب -->
@@ -2124,6 +2381,38 @@ h2, h3, h4, h5 {
 </style>
 
 <script>
+document.addEventListener('DOMContentLoaded', function() {
+    const tabButtons = document.querySelectorAll('[data-production-tab]');
+    const sections = {
+        records: document.getElementById('productionRecordsSection'),
+        reports: document.getElementById('productionReportsSection')
+    };
+
+    tabButtons.forEach(function(button) {
+        button.addEventListener('click', function() {
+            const target = button.getAttribute('data-production-tab');
+            if (!target || !sections[target]) {
+                return;
+            }
+
+            tabButtons.forEach(function(btn) {
+                btn.classList.remove('active');
+                btn.setAttribute('aria-pressed', 'false');
+            });
+
+            Object.keys(sections).forEach(function(key) {
+                if (sections[key]) {
+                    sections[key].classList.add('d-none');
+                }
+            });
+
+            button.classList.add('active');
+            button.setAttribute('aria-pressed', 'true');
+            sections[target].classList.remove('d-none');
+        });
+    });
+});
+
 // تحميل بيانات الإنتاج للتعديل
 function editProduction(id) {
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
