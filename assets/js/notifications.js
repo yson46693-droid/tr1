@@ -27,6 +27,10 @@ function filterDisplayableNotifications(notifications) {
         const link = (notification.link || '').toString();
         const timestamp = getNotificationTimestamp(notification);
 
+        if (!isNotificationUnread(notification)) {
+            return;
+        }
+
         const containsKeyword = text => {
             if (typeof text !== 'string' || text.trim() === '') {
                 return false;

@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/honey_varieties.php';
 
 requireRole('production'); // فقط عامل الإنتاج يمكنه التعديل
 
@@ -20,6 +21,9 @@ $currentUser = getCurrentUser();
 $db = db();
 $error = '';
 $success = '';
+$honeyVarietiesCatalog = getHoneyVarietiesCatalog();
+$validHoneyVarieties = array_keys($honeyVarietiesCatalog);
+$defaultHoneyVariety = 'سدر';
 
 // إنشاء جدول مخزن العسل إذا لم يكن موجوداً
 $tableCheck = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
@@ -107,10 +111,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $honeyType = $_POST['honey_type'] ?? 'raw'; // raw or filtered
         
         // التحقق من صحة نوع العسل
-        $validVarieties = ['سدر', 'جبلي', 'حبة البركة', 'موالح', 'نوارة برسيم', 'أخرى'];
-        if (!in_array($honeyVariety, $validVarieties)) {
+        if (!in_array($honeyVariety, $validHoneyVarieties, true)) {
             $honeyVariety = 'أخرى';
         }
+        $honeyVarietyCode = getHoneyVarietyCode($honeyVariety);
         
         if ($supplierId <= 0) {
             $error = 'يجب اختيار المورد';
@@ -151,12 +155,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
-            logAudit($currentUser['id'], 'add_honey', 'honey_stock', $supplierId, null, [
-                'supplier_id' => $supplierId,
-                'honey_variety' => $honeyVariety,
-                'quantity' => $quantity,
-                'type' => $honeyType
-            ]);
+            logAudit(
+                $currentUser['id'],
+                'add_honey',
+                'honey_stock',
+                $supplierId,
+                null,
+                [
+                    'supplier_id' => $supplierId,
+                    'honey_variety' => $honeyVariety,
+                    'honey_variety_code' => $honeyVarietyCode,
+                    'quantity' => $quantity,
+                    'type' => $honeyType,
+                ]
+            );
             
             $success = 'تم إضافة العسل بنجاح';
         }
@@ -212,9 +224,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     [$stock['supplier_id'], $rawQuantity, $filteredQuantity, $filtrationLoss, $filtrationDate, $notes ?: null, $currentUser['id']]
                 );
                 
+                $stockVariety = $stock['honey_variety'] ?? 'أخرى';
+                $stockVarietyCode = getHoneyVarietyCode($stockVariety);
+
                 logAudit($currentUser['id'], 'filter_honey', 'honey_filtration', $stockId, null, [
                     'supplier_id' => $stock['supplier_id'],
-                    'honey_variety' => $stock['honey_variety'] ?? 'أخرى',
+                    'honey_variety' => $stockVariety,
+                    'honey_variety_code' => $stockVarietyCode,
                     'raw_quantity' => $rawQuantity,
                     'filtered_quantity' => $filteredQuantity,
                     'loss' => $filtrationLoss
@@ -453,6 +469,11 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                     </thead>
                     <tbody>
                         <?php foreach ($honeyStock as $index => $stock): ?>
+                            <?php
+                                $varietyRaw = $stock['honey_variety'] ?? 'أخرى';
+                                $varietyDisplay = formatHoneyVarietyWithCode($varietyRaw);
+                                $varietyDisplayEscaped = htmlspecialchars($varietyDisplay, ENT_QUOTES, 'UTF-8');
+                            ?>
                             <tr>
                                 <td class="text-center"><?php echo $offset + $index + 1; ?></td>
                                 <td>
@@ -463,7 +484,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                                 </td>
                                 <td class="text-center">
                                     <span class="badge bg-info">
-                                        <i class="bi bi-tag me-1"></i><?php echo htmlspecialchars($stock['honey_variety'] ?? 'أخرى'); ?>
+                                        <i class="bi bi-tag me-1"></i><?php echo htmlspecialchars($varietyDisplay); ?>
                                     </span>
                                 </td>
                                 <td class="text-center">
@@ -477,7 +498,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                                 <td class="text-center">
                                     <div class="btn-group btn-group-sm" role="group">
                                         <button class="btn btn-warning" 
-                                                onclick="showFilterModal(<?php echo $stock['id']; ?>, <?php echo $stock['supplier_id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety'] ?? 'أخرى'); ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
+                                                onclick="showFilterModal(<?php echo $stock['id']; ?>, <?php echo $stock['supplier_id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name'], ENT_QUOTES, 'UTF-8'); ?>', '<?php echo $varietyDisplayEscaped; ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
                                                 title="تصفية العسل"
                                                 <?php echo $stock['raw_honey_quantity'] <= 0 ? 'disabled' : ''; ?>>
                                             <i class="bi bi-funnel"></i>
@@ -503,6 +524,11 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
             <!-- عرض Cards على الموبايل -->
             <div class="d-md-none">
                 <?php foreach ($honeyStock as $index => $stock): ?>
+                    <?php
+                        $varietyRaw = $stock['honey_variety'] ?? 'أخرى';
+                        $varietyDisplay = formatHoneyVarietyWithCode($varietyRaw);
+                        $varietyDisplayEscaped = htmlspecialchars($varietyDisplay, ENT_QUOTES, 'UTF-8');
+                    ?>
                     <div class="card mb-3 shadow-sm">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-2">
@@ -512,7 +538,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                                         <small class="text-muted d-block"><?php echo htmlspecialchars($stock['supplier_phone']); ?></small>
                                     <?php endif; ?>
                                     <span class="badge bg-info mt-1">
-                                        <?php echo htmlspecialchars($stock['honey_variety'] ?? 'أخرى'); ?>
+                                        <?php echo htmlspecialchars($varietyDisplay); ?>
                                     </span>
                                 </div>
                                 <span class="badge bg-primary">#<?php echo $offset + $index + 1; ?></span>
@@ -530,7 +556,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                             
                             <div class="d-grid gap-2 d-flex mt-3">
                                 <button class="btn btn-sm btn-warning flex-fill" 
-                                        onclick="showFilterModal(<?php echo $stock['id']; ?>, <?php echo $stock['supplier_id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety'] ?? 'أخرى'); ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
+                                        onclick="showFilterModal(<?php echo $stock['id']; ?>, <?php echo $stock['supplier_id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name'], ENT_QUOTES, 'UTF-8'); ?>', '<?php echo $varietyDisplayEscaped; ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
                                         <?php echo $stock['raw_honey_quantity'] <= 0 ? 'disabled' : ''; ?>>
                                     <i class="bi bi-funnel"></i> تصفية
                                 </button>
@@ -620,13 +646,12 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                     </div>
                     <div class="mb-3">
                         <label class="form-label">صنف العسل <span class="text-danger">*</span></label>
-                        <select class="form-select" name="honey_variety" required>
-                            <option value="سدر">سدر</option>
-                            <option value="جبلي">جبلي</option>
-                            <option value="حبة البركة">حبة البركة</option>
-                            <option value="موالح">موالح</option>
-                            <option value="نوارة برسيم">نوارة برسيم</option>
-                            <option value="أخرى">أخرى</option>
+                        <select class="form-select honey-variety-select" name="honey_variety" required>
+                            <?php foreach ($honeyVarietiesCatalog as $honeyVariety => $meta): ?>
+                                <option value="<?php echo htmlspecialchars($honeyVariety); ?>" data-code="<?php echo htmlspecialchars($meta['code']); ?>" <?php echo $honeyVariety === $defaultHoneyVariety ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars(sprintf('%s - %s', $meta['label'], $meta['code'])); ?>
+                                </option>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="mb-3">

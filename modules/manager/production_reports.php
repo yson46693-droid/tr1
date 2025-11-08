@@ -311,7 +311,7 @@ $csrfToken = generateCSRFToken();
         </div>
         <div class="col-sm-3 col-lg-2">
             <label class="form-label">&nbsp;</label>
-            <button class="btn btn-primary w-100">
+                <button class="btn btn-primary w-100" style="min-width: 160px;">
                 <i class="bi bi-send-check me-1"></i>إرسال التقرير
             </button>
         </div>

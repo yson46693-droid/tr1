@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/honey_varieties.php';
 
 $rawMaterialsContext = defined('RAW_MATERIALS_CONTEXT') ? RAW_MATERIALS_CONTEXT : 'production';
 $allowedRoles = ['production'];
@@ -25,6 +26,10 @@ $currentUser = getCurrentUser();
 $db = db();
 $error = '';
 $success = '';
+
+$honeyVarietiesCatalog = getHoneyVarietiesCatalog();
+$validHoneyVarieties = array_keys($honeyVarietiesCatalog);
+$defaultHoneyVariety = 'سدر';
 
 $dashboardSlug = $rawMaterialsContext === 'manager' ? 'manager' : 'production';
 $dashboardUrl = getDashboardUrl($dashboardSlug);
@@ -498,10 +503,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $quantity = floatval($_POST['quantity'] ?? 0);
             $honeyType = $_POST['honey_type'] ?? 'raw';
             
-            $validVarieties = ['سدر', 'جبلي', 'حبة البركة', 'موالح', 'نوارة برسيم', 'أخرى'];
-            if (!in_array($honeyVariety, $validVarieties)) {
+            if (!in_array($honeyVariety, $validHoneyVarieties, true)) {
                 $honeyVariety = 'أخرى';
             }
+            $honeyVarietyCode = getHoneyVarietyCode($honeyVariety);
             
             if ($supplierId <= 0) {
                 $error = 'يجب اختيار المورد';
@@ -524,7 +529,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-                logAudit($currentUser['id'], 'add_honey', 'honey_stock', $supplierId, null, ['variety' => $honeyVariety, 'quantity' => $quantity, 'type' => $honeyType]);
+                logAudit(
+                    $currentUser['id'],
+                    'add_honey',
+                    'honey_stock',
+                    $supplierId,
+                    null,
+                    [
+                        'variety' => $honeyVariety,
+                        'variety_code' => $honeyVarietyCode,
+                        'quantity' => $quantity,
+                        'type' => $honeyType,
+                    ]
+                );
                 
                 $success = 'تم إضافة العسل بنجاح';
                 // إعادة تحميل الصفحة باستخدام JavaScript
@@ -1064,11 +1081,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $unit = trim($material['unit'] ?? 'كجم');
                     
                     if ($materialType && $quantity > 0) {
+                        $isHoneyMaterial = $materialType === 'honey_raw' || $materialType === 'honey_filtered';
+                        if ($isHoneyMaterial && !in_array($honeyVariety, $validHoneyVarieties, true)) {
+                            $honeyVariety = null;
+                        }
                         $rawMaterials[] = [
                             'type' => $materialType,
                             'name' => $materialName ?: $materialType,
                             'supplier_id' => $supplierId > 0 ? $supplierId : null,
-                            'honey_variety' => ($materialType === 'honey_raw' || $materialType === 'honey_filtered') ? $honeyVariety : null,
+                            'honey_variety' => $isHoneyMaterial ? $honeyVariety : null,
                             'quantity' => $quantity,
                             'unit' => $unit
                         ];
@@ -1497,6 +1518,11 @@ if ($section === 'honey') {
                         </thead>
                         <tbody>
                             <?php foreach ($honeyStock as $stock): ?>
+                                <?php
+                                    $varietyRaw = $stock['honey_variety'] ?? 'أخرى';
+                                    $varietyDisplay = formatHoneyVarietyWithCode($varietyRaw);
+                                    $varietyDisplayEscaped = htmlspecialchars($varietyDisplay, ENT_QUOTES, 'UTF-8');
+                                ?>
                                 <tr>
                                     <td>
                                         <strong><?php echo htmlspecialchars($stock['supplier_name']); ?></strong>
@@ -1504,18 +1530,18 @@ if ($section === 'honey') {
                                             <br><small class="text-muted"><?php echo htmlspecialchars($stock['supplier_phone']); ?></small>
                                         <?php endif; ?>
                                     </td>
-                                    <td><span class="badge bg-info"><?php echo htmlspecialchars($stock['honey_variety']); ?></span></td>
+                                    <td><span class="badge bg-info"><?php echo htmlspecialchars($varietyDisplay); ?></span></td>
                                     <td class="text-center"><strong class="text-warning"><?php echo number_format($stock['raw_honey_quantity'], 2); ?></strong> كجم</td>
                                     <td class="text-center"><strong class="text-success"><?php echo number_format($stock['filtered_honey_quantity'], 2); ?></strong> كجم</td>
                                     <td class="text-center">
                                         <div class="btn-group-vertical btn-group-sm" role="group">
                                             <button class="btn btn-warning btn-sm mb-1" 
-                                                    onclick="filterHoney(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety']); ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
+                                                    onclick="filterHoney(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name'], ENT_QUOTES, 'UTF-8'); ?>', '<?php echo $varietyDisplayEscaped; ?>', <?php echo $stock['raw_honey_quantity']; ?>)"
                                                     <?php echo $stock['raw_honey_quantity'] <= 0 ? 'disabled' : ''; ?>>
                                                 <i class="bi bi-funnel"></i> تصفية
                                             </button>
                                             <button class="btn btn-danger btn-sm"
-                                                    onclick="openHoneyDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['honey_variety']); ?>', <?php echo $stock['raw_honey_quantity']; ?>, <?php echo $stock['filtered_honey_quantity']; ?>)"
+                                                    onclick="openHoneyDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name'], ENT_QUOTES, 'UTF-8'); ?>', '<?php echo $varietyDisplayEscaped; ?>', <?php echo $stock['raw_honey_quantity']; ?>, <?php echo $stock['filtered_honey_quantity']; ?>)"
                                                     <?php echo ($stock['raw_honey_quantity'] <= 0 && $stock['filtered_honey_quantity'] <= 0) ? 'disabled' : ''; ?>>
                                                 <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
                                             </button>
@@ -1553,13 +1579,12 @@ if ($section === 'honey') {
                         </div>
                         <div class="mb-3">
                             <label class="form-label">نوع العسل</label>
-                            <select class="form-select" name="honey_variety">
-                                <option value="سدر">سدر</option>
-                                <option value="جبلي">جبلي</option>
-                                <option value="حبة البركة">حبة البركة</option>
-                                <option value="موالح">موالح</option>
-                                <option value="نوارة برسيم">نوارة برسيم</option>
-                                <option value="أخرى">أخرى</option>
+                            <select class="form-select honey-variety-select" name="honey_variety">
+                                <?php foreach ($honeyVarietiesCatalog as $honeyVariety => $meta): ?>
+                                    <option value="<?php echo htmlspecialchars($honeyVariety); ?>" data-code="<?php echo htmlspecialchars($meta['code']); ?>" <?php echo $honeyVariety === $defaultHoneyVariety ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars(sprintf('%s - %s', $meta['label'], $meta['code'])); ?>
+                                    </option>
+                                <?php endforeach; ?>
                             </select>
                         </div>
                         <div class="mb-3">
@@ -2961,9 +2986,18 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
     </div>
 </div>
 
+<?php
+$honeyVarietyOptionsMarkup = '';
+foreach ($honeyVarietiesCatalog as $catalogVariety => $meta) {
+    $labelWithCode = sprintf('%s - %s', $meta['label'], $meta['code']);
+    $honeyVarietyOptionsMarkup .= '<option value="' . htmlspecialchars($catalogVariety, ENT_QUOTES, 'UTF-8') . '" data-code="' . htmlspecialchars($meta['code'], ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($labelWithCode, ENT_QUOTES, 'UTF-8') . '</option>';
+}
+?>
+
 <script>
 // دالة لإضافة صف مادة خام جديدة
 let materialRowCount = 0;
+const honeyVarietyOptionsMarkup = <?php echo json_encode($honeyVarietyOptionsMarkup, JSON_UNESCAPED_UNICODE); ?>;
 function addMaterialRow() {
     materialRowCount++;
     const container = document.getElementById('materialsContainer');
@@ -2996,15 +3030,10 @@ function addMaterialRow() {
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">نوع العسل</label>
-                        <select class="form-select form-select-sm" name="materials[${materialRowCount}][honey_variety]" 
-                                id="honey_variety_${materialRowCount}" style="display:none;">
+                        <select class="form-select form-select-sm honey-variety-select" name="materials[${materialRowCount}][honey_variety]" 
+                                id="honey_variety_${materialRowCount}" style="display:none;" data-placeholder-target="honey_variety_placeholder_${materialRowCount}">
                             <option value="">اختر النوع</option>
-                            <option value="سدر">سدر</option>
-                            <option value="جبلي">جبلي</option>
-                            <option value="حبة البركة">حبة البركة</option>
-                            <option value="موالح">موالح</option>
-                            <option value="نوارة برسيم">نوارة برسيم</option>
-                            <option value="أخرى">أخرى</option>
+                            ${honeyVarietyOptionsMarkup}
                         </select>
                         <small class="text-muted" id="honey_variety_placeholder_${materialRowCount}">-</small>
                     </div>

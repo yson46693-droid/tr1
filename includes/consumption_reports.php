@@ -524,8 +524,13 @@ function generateConsumptionPdf($summary, $meta)
 function sendConsumptionReport($dateFrom, $dateTo, $scopeLabel)
 {
     $summary = getConsumptionSummary($dateFrom, $dateTo);
-    if (empty($summary['packaging']['items']) && empty($summary['raw']['items'])) {
-        return ['success' => false, 'message' => 'لا توجد بيانات لاستهلاك الفترة المحددة'];
+    $hasPackaging = !empty($summary['packaging']['items']);
+    $hasRaw = !empty($summary['raw']['items']);
+    $hasPackagingDamage = !empty($summary['packaging_damage']['items']);
+    $hasRawDamage = !empty($summary['raw_damage']['items']);
+
+    if (!$hasPackaging && !$hasRaw && !$hasPackagingDamage && !$hasRawDamage) {
+        return ['success' => false, 'message' => 'لا توجد بيانات للفترة المحددة. يرجى اختيار فترة تحتوي على استهلاك أو تالف.'];
     }
     $title = 'تقرير استهلاك الإنتاج';
     $meta = [
