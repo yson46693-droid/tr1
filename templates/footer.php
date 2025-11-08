@@ -1,34 +1,15 @@
-            const versionUtils = (function() {
-                function normalize(versionString) {
-                    const cleaned = (versionString || '').replace(/[^0-9.]/g, '');
-                    const parts = cleaned.split('.').filter(Boolean);
-                    while (parts.length < 2) {
-                        parts.push('0');
-                    }
-                    return parts.slice(0, 3);
-                }
-
-                function increment(baseVersion, serverVersion) {
-                    if (serverVersion && serverVersion !== baseVersion) {
+            const versionUtils = {
+                normalize(versionString) {
+                    return (versionString || '').toString().trim();
+                },
+                latest(serverVersion) {
+                    const stored = localStorage.getItem(VERSION_STORAGE_KEY);
+                    if (serverVersion) {
                         return serverVersion;
                     }
-
-                    const parts = normalize(baseVersion);
-                    const minorIndex = parts.length - 1;
-                    const minor = parseInt(parts[minorIndex], 10) || 0;
-                    parts[minorIndex] = String(minor + 1);
-
-                    if (parts.length === 2) {
-                        return parts.join('.');
-                    }
-                    return parts.join('.');
+                    return stored || 'جديد';
                 }
-
-                return {
-                    normalize,
-                    increment
-                };
-            })();
+            };
 <?php
 
 
@@ -190,13 +171,11 @@ if (!defined('ACCESS_ALLOWED')) {
                     if (data.success) {
                         const currentHash = data.content_hash || data.version || data.last_modified;
                         const storedHash = localStorage.getItem(STORAGE_KEY);
-                        const storedDisplayedVersion = localStorage.getItem(VERSION_STORAGE_KEY);
-                        const serverVersion = data.version || '1.0.0';
-
-                        let displayVersion = storedDisplayedVersion || serverVersion;
+                        const serverVersion = data.version || '';
+                        let displayVersion = versionUtils.latest(serverVersion);
 
                         if (storedHash && storedHash !== currentHash) {
-                            displayVersion = versionUtils.increment(storedDisplayedVersion || serverVersion, serverVersion);
+                            displayVersion = versionUtils.normalize(serverVersion) || 'جديد';
                             showUpdateAvailableNotification(displayVersion);
                         }
 
@@ -224,8 +203,7 @@ if (!defined('ACCESS_ALLOWED')) {
                 notification.className = 'alert alert-info alert-dismissible fade show position-fixed';
                 notification.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);';
                 
-                const storedDisplayedVersion = localStorage.getItem(VERSION_STORAGE_KEY) || '1.0.0';
-                const displayVersion = versionUtils.increment(storedDisplayedVersion, version);
+                const displayVersion = versionUtils.normalize(version) || 'جديد';
                 localStorage.setItem(VERSION_STORAGE_KEY, displayVersion);
                 
                 notification.innerHTML = `
@@ -235,7 +213,7 @@ if (!defined('ACCESS_ALLOWED')) {
                                 <i class="bi bi-arrow-clockwise me-2 fs-5"></i>
                                 <strong>تحديث متاح!</strong>
                             </div>
-                            <p class="mb-2 small">يتوفر تحديث جديد للموقع (v${displayVersion}). يرجى تحديث الصفحة للحصول على أحدث الميزات.</p>
+                            <p class="mb-2 small">يتوفر تحديث جديد للموقع. يرجى تحديث الصفحة للحصول على أحدث الميزات.</p>
                             <div class="d-flex gap-2">
                                 <button type="button" class="btn btn-sm btn-primary" onclick="refreshPage()">
                                     <i class="bi bi-arrow-clockwise me-1"></i>تحديث الآن
