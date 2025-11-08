@@ -320,6 +320,23 @@ function getConsumptionSummary($dateFrom, $dateTo)
                 return $b['total_damaged'] <=> $a['total_damaged'];
             });
 
+            $packagingDamageEntries = 0;
+            $packagingDamageLastRecordedAt = null;
+            $packagingDamageLastRecordedBy = null;
+            foreach ($summary['packaging_damage']['items'] as $item) {
+                $packagingDamageEntries += (int)($item['entries'] ?? 0);
+                $itemLastRecordedAt = $item['last_recorded_at'] ?? null;
+                if (!empty($itemLastRecordedAt)) {
+                    if ($packagingDamageLastRecordedAt === null || strtotime($itemLastRecordedAt) > strtotime($packagingDamageLastRecordedAt)) {
+                        $packagingDamageLastRecordedAt = $itemLastRecordedAt;
+                        $packagingDamageLastRecordedBy = $item['last_recorded_by'] ?? null;
+                    }
+                }
+            }
+            $summary['packaging_damage']['entries'] = $packagingDamageEntries;
+            $summary['packaging_damage']['last_recorded_at'] = $packagingDamageLastRecordedAt;
+            $summary['packaging_damage']['last_recorded_by'] = $packagingDamageLastRecordedBy;
+
             $summary['packaging_damage']['logs'] = $damageLogs;
         }
     } catch (Exception $e) {
@@ -403,6 +420,23 @@ function getConsumptionSummary($dateFrom, $dateTo)
                 usort($summary['raw_damage']['categories'][$category]['items'], function ($a, $b) {
                     return ($b['total_damaged_raw'] ?? 0) <=> ($a['total_damaged_raw'] ?? 0);
                 });
+
+                $categoryEntries = 0;
+                $categoryLastRecordedAt = null;
+                $categoryLastRecordedBy = null;
+                foreach ($items as $item) {
+                    $categoryEntries += (int)($item['entries'] ?? 0);
+                    $itemLastRecordedAt = $item['last_recorded_at'] ?? null;
+                    if (!empty($itemLastRecordedAt)) {
+                        if ($categoryLastRecordedAt === null || strtotime($itemLastRecordedAt) > strtotime($categoryLastRecordedAt)) {
+                            $categoryLastRecordedAt = $itemLastRecordedAt;
+                            $categoryLastRecordedBy = $item['last_recorded_by'] ?? null;
+                        }
+                    }
+                }
+                $summary['raw_damage']['categories'][$category]['entries'] = $categoryEntries;
+                $summary['raw_damage']['categories'][$category]['last_recorded_at'] = $categoryLastRecordedAt;
+                $summary['raw_damage']['categories'][$category]['last_recorded_by'] = $categoryLastRecordedBy;
             }
 
             $summary['raw_damage']['logs'] = $rawDamageLogs;
@@ -410,6 +444,37 @@ function getConsumptionSummary($dateFrom, $dateTo)
     } catch (Exception $e) {
         error_log('Consumption summary raw damage aggregation error: ' . $e->getMessage());
     }
+
+    $summary['damage_compliance'] = [];
+    $summary['damage_compliance'][] = [
+        'key' => 'packaging_damage',
+        'label' => 'قسم التعبئة',
+        'entries' => $summary['packaging_damage']['entries'] ?? 0,
+        'total_damaged' => consumptionFormatNumber($summary['packaging_damage']['total']),
+        'last_recorded_at' => $summary['packaging_damage']['last_recorded_at'] ?? null,
+        'last_recorded_by' => $summary['packaging_damage']['last_recorded_by'] ?? null,
+        'has_records' => ($summary['packaging_damage']['entries'] ?? 0) > 0
+    ];
+
+    foreach ($summary['raw_damage']['categories'] as $categoryKey => $categoryData) {
+        $entries = $categoryData['entries'] ?? 0;
+        $summary['damage_compliance'][] = [
+            'key' => 'raw_' . $categoryKey,
+            'label' => 'قسم ' . ($categoryData['label'] ?? $categoryKey),
+            'entries' => $entries,
+            'total_damaged' => consumptionFormatNumber($categoryData['total']),
+            'last_recorded_at' => $categoryData['last_recorded_at'] ?? null,
+            'last_recorded_by' => $categoryData['last_recorded_by'] ?? null,
+            'has_records' => $entries > 0
+        ];
+    }
+
+    usort($summary['damage_compliance'], function ($a, $b) {
+        if (($a['has_records'] ?? false) === ($b['has_records'] ?? false)) {
+            return strcmp($a['label'] ?? '', $b['label'] ?? '');
+        }
+        return ($a['has_records'] ?? false) ? 1 : -1;
+    });
 
     return $summary;
 }

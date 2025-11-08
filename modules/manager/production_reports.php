@@ -352,6 +352,53 @@ function renderSummaryCards($label, $summary)
     echo '</div></div>';
 }
 
+function renderDamageComplianceCard(array $compliance)
+{
+    if (empty($compliance)) {
+        return;
+    }
+    echo '<div class="card mb-4 shadow-sm">';
+    echo '<div class="card-header bg-warning-subtle text-warning d-flex justify-content-between align-items-center">';
+    echo '<span><i class="bi bi-shield-check me-2"></i>متابعة تسجيل التوالف حسب الأقسام</span>';
+    echo '<span class="small text-warning-emphasis">يجب تسجيل أي تالف بشكل يومي</span>';
+    echo '</div>';
+    echo '<div class="card-body"><div class="row g-3">';
+    foreach ($compliance as $department) {
+        $label = $department['label'] ?? 'قسم غير محدد';
+        $entries = (int)($department['entries'] ?? 0);
+        $totalDamaged = (float)($department['total_damaged'] ?? 0);
+        $hasRecords = !empty($department['has_records']);
+        $lastRecordedAt = $department['last_recorded_at'] ?? null;
+        $lastRecordedBy = $department['last_recorded_by'] ?? null;
+
+        $statusClass = $hasRecords ? 'bg-success-subtle text-success' : 'bg-danger-subtle text-danger';
+        $statusIcon = $hasRecords ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill';
+        $statusLabel = $hasRecords ? 'مسجل' : 'غير مسجل';
+        $lastRecordedDisplay = '<span class="text-muted">لا يوجد تسجيل</span>';
+        if (!empty($lastRecordedAt)) {
+            $formattedDate = date('Y-m-d H:i', strtotime($lastRecordedAt));
+            $lastRecordedDisplay = htmlspecialchars($formattedDate);
+            if (!empty($lastRecordedBy)) {
+                $lastRecordedDisplay .= '<br><small class="text-muted">بواسطة: ' . htmlspecialchars($lastRecordedBy) . '</small>';
+            }
+        }
+
+        echo '<div class="col-md-4 col-lg-3">';
+        echo '<div class="border rounded-3 p-3 h-100 shadow-sm">';
+        echo '<div class="d-flex justify-content-between align-items-center mb-2">';
+        echo '<span class="fw-semibold">' . htmlspecialchars($label) . '</span>';
+        echo '<span class="badge ' . $statusClass . '"><i class="bi ' . $statusIcon . ' me-1"></i>' . htmlspecialchars($statusLabel) . '</span>';
+        echo '</div>';
+        echo '<div class="small text-muted mb-1">عدد السجلات: <span class="fw-semibold">' . number_format($entries) . '</span></div>';
+        echo '<div class="small text-muted mb-1">إجمالي التالف: <span class="fw-semibold text-danger">' . number_format($totalDamaged, 3) . '</span></div>';
+        echo '<div class="small text-muted">آخر تسجيل:<br><span class="fw-semibold">' . $lastRecordedDisplay . '</span></div>';
+        echo '</div>';
+        echo '</div>';
+    }
+    echo '</div></div>';
+    echo '</div>';
+}
+
 $availablePeriods = ['current_month', 'previous_month', 'day'];
 $selectedPeriod = $_GET['period'] ?? 'current_month';
 if (!in_array($selectedPeriod, $availablePeriods, true)) {
@@ -428,6 +475,8 @@ $recordsCount = count($combinedRows);
 </div>
 
 <?php renderSummaryCards('ملخص ' . $rangeLabel, $selectedSummary); ?>
+
+<?php renderDamageComplianceCard($selectedSummary['damage_compliance'] ?? []); ?>
 
 <div class="card shadow-sm">
     <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">

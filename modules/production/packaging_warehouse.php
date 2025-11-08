@@ -1205,6 +1205,167 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
 </div>
 
 <!-- Modal إضافة كمية جديدة -->
+<div class="modal fade" id="packagingReportModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title"><i class="bi bi-clipboard-data me-2"></i>تقرير احترافي لمخزون أدوات التعبئة</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div id="packagingReportContent" class="packaging-report-content">
+                    <div class="report-header d-flex flex-column flex-lg-row justify-content-between align-items-start gap-3 mb-4">
+                        <div>
+                            <h3 class="fw-semibold mb-1">تقرير مخزن أدوات التعبئة</h3>
+                            <div class="text-muted small">تاريخ التوليد: <?php echo htmlspecialchars($packagingReport['generated_at']); ?></div>
+                            <div class="text-muted small">أُعد بواسطة: <?php echo htmlspecialchars($packagingReport['generated_by']); ?></div>
+                        </div>
+                        <div class="text-lg-end">
+                            <div class="d-flex flex-wrap gap-2 justify-content-start justify-content-lg-end">
+                                <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2">
+                                    إجمالي الأدوات: <?php echo number_format($packagingReport['total_materials']); ?>
+                                </span>
+                                <span class="badge bg-success-subtle text-success fw-semibold px-3 py-2">
+                                    إجمالي الكمية: <?php echo number_format($packagingReport['total_quantity'], 2); ?>
+                                </span>
+                                <span class="badge bg-info-subtle text-info fw-semibold px-3 py-2">
+                                    فئات الأدوات: <?php echo number_format($packagingReport['types_count']); ?>
+                                </span>
+                            </div>
+                            <div class="text-muted small mt-2">
+                                آخر تحديث للسجلات: <?php echo $packagingReport['last_updated'] ? htmlspecialchars($packagingReport['last_updated']) : 'غير متاح'; ?>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-4">
+                        <div class="col-sm-6 col-lg-3">
+                            <div class="border rounded-4 p-3 h-100 bg-light">
+                                <div class="text-muted small mb-1">إجمالي الأدوات</div>
+                                <div class="fs-5 fw-semibold text-primary"><?php echo number_format($packagingReport['total_materials']); ?></div>
+                                <div class="text-muted small mt-1">الأدوات النشطة في المخزن</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-6 col-lg-3">
+                            <div class="border rounded-4 p-3 h-100 bg-light">
+                                <div class="text-muted small mb-1">إجمالي المخزون الحالي</div>
+                                <div class="fs-5 fw-semibold text-success"><?php echo number_format($packagingReport['total_quantity'], 2); ?></div>
+                                <div class="text-muted small mt-1">جميع الوحدات المتاحة</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-6 col-lg-3">
+                            <div class="border rounded-4 p-3 h-100 bg-light">
+                                <div class="text-muted small mb-1">أدوات بدون مخزون</div>
+                                <div class="fs-5 fw-semibold text-danger"><?php echo number_format($packagingReport['zero_quantity']); ?></div>
+                                <div class="text-muted small mt-1">أدوات تحتاج إعادة توريد</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-6 col-lg-3">
+                            <div class="border rounded-4 p-3 h-100 bg-light">
+                                <div class="text-muted small mb-1">عمليات الإنتاج المرتبطة</div>
+                                <div class="fs-5 fw-semibold text-info"><?php echo number_format($packagingReport['total_productions']); ?></div>
+                                <div class="text-muted small mt-1">إجمالي العمليات التي استُخدمت فيها الأدوات</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h5 class="fw-semibold mb-3"><i class="bi bi-diagram-3 me-2"></i>التوزيع حسب النوع</h5>
+                    <div class="table-responsive mb-4">
+                        <table class="table table-sm table-bordered align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>الفئة</th>
+                                    <th>عدد الأصناف</th>
+                                    <th>إجمالي الكمية</th>
+                                    <th>تفاصيل الوحدات</th>
+                                    <th>متوسط الكمية</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (empty($packagingReport['type_breakdown'])): ?>
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted py-3">لا توجد بيانات كافية لعرض التوزيع حسب النوع.</td>
+                                    </tr>
+                                <?php else: ?>
+                                    <?php foreach ($packagingReport['type_breakdown'] as $typeLabel => $info): ?>
+                                        <?php
+                                        $unitBreakdown = [];
+                                        foreach ($info['units'] as $unitName => $unitQuantity) {
+                                            $unitBreakdown[] = number_format($unitQuantity, 2) . ' ' . htmlspecialchars($unitName);
+                                        }
+                                        ?>
+                                        <tr>
+                                            <td class="fw-semibold"><?php echo htmlspecialchars($typeLabel); ?></td>
+                                            <td><?php echo number_format($info['count']); ?></td>
+                                            <td><?php echo number_format($info['total_quantity'], 2); ?></td>
+                                            <td><?php echo $unitBreakdown ? implode(' • ', $unitBreakdown) : '-'; ?></td>
+                                            <td><?php echo number_format($info['average_quantity'], 2); ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h5 class="fw-semibold mb-3"><i class="bi bi-bar-chart-steps me-2"></i>أعلى الأدوات من حيث الكمية</h5>
+                    <div class="table-responsive mb-3">
+                        <table class="table table-sm table-striped align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>#</th>
+                                    <th>اسم الأداة</th>
+                                    <th>الكود/المعرف</th>
+                                    <th>الفئة</th>
+                                    <th>الكمية المتاحة</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php if (empty($packagingReport['top_items'])): ?>
+                                    <tr>
+                                        <td colspan="5" class="text-center text-muted py-3">لا توجد بيانات لعرض أفضل الأدوات.</td>
+                                    </tr>
+                                <?php else: ?>
+                                    <?php foreach ($packagingReport['top_items'] as $index => $item): ?>
+                                        <tr>
+                                            <td><?php echo $index + 1; ?></td>
+                                            <td class="fw-semibold"><?php echo htmlspecialchars($item['name']); ?></td>
+                                            <td><?php echo $item['code'] ? htmlspecialchars((string)$item['code']) : '-'; ?></td>
+                                            <td><?php echo htmlspecialchars($item['type']); ?></td>
+                                            <td>
+                                                <span class="badge bg-primary-subtle text-primary fw-semibold">
+                                                    <?php echo number_format($item['quantity'], 2) . ' ' . htmlspecialchars($item['unit']); ?>
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="alert alert-info d-flex align-items-center gap-2">
+                        <i class="bi bi-info-circle-fill fs-4"></i>
+                        <div>
+                            <div class="fw-semibold">ملاحظات تحليلية</div>
+                            <ul class="mb-0 small ps-3">
+                                <li>عدد الأدوات بدون مخزون حالياً: <strong><?php echo number_format($packagingReport['zero_quantity']); ?></strong>. يُنصح بمراجعة إجراءات إعادة التوريد.</li>
+                                <li>إجمالي الاستخدام من خلال عمليات الإنتاج: <strong><?php echo number_format($packagingReport['total_used'], 2); ?></strong> وحدة عبر <strong><?php echo number_format($packagingReport['total_productions']); ?></strong> عملية معتمدة.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">إغلاق</button>
+                <button type="button" class="btn btn-primary" id="printPackagingReportBtn">
+                    <i class="bi bi-printer me-1"></i>
+                    طباعة التقرير
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="addQuantityModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -1410,6 +1571,83 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
 </div>
 
 <script>
+(function () {
+    const reportButton = document.getElementById('generatePackagingReportBtn');
+    const reportModalElement = document.getElementById('packagingReportModal');
+    const printButton = document.getElementById('printPackagingReportBtn');
+
+    let reportModalInstance = null;
+
+    if (reportModalElement && typeof bootstrap !== 'undefined') {
+        reportModalInstance = new bootstrap.Modal(reportModalElement);
+    }
+
+    if (reportButton && reportModalInstance) {
+        reportButton.addEventListener('click', () => {
+            reportModalInstance.show();
+        });
+    }
+
+    if (printButton) {
+        printButton.addEventListener('click', () => {
+            const reportContent = document.getElementById('packagingReportContent');
+            if (!reportContent) {
+                return;
+            }
+
+            const printWindow = window.open('', '_blank', 'width=1024,height=768');
+            const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+                .map((element) => element.outerHTML)
+                .join('\n');
+
+            printWindow.document.write(`<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>تقرير مخزن أدوات التعبئة</title>
+${stylesheets}
+<style>
+body { font-family: 'Tajawal', 'Cairo', sans-serif; padding: 32px; background: #f8fafc; color: #0f172a; }
+.report-header { border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.summary-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
+.summary-card .label { color: #64748b; font-size: 13px; margin-bottom: 6px; }
+.summary-card .value { font-size: 20px; font-weight: 600; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 28px; background: #fff; border-radius: 16px; overflow: hidden; }
+table thead { background: #f1f5f9; }
+table th, table td { padding: 14px 16px; border: 1px solid #e2e8f0; text-align: right; }
+table th { font-weight: 600; color: #1e293b; background: #f8fafc; }
+.badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #e0f2fe; color: #0369a1; font-size: 12px; font-weight: 600; }
+.notes { border-left: 4px solid #38bdf8; background: #ecfeff; padding: 16px 20px; border-radius: 12px; }
+@media print {
+    body { padding: 0; background: #fff; }
+    .badge { background: #bfdbfe; color: #1d4ed8; }
+}
+</style>
+</head>
+<body>
+<div class="report-header">
+    <div>
+        <h2 style="margin:0 0 8px; font-weight:700;">تقرير مخزن أدوات التعبئة</h2>
+        <div style="color:#64748b; font-size:13px;">تاريخ التوليد: <?php echo htmlspecialchars($packagingReport['generated_at']); ?></div>
+        <div style="color:#64748b; font-size:13px;">أُعد بواسطة: <?php echo htmlspecialchars($packagingReport['generated_by']); ?></div>
+    </div>
+    <div style="text-align:left;">
+        <div class="badge">إجمالي الأدوات: <?php echo number_format($packagingReport['total_materials']); ?></div>
+        <div class="badge" style="margin-right:8px;">إجمالي الكمية: <?php echo number_format($packagingReport['total_quantity'], 2); ?></div>
+        <div style="color:#64748b; font-size:12px; margin-top:8px;">آخر تحديث للسجلات: <?php echo $packagingReport['last_updated'] ? htmlspecialchars($packagingReport['last_updated']) : 'غير متاح'; ?></div>
+    </div>
+</div>
+${reportContent.outerHTML}
+</body>
+</html>`);
+            printWindow.document.close();
+            printWindow.focus();
+            printWindow.print();
+        });
+    }
+})();
+
 function openAddQuantityModal(trigger) {
     const modalElement = document.getElementById('addQuantityModal');
     const form = document.getElementById('addQuantityForm');
@@ -1733,6 +1971,22 @@ function openEditModalFromData(material) {
 .table-sm .btn-group {
     display: flex;
     gap: 2px;
+}
+
+.packaging-report-content .badge {
+    font-size: 0.75rem;
+}
+
+.packaging-report-content .table {
+    font-size: 0.85rem;
+}
+
+.packaging-report-content .border.rounded-4 {
+    background-color: #f8fafc;
+}
+
+.packaging-report-content h5 {
+    color: #1f2937;
 }
 
 @media (max-width: 991px) {

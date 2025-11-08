@@ -140,7 +140,7 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                     );
                 }
 
-                $notifications = getUserNotifications($currentUser['id'], false, 10) ?? [];
+                $notifications = getUserNotifications($currentUser['id'], true, 10) ?? [];
                 $tasksTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'tasks'"));
                 $activeTaskTitles = [];
 

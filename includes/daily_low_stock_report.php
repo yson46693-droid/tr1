@@ -7,6 +7,82 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
+const LOW_STOCK_REPORT_JOB_KEY = 'low_stock_report';
+
+if (!function_exists('lowStockReportEnsureJobTable')) {
+    /**
+     * ضمان وجود جدول تتبع الوظائف اليومية.
+     */
+    function lowStockReportEnsureJobTable(): void
+    {
+        static $tableReady = false;
+
+        if ($tableReady) {
+            return;
+        }
+
+        try {
+            $db = db();
+            $db->execute("
+                CREATE TABLE IF NOT EXISTS `system_daily_jobs` (
+                  `job_key` varchar(120) NOT NULL,
+                  `last_sent_at` datetime DEFAULT NULL,
+                  `last_file_path` varchar(512) DEFAULT NULL,
+                  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`job_key`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+        } catch (Throwable $tableError) {
+            error_log('Low Stock Report: failed ensuring job table - ' . $tableError->getMessage());
+            return;
+        }
+
+        $tableReady = true;
+    }
+}
+
+if (!function_exists('lowStockReportNotifyManager')) {
+    /**
+     * إرسال إشعار للمدير عند الحاجة.
+     */
+    function lowStockReportNotifyManager(string $message): void
+    {
+        if (function_exists('createNotificationForRole')) {
+            try {
+                createNotificationForRole(
+                    'manager',
+                    'تقرير المخازن اليومي',
+                    $message,
+                    'info'
+                );
+            } catch (Throwable $notifyError) {
+                error_log('Low Stock Report: notification error - ' . $notifyError->getMessage());
+            }
+        }
+    }
+}
+
+if (!function_exists('lowStockReportSaveStatus')) {
+    /**
+     * حفظ حالة التقرير في system_settings.
+     *
+     * @param array<string, mixed> $data
+     */
+    function lowStockReportSaveStatus($db, string $settingKey, array $data): void
+    {
+        try {
+            $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $db->execute(
+                "INSERT INTO system_settings (`key`, `value`) VALUES (?, ?)
+                 ON DUPLICATE KEY UPDATE value = VALUES(value)",
+                [$settingKey, $json]
+            );
+        } catch (Throwable $saveError) {
+            error_log('Low Stock Report: status save error - ' . $saveError->getMessage());
+        }
+    }
+}
+
 if (!function_exists('triggerDailyLowStockReport')) {
     /**
      * تنفيذ فحص الكميات المنخفضة مرة واحدة يوميًا.
@@ -40,6 +116,33 @@ if (!function_exists('triggerDailyLowStockReport')) {
         }
 
         $db = db();
+
+        lowStockReportEnsureJobTable();
+
+        $jobState = null;
+        try {
+            $jobState = $db->queryOne(
+                "SELECT last_sent_at, last_file_path FROM system_daily_jobs WHERE job_key = ? LIMIT 1",
+                [LOW_STOCK_REPORT_JOB_KEY]
+            );
+        } catch (Throwable $stateError) {
+            error_log('Low Stock Report: job state error - ' . $stateError->getMessage());
+        }
+
+        if (!empty($jobState['last_sent_at'])) {
+            $lastSentDate = substr((string)$jobState['last_sent_at'], 0, 10);
+            if ($lastSentDate === $todayDate) {
+                lowStockReportNotifyManager('تم إرسال تقرير المخازن إلى شات Telegram خلال هذا اليوم بالفعل.');
+                lowStockReportSaveStatus($db, $settingKey, [
+                    'date' => $todayDate,
+                    'status' => 'already_sent',
+                    'checked_at' => date('Y-m-d H:i:s'),
+                    'last_sent_at' => $jobState['last_sent_at'],
+                    'file_path' => $jobState['last_file_path'] ?? null,
+                ]);
+                return;
+            }
+        }
 
         // منع التكرار خلال نفس اليوم باستخدام قفل بسيط
         try {
@@ -305,15 +408,36 @@ if (!function_exists('triggerDailyLowStockReport')) {
                 $finalData['file_path'] = $savedFilePath;
             }
 
-            $finalDataJson = json_encode($finalData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            $db->execute(
-                "UPDATE system_settings SET value = ? WHERE `key` = ?",
-                [$finalDataJson, $settingKey]
-            );
+            if ($status === 'completed') {
+                lowStockReportNotifyManager('تم إرسال تقرير المخازن منخفضة الكمية إلى شات Telegram.');
+                try {
+                    if ($savedFilePath !== null) {
+                        $fileLogValue = $savedFilePath;
+                    } elseif (!empty($reportFileName)) {
+                        $fileLogValue = $reportFileName;
+                    } else {
+                        $fileLogValue = null;
+                    }
+
+                    if ($jobState) {
+                        $db->execute(
+                            "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = ?, updated_at = NOW() WHERE job_key = ?",
+                            [$fileLogValue, LOW_STOCK_REPORT_JOB_KEY]
+                        );
+                    } else {
+                        $db->execute(
+                            "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), ?)",
+                            [LOW_STOCK_REPORT_JOB_KEY, $fileLogValue]
+                        );
+                    }
+                } catch (Throwable $jobUpdateError) {
+                    error_log('Low Stock Report: job state update failed - ' . $jobUpdateError->getMessage());
+                }
+            }
+
+            lowStockReportSaveStatus($db, $settingKey, $finalData);
         } catch (Throwable $updateError) {
             error_log('Low Stock Report: status update failed - ' . $updateError->getMessage());
         }
     }
 }
-
-
