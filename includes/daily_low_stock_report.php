@@ -7,6 +7,11 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
+require_once __DIR__ . '/pdf_helper.php';
+
+use Mpdf\HTMLParserMode;
+use Mpdf\Output\Destination;
+
 /**
  * إنشاء ملف PDF لتقرير الكميات المنخفضة
  *
@@ -53,7 +58,12 @@ function dailyLowStockGeneratePdf(array $sections, array $counts): ?string
         $lines[] = '';
     }
 
-    $pdfContent = dailyLowStockBuildPdf($lines);
+    $imageInfo = dailyLowStockRenderReportImage($lines);
+    if ($imageInfo === null) {
+        return null;
+    }
+
+    $pdfContent = dailyLowStockBuildImagePdf($imageInfo);
     if ($pdfContent === null) {
         return null;
     }
@@ -67,53 +77,111 @@ function dailyLowStockGeneratePdf(array $sections, array $counts): ?string
     return $filePath;
 }
 
-/**
- * بناء محتوى PDF بسيط يدعم العربية
- *
- * @param array<int, string> $lines
- * @return string|null
- */
-function dailyLowStockBuildPdf(array $lines): ?string
+function dailyLowStockRenderReportImage(array $lines): ?array
 {
-    if (empty($lines)) {
+    if (!extension_loaded('gd') || !function_exists('imagecreatetruecolor') || !function_exists('imagettftext')) {
+        error_log('Low Stock Report: GD extension or TTF support not available');
         return null;
     }
 
-    $pageWidth = 595.0;
-    $pageHeight = 842.0;
-    $marginX = 40.0;
-    $startY = $pageHeight - 60.0;
-    $lineSpacing = 22.0;
-
-    $contentParts = [];
-    $yPos = $startY;
-
-    foreach ($lines as $index => $line) {
-        if ($yPos < 60.0) {
-            break;
-        }
-
-        $fontSize = $index === 0 ? 20 : ($index <= 2 ? 14 : 12);
-        $prepared = dailyLowStockNormalizePdfText($line);
-        $hex = strtoupper(bin2hex(dailyLowStockUtf16beText($prepared, true)));
-
-        $contentParts[] = "BT\n/F1 {$fontSize} Tf\n-1 0 0 1 " . ($pageWidth - $marginX) . " {$yPos} Tm\n<{$hex}> Tj\nET\n";
-        $yPos -= $lineSpacing;
+    $fontPath = dailyLowStockFindFontPath();
+    if ($fontPath === null) {
+        error_log('Low Stock Report: no suitable TTF font found');
+        return null;
     }
 
-    $contentStream = implode('', $contentParts);
-    $contentLength = strlen($contentStream);
-    $toUnicode = dailyLowStockBuildToUnicodeCMap();
+    $fontSize = 28;
+    $headerFontSize = 34;
+    $margin = 60;
+    $lineSpacing = (int)ceil($fontSize * 1.6);
+    $headerSpacing = (int)ceil($headerFontSize * 1.6);
+
+    $maxWidth = 0;
+    foreach ($lines as $index => $line) {
+        $size = $index <= 2 ? $headerFontSize : $fontSize;
+        $bbox = imagettfbbox($size, 0, $fontPath, $line);
+        if ($bbox === false) {
+            continue;
+        }
+        $width = max($bbox[2], $bbox[4]) - min($bbox[0], $bbox[6]);
+        $maxWidth = max($maxWidth, (int)ceil($width));
+    }
+
+    if ($maxWidth === 0) {
+        $maxWidth = 800;
+    }
+
+    $imageWidth = $maxWidth + ($margin * 2);
+    $imageHeight = $margin * 2;
+
+    foreach ($lines as $index => $line) {
+        $imageHeight += $index <= 2 ? $headerSpacing : $lineSpacing;
+    }
+
+    $img = imagecreatetruecolor($imageWidth, $imageHeight);
+    if (!$img) {
+        return null;
+    }
+
+    $white = imagecolorallocate($img, 255, 255, 255);
+    $black = imagecolorallocate($img, 20, 20, 20);
+    imagefill($img, 0, 0, $white);
+
+    $currentY = $margin;
+    foreach ($lines as $index => $line) {
+        $size = $index <= 2 ? $headerFontSize : $fontSize;
+        $spacing = $index <= 2 ? $headerSpacing : $lineSpacing;
+        $bbox = imagettfbbox($size, 0, $fontPath, $line);
+        if ($bbox === false) {
+            $currentY += $spacing;
+            continue;
+        }
+        $textWidth = max($bbox[2], $bbox[4]) - min($bbox[0], $bbox[6]);
+        $x = $imageWidth - $margin - $textWidth;
+        $y = $currentY + $spacing - (int)($spacing * 0.3);
+        imagettftext($img, $size, 0, (int)$x, (int)$y, $black, $fontPath, $line);
+        $currentY += $spacing;
+    }
+
+    ob_start();
+    imagejpeg($img, null, 90);
+    $jpegData = ob_get_clean();
+    imagedestroy($img);
+
+    if ($jpegData === false || $jpegData === '') {
+        return null;
+    }
+
+    return [
+        'jpeg' => $jpegData,
+        'width' => $imageWidth,
+        'height' => $imageHeight,
+        'dpi' => 96,
+    ];
+}
+
+function dailyLowStockBuildImagePdf(array $imageInfo): ?string
+{
+    $jpegData = $imageInfo['jpeg'] ?? null;
+    $widthPx = (int)($imageInfo['width'] ?? 0);
+    $heightPx = (int)($imageInfo['height'] ?? 0);
+    $dpi = (int)($imageInfo['dpi'] ?? 96);
+
+    if ($jpegData === null || $widthPx <= 0 || $heightPx <= 0) {
+        return null;
+    }
+
+    $widthPt = $widthPx * 72 / $dpi;
+    $heightPt = $heightPx * 72 / $dpi;
 
     $objects = [];
     $objects[] = "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n";
     $objects[] = "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n";
-    $objects[] = "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 {$pageWidth} {$pageHeight}] /Contents 7 0 R /Resources << /Font << /F1 4 0 R >> >> >> endobj\n";
-    $objects[] = "4 0 obj << /Type /Font /Subtype /Type0 /BaseFont /TimesNewRomanPSMT /Encoding /Identity-H /DescendantFonts [5 0 R] /ToUnicode 6 0 R >> endobj\n";
-    $objects[] = "5 0 obj << /Type /Font /Subtype /CIDFontType2 /BaseFont /TimesNewRomanPSMT /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor 8 0 R /CIDToGIDMap /Identity /DW 1000 >> endobj\n";
-    $objects[] = "6 0 obj << /Length " . strlen($toUnicode) . " >> stream\n{$toUnicode}endstream\nendobj\n";
-    $objects[] = "7 0 obj << /Length {$contentLength} >> stream\n{$contentStream}endstream\nendobj\n";
-    $objects[] = "8 0 obj << /Type /FontDescriptor /FontName /TimesNewRomanPSMT /Flags 32 /ItalicAngle 0 /Ascent 1024 /Descent -300 /CapHeight 800 /StemV 80 /FontBBox [-1024 -1024 3072 3072] >> endobj\n";
+    $objects[] = "3 0 obj << /Type /Page /Parent 2 0 R /Resources << /XObject << /Im1 4 0 R >> >> /MediaBox [0 0 {$widthPt} {$heightPt}] /Contents 5 0 R >> endobj\n";
+    $objects[] = "4 0 obj << /Type /XObject /Subtype /Image /Width {$widthPx} /Height {$heightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length " . strlen($jpegData) . " >> stream\n{$jpegData}\nendstream\nendobj\n";
+
+    $content = "q {$widthPt} 0 0 {$heightPt} 0 0 cm /Im1 Do Q\n";
+    $objects[] = "5 0 obj << /Length " . strlen($content) . " >> stream\n{$content}endstream\nendobj\n";
 
     $pdf = "%PDF-1.7\n";
     $offsets = [];
@@ -136,143 +204,28 @@ function dailyLowStockBuildPdf(array $lines): ?string
     return $pdf;
 }
 
-function dailyLowStockNormalizePdfText(string $text): string
+function dailyLowStockFindFontPath(): ?string
 {
-    $text = str_replace(["\r\n", "\r"], "\n", $text);
-    $text = preg_replace('/\s+/', ' ', $text);
-    $text = trim($text);
-    return dailyLowStockShapeArabic($text);
-}
-
-function dailyLowStockUtf16beText(string $text, bool $withBom = false): string
-{
-    $result = $withBom ? "\xFE\xFF" : '';
-    $directional = "\u{202B}" . $text . "\u{202C}";
-    $result .= mb_convert_encoding($directional, 'UTF-16BE', 'UTF-8');
-    return $result;
-}
-
-function dailyLowStockShapeArabic(string $text): string
-{
-    static $map = null;
-    if ($map === null) {
-        $map = [
-            "\u{0621}" => ['iso' => "\u{FE80}", 'fin' => "\u{FE80}", 'ini' => null, 'med' => null, 'join_prev' => false, 'join_next' => false],
-            "\u{0622}" => ['iso' => "\u{FE81}", 'fin' => "\u{FE82}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0623}" => ['iso' => "\u{FE83}", 'fin' => "\u{FE84}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0624}" => ['iso' => "\u{FE85}", 'fin' => "\u{FE86}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0625}" => ['iso' => "\u{FE87}", 'fin' => "\u{FE88}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0626}" => ['iso' => "\u{FE89}", 'fin' => "\u{FE8A}", 'ini' => "\u{FE8B}", 'med' => "\u{FE8C}", 'join_prev' => true, 'join_next' => true],
-            "\u{0627}" => ['iso' => "\u{FE8D}", 'fin' => "\u{FE8E}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0628}" => ['iso' => "\u{FE8F}", 'fin' => "\u{FE90}", 'ini' => "\u{FE91}", 'med' => "\u{FE92}", 'join_prev' => true, 'join_next' => true],
-            "\u{0629}" => ['iso' => "\u{FE93}", 'fin' => "\u{FE94}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{062A}" => ['iso' => "\u{FE95}", 'fin' => "\u{FE96}", 'ini' => "\u{FE97}", 'med' => "\u{FE98}", 'join_prev' => true, 'join_next' => true],
-            "\u{062B}" => ['iso' => "\u{FE99}", 'fin' => "\u{FE9A}", 'ini' => "\u{FE9B}", 'med' => "\u{FE9C}", 'join_prev' => true, 'join_next' => true],
-            "\u{062C}" => ['iso' => "\u{FE9D}", 'fin' => "\u{FE9E}", 'ini' => "\u{FE9F}", 'med' => "\u{FEA0}", 'join_prev' => true, 'join_next' => true],
-            "\u{062D}" => ['iso' => "\u{FEA1}", 'fin' => "\u{FEA2}", 'ini' => "\u{FEA3}", 'med' => "\u{FEA4}", 'join_prev' => true, 'join_next' => true],
-            "\u{062E}" => ['iso' => "\u{FEA5}", 'fin' => "\u{FEA6}", 'ini' => "\u{FEA7}", 'med' => "\u{FEA8}", 'join_prev' => true, 'join_next' => true],
-            "\u{062F}" => ['iso' => "\u{FEA9}", 'fin' => "\u{FEAA}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0630}" => ['iso' => "\u{FEAB}", 'fin' => "\u{FEAC}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0631}" => ['iso' => "\u{FEAD}", 'fin' => "\u{FEAE}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0632}" => ['iso' => "\u{FEAF}", 'fin' => "\u{FEB0}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0633}" => ['iso' => "\u{FEB1}", 'fin' => "\u{FEB2}", 'ini' => "\u{FEB3}", 'med' => "\u{FEB4}", 'join_prev' => true, 'join_next' => true],
-            "\u{0634}" => ['iso' => "\u{FEB5}", 'fin' => "\u{FEB6}", 'ini' => "\u{FEB7}", 'med' => "\u{FEB8}", 'join_prev' => true, 'join_next' => true],
-            "\u{0635}" => ['iso' => "\u{FEB9}", 'fin' => "\u{FEBA}", 'ini' => "\u{FEBB}", 'med' => "\u{FEBC}", 'join_prev' => true, 'join_next' => true],
-            "\u{0636}" => ['iso' => "\u{FEBD}", 'fin' => "\u{FEBE}", 'ini' => "\u{FEBF}", 'med' => "\u{FEC0}", 'join_prev' => true, 'join_next' => true],
-            "\u{0637}" => ['iso' => "\u{FEC1}", 'fin' => "\u{FEC2}", 'ini' => "\u{FEC3}", 'med' => "\u{FEC4}", 'join_prev' => true, 'join_next' => true],
-            "\u{0638}" => ['iso' => "\u{FEC5}", 'fin' => "\u{FEC6}", 'ini' => "\u{FEC7}", 'med' => "\u{FEC8}", 'join_prev' => true, 'join_next' => true],
-            "\u{0639}" => ['iso' => "\u{FEC9}", 'fin' => "\u{FECA}", 'ini' => "\u{FECB}", 'med' => "\u{FECC}", 'join_prev' => true, 'join_next' => true],
-            "\u{063A}" => ['iso' => "\u{FECD}", 'fin' => "\u{FECE}", 'ini' => "\u{FECF}", 'med' => "\u{FED0}", 'join_prev' => true, 'join_next' => true],
-            "\u{0641}" => ['iso' => "\u{FED1}", 'fin' => "\u{FED2}", 'ini' => "\u{FED3}", 'med' => "\u{FED4}", 'join_prev' => true, 'join_next' => true],
-            "\u{0642}" => ['iso' => "\u{FED5}", 'fin' => "\u{FED6}", 'ini' => "\u{FED7}", 'med' => "\u{FED8}", 'join_prev' => true, 'join_next' => true],
-            "\u{0643}" => ['iso' => "\u{FED9}", 'fin' => "\u{FEDA}", 'ini' => "\u{FEDB}", 'med' => "\u{FEDC}", 'join_prev' => true, 'join_next' => true],
-            "\u{0644}" => ['iso' => "\u{FEDD}", 'fin' => "\u{FEDE}", 'ini' => "\u{FEDF}", 'med' => "\u{FEE0}", 'join_prev' => true, 'join_next' => true],
-            "\u{0645}" => ['iso' => "\u{FEE1}", 'fin' => "\u{FEE2}", 'ini' => "\u{FEE3}", 'med' => "\u{FEE4}", 'join_prev' => true, 'join_next' => true],
-            "\u{0646}" => ['iso' => "\u{FEE5}", 'fin' => "\u{FEE6}", 'ini' => "\u{FEE7}", 'med' => "\u{FEE8}", 'join_prev' => true, 'join_next' => true],
-            "\u{0647}" => ['iso' => "\u{FEE9}", 'fin' => "\u{FEEA}", 'ini' => "\u{FEEB}", 'med' => "\u{FEEC}", 'join_prev' => true, 'join_next' => true],
-            "\u{0648}" => ['iso' => "\u{FEED}", 'fin' => "\u{FEEE}", 'ini' => null, 'med' => null, 'join_prev' => true, 'join_next' => false],
-            "\u{0649}" => ['iso' => "\u{FEEF}", 'fin' => "\u{FEF0}", 'ini' => "\u{FBE8}", 'med' => "\u{FBE9}", 'join_prev' => true, 'join_next' => true],
-            "\u{064A}" => ['iso' => "\u{FEF1}", 'fin' => "\u{FEF2}", 'ini' => "\u{FEF3}", 'med' => "\u{FEF4}", 'join_prev' => true, 'join_next' => true],
-            "\u{0620}" => ['iso' => "\u{FE8B}", 'fin' => "\u{FE8C}", 'ini' => "\u{FE8B}", 'med' => "\u{FE8C}", 'join_prev' => true, 'join_next' => true],
-            "\u{0640}" => ['iso' => "\u{0640}", 'fin' => "\u{0640}", 'ini' => "\u{0640}", 'med' => "\u{0640}", 'join_prev' => true, 'join_next' => true],
-        ];
-    }
-
-    $chars = preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY);
-    $count = count($chars);
-
-    for ($i = 0; $i < $count; $i++) {
-        $current = $chars[$i];
-        if (!isset($map[$current])) {
-            continue;
-        }
-        $data = $map[$current];
-
-        $prevJoin = false;
-        if ($data['join_prev'] && $i > 0) {
-            $prevChar = $chars[$i - 1];
-            if (isset($map[$prevChar]) && $map[$prevChar]['join_next']) {
-                $prevJoin = true;
-            }
-        }
-
-        $nextJoin = false;
-        if ($data['join_next'] && $i < $count - 1) {
-            $nextChar = $chars[$i + 1];
-            if (isset($map[$nextChar]) && $map[$nextChar]['join_prev']) {
-                $nextJoin = true;
-            }
-        }
-
-        if ($prevJoin && $nextJoin && !empty($data['med'])) {
-            $chars[$i] = $data['med'];
-        } elseif ($prevJoin && !empty($data['fin'])) {
-            $chars[$i] = $data['fin'];
-        } elseif ($nextJoin && !empty($data['ini'])) {
-            $chars[$i] = $data['ini'];
-        } else {
-            $chars[$i] = $data['iso'];
-        }
-    }
-
-    $shaped = implode('', $chars);
-
-    // Handle lam-alef ligatures for better appearance
-    $ligatures = [
-        "\u{0644}\u{FE8E}" => "\u{FEFB}", // lam + alef
-        "\u{0644}\u{FE82}" => "\u{FEF5}", // lam + alef with madda
-        "\u{0644}\u{FE84}" => "\u{FEF7}", // lam + alef with hamza above
-        "\u{0644}\u{FE88}" => "\u{FEF9}", // lam + alef with hamza below
+    $candidates = [
+        '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+        '/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed.ttf',
+        '/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf',
+        '/usr/share/fonts/truetype/takao-gothic/TakaoPGothic.ttf',
+        '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+        '/system/fonts/NotoNaskhArabic-Regular.ttf',
+        '/system/fonts/NotoSansArabic-Regular.ttf',
+        'C:\\Windows\\Fonts\\arial.ttf',
+        'C:\\Windows\\Fonts\\arialuni.ttf',
+        'C:\\Windows\\Fonts\\Tahoma.ttf',
     ];
-    $shaped = str_replace(array_keys($ligatures), array_values($ligatures), $shaped);
 
-    return $shaped;
-}
+    foreach ($candidates as $path) {
+        if (is_readable($path)) {
+            return $path;
+        }
+    }
 
-function dailyLowStockBuildToUnicodeCMap(): string
-{
-    return <<<CMAP
-/CIDInit /ProcSet findresource begin
-12 dict begin
-begincmap
-/CIDSystemInfo
-<< /Registry (Adobe)
-   /Ordering (Identity)
-   /Supplement 0
->> def
-/CMapName /Adobe-Identity-UCS def
-/CMapType 2 def
-1 begincodespacerange
-<0000> <FFFF>
-endcodespacerange
-1 beginbfrange
-<0000> <FFFF> <0000>
-endbfrange
-endcmap
-CMapName currentdict /CMap defineresource pop
-end
-end
-CMAP;
+    return null;
 }
 
 function formatLowStockCountLabel(string $key): string

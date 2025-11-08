@@ -9,6 +9,9 @@ if (!defined('ACCESS_ALLOWED')) {
 }
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/pdf_helper.php';
+
+use Mpdf\HTMLParserMode;
 
 // التأكد من وجود الدالة getCurrentLanguage
 if (!function_exists('getCurrentLanguage')) {
@@ -18,205 +21,112 @@ if (!function_exists('getCurrentLanguage')) {
 }
 
 /**
- * تصدير PDF (HTML للطباعة)
+ * تصدير PDF باستخدام مكتبة mPDF مع دعم كامل للعربية
+ *
+ * @param array<int, array<string, mixed>> $data
+ * @param string $title
+ * @param array<string, mixed> $filters
+ * @return string مسار ملف PDF الناتج
+ * @throws Exception
  */
-function exportPDF($data, $title, $filters = []) {
-    $dir = getCurrentLanguage() === 'ar' ? 'rtl' : 'ltr';
-    
-    // بناء HTML
-    $html = '<!DOCTYPE html>
-<html lang="' . getCurrentLanguage() . '" dir="' . $dir . '">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>' . htmlspecialchars($title) . '</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: Arial, "Segoe UI", Tahoma, sans-serif;
-            padding: 20px;
-            color: #333;
-            direction: ' . $dir . ';
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            border-bottom: 3px solid #1e3a5f;
-            padding-bottom: 20px;
-        }
-        .header h1 {
-            color: #1e3a5f;
-            font-size: 24px;
-            margin-bottom: 10px;
-        }
-        .header .company {
-            color: #666;
-            font-size: 16px;
-            margin-bottom: 5px;
-        }
-        .header .date {
-            color: #999;
-            font-size: 14px;
-        }
-        .filters {
-            margin-bottom: 20px;
-            padding: 15px;
-            background: #f5f5f5;
-            border-radius: 5px;
-        }
-        .filters h3 {
-            font-size: 16px;
-            margin-bottom: 10px;
-            color: #1e3a5f;
-        }
-        .filters p {
-            margin: 5px 0;
-            font-size: 14px;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            font-size: 12px;
-        }
-        table th {
-            background: #1e3a5f;
-            color: white;
-            padding: 12px;
-            text-align: ' . ($dir === 'rtl' ? 'right' : 'left') . ';
-            font-weight: bold;
-            border: 1px solid #ddd;
-        }
-        table td {
-            padding: 10px;
-            border: 1px solid #ddd;
-            text-align: ' . ($dir === 'rtl' ? 'right' : 'left') . ';
-        }
-        table tr:nth-child(even) {
-            background: #f9f9f9;
-        }
-        table tr:hover {
-            background: #f0f0f0;
-        }
-        .no-data {
-            text-align: center;
-            padding: 40px;
-            color: #999;
-            font-size: 16px;
-        }
-        @media print {
-            body { padding: 10px; }
-            .no-print { display: none; }
-        }
-        .print-btn {
-            position: fixed;
-            top: 20px;
-            ' . ($dir === 'rtl' ? 'left' : 'right') . ': 20px;
-            background: #1e3a5f;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            z-index: 1000;
-        }
-        .print-btn:hover {
-            background: #2c5282;
-        }
-    </style>
-</head>
-<body>
-    <button class="print-btn no-print" onclick="window.print()">🖨️ طباعة</button>
-    
-    <div class="header">
-        <h1>' . htmlspecialchars($title) . '</h1>
-        <div class="company">' . htmlspecialchars(COMPANY_NAME) . '</div>
-        <div class="date">' . date('Y-m-d H:i:s') . '</div>
-    </div>';
-    
-    // الفلاتر
-    if (!empty($filters)) {
-        $html .= '<div class="filters">
-            <h3>الفلاتر:</h3>';
-        foreach ($filters as $key => $value) {
-            if (!empty($value)) {
-                $html .= '<p><strong>' . htmlspecialchars($key) . ':</strong> ' . htmlspecialchars($value) . '</p>';
-            }
-        }
-        $html .= '</div>';
+function exportPDF($data, $title, $filters = [])
+{
+    $language = getCurrentLanguage();
+    $dir = $language === 'ar' ? 'rtl' : 'ltr';
+
+    $reportsDir = rtrim(REPORTS_PATH, '/\\');
+    if (!file_exists($reportsDir) && !@mkdir($reportsDir, 0755, true)) {
+        throw new Exception('فشل في إنشاء مجلد التقارير. يرجى التحقق من الصلاحيات.');
     }
-    
-    // الجدول
-    if (!empty($data) && is_array($data) && count($data) > 0) {
-        $headers = array_keys($data[0]);
-        
-        $html .= '<table>
-            <thead>
-                <tr>';
-        foreach ($headers as $header) {
-            $html .= '<th>' . htmlspecialchars($header) . '</th>';
+    if (!is_writable($reportsDir)) {
+        throw new Exception('مجلد التقارير غير قابل للكتابة. يرجى التحقق من الصلاحيات.');
+    }
+
+    $headers = [];
+    if (!empty($data) && is_array($data)) {
+        $firstRow = reset($data);
+        if (is_array($firstRow)) {
+            $headers = array_keys($firstRow);
         }
-        $html .= '</tr>
-            </thead>
-            <tbody>';
-        
+    }
+
+    $html = '<div class="report-wrapper">';
+    $html .= '<header class="report-header">';
+    $html .= '<h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>';
+    $html .= '<div class="meta"><span>' . htmlspecialchars(COMPANY_NAME, ENT_QUOTES, 'UTF-8') . '</span>';
+    $html .= '<span>' . date('Y-m-d H:i:s') . '</span></div>';
+    $html .= '</header>';
+
+    if (!empty($filters)) {
+        $html .= '<section class="filters"><h2>الفلاتر</h2><ul>';
+        foreach ($filters as $key => $value) {
+            if ($value === '' || $value === null) {
+                continue;
+            }
+            $html .= '<li><strong>' . htmlspecialchars($key, ENT_QUOTES, 'UTF-8') . ':</strong> ' .
+                htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '</li>';
+        }
+        $html .= '</ul></section>';
+    }
+
+    if (!empty($headers)) {
+        $html .= '<table class="report-table"><thead><tr>';
+        foreach ($headers as $column) {
+            $html .= '<th>' . htmlspecialchars((string)$column, ENT_QUOTES, 'UTF-8') . '</th>';
+        }
+        $html .= '</tr></thead><tbody>';
         foreach ($data as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
             $html .= '<tr>';
-            foreach ($headers as $header) {
-                $html .= '<td>' . htmlspecialchars($row[$header] ?? '') . '</td>';
+            foreach ($headers as $column) {
+                $value = $row[$column] ?? '';
+                $html .= '<td>' . htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8') . '</td>';
             }
             $html .= '</tr>';
         }
-        
-        $html .= '</tbody>
-        </table>';
+        $html .= '</tbody></table>';
     } else {
-        $html .= '<div class="no-data">لا توجد بيانات متاحة</div>';
+        $html .= '<div class="empty">لا توجد بيانات متاحة</div>';
     }
-    
-    $html .= '</body>
-</html>';
-    
-    // حفظ الملف
-    $fileName = sanitizeFileName($title) . '_' . date('Y-m-d_His') . '.html';
-    $filePath = REPORTS_PATH . $fileName;
-    
-    // التأكد من وجود المجلد
-    $reportsDir = rtrim(REPORTS_PATH, '/\\');
-    if (!file_exists($reportsDir)) {
-        if (!@mkdir($reportsDir, 0755, true)) {
-            error_log("Failed to create reports directory: " . $reportsDir);
-            error_log("Current working directory: " . getcwd());
-            error_log("REPORTS_PATH: " . REPORTS_PATH);
-            throw new Exception('فشل في إنشاء مجلد التقارير. يرجى التحقق من الصلاحيات.');
-        }
+
+    $html .= '</div>';
+
+    $styles = '
+        *, *::before, *::after { box-sizing: border-box; }
+        body { font-family: "Amiri", "Cairo", "DejaVu Sans", sans-serif; direction: ' . $dir . '; text-align: ' . ($dir === 'rtl' ? 'right' : 'left') . '; color:#1f2937; }
+        .report-wrapper { padding: 24px; }
+        .report-header { border-bottom: 3px solid #1d4ed8; margin-bottom: 20px; padding-bottom: 16px; text-align: center; }
+        .report-header h1 { margin: 0 0 8px; font-size: 24px; color:#0f172a; }
+        .report-header .meta { display:flex; gap:12px; justify-content:center; font-size:13px; color:#475569; }
+        .report-header .meta span { background:#e2e8f0; padding:6px 12px; border-radius:999px; }
+        .filters { margin: 24px 0; padding: 16px 20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; }
+        .filters h2 { margin:0 0 10px; font-size:16px; color:#0f172a; }
+        .filters ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; font-size:14px; }
+        .report-table { width:100%; border-collapse:collapse; margin-top:16px; font-size:13px; }
+        .report-table thead th { background:#1d4ed8; color:#fff; padding:12px; border:1px solid #1d4ed8; }
+        .report-table tbody td { padding:10px 12px; border:1px solid #cbd5f5; background:#fff; }
+        .report-table tbody tr:nth-child(even) td { background:#f1f5f9; }
+        .empty { padding:24px; background:#f8fafc; border:1px dashed #cbd5f5; border-radius:12px; text-align:center; font-size:14px; color:#64748b; }
+    ';
+
+    $fileName = sanitizeFileName($title) . '_' . date('Y-m-d_His') . '.pdf';
+    $filePath = $reportsDir . DIRECTORY_SEPARATOR . $fileName;
+
+    $mpdf = createArabicMpdf([
+        'directionality' => $dir === 'rtl' ? 'rtl' : 'ltr',
+        'default_font'   => 'amiri',
+    ]);
+
+    if ($dir !== 'rtl') {
+        $mpdf->SetDirectionality('ltr');
     }
-    
-    // التحقق من صلاحيات الكتابة
-    if (!is_writable($reportsDir)) {
-        error_log("Reports directory is not writable: " . $reportsDir);
-        throw new Exception('مجلد التقارير غير قابل للكتابة. يرجى التحقق من الصلاحيات.');
-    }
-    
-    // حفظ الملف
-    $result = @file_put_contents($filePath, $html);
-    if ($result === false) {
-        $error = error_get_last();
-        error_log("Failed to save PDF file: " . ($error['message'] ?? 'Unknown error'));
-        error_log("File path: " . $filePath);
-        error_log("Content length: " . strlen($html));
-        throw new Exception('فشل في حفظ ملف PDF. يرجى التحقق من الصلاحيات والمساحة المتاحة.');
-    }
-    
-    // التحقق من أن الملف تم إنشاؤه بنجاح
-    if (!file_exists($filePath) || filesize($filePath) === 0) {
-        error_log("PDF file was not created properly or is empty: " . $filePath);
-        throw new Exception('فشل في إنشاء ملف PDF أو الملف فارغ.');
-    }
-    
-    error_log("PDF report created successfully: " . $filePath . " (" . filesize($filePath) . " bytes)");
-    
+
+    $mpdf->WriteHTML($styles, HTMLParserMode::HEADER_CSS);
+    $mpdf->WriteHTML($html, HTMLParserMode::HTML_BODY);
+    $mpdf->Output($filePath, \Mpdf\Output\Destination::FILE);
+
     return $filePath;
 }
 
