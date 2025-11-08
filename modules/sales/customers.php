@@ -221,7 +221,7 @@ $customers = $db->query($sql, $params);
                 <h5 class="modal-title">إضافة عميل جديد</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="<?php echo getDashboardUrl('sales'); ?>?page=customers">
+            <form method="POST" action="<?php echo htmlspecialchars($_SERVER['REQUEST_URI']); ?>">
                 <input type="hidden" name="action" value="add_customer">
                 <div class="modal-body">
                     <div class="mb-3">
@@ -284,8 +284,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             ]);
             
             $success = 'تم إضافة العميل بنجاح';
-            // إعادة تحميل الصفحة
-            echo '<script>setTimeout(function(){ window.location.href = "?page=customers"; }, 1000);</script>';
+            $redirectUrl = getDashboardUrl($currentUser['role'] ?? 'sales') . '?page=customers';
+            echo '<script>setTimeout(function(){ window.location.href = ' . json_encode($redirectUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . '; }, 600);</script>';
         }
     }
 }

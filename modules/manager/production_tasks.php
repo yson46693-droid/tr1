@@ -118,6 +118,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         $assignees = array_unique(array_filter(array_map('intval', $assignees)));
+        $allowedAssignees = array_map(function ($user) {
+            return (int)($user['id'] ?? 0);
+        }, $productionUsers);
+        $assignees = array_values(array_intersect($assignees, $allowedAssignees));
 
         if (empty($assignees)) {
             $error = 'يجب اختيار عامل واحد على الأقل لاستلام المهمة.';
@@ -134,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $db->beginTransaction();
 
                 $productName = '';
+                $relatedTypeValue = 'manager_' . $taskType;
                 if ($taskType === 'production' && $productId > 0) {
                     $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$productId]);
                     if (!$product) {
@@ -148,7 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $insertedTaskIds = [];
                 foreach ($assignees as $assignedId) {
                     $columns = ['title', 'description', 'created_by', 'priority', 'status', 'related_type'];
-                    $values = [$title, $details ?: null, $currentUser['id'], $priority, 'pending', 'manager_dispatch'];
+                    $values = [$title, $details ?: null, $currentUser['id'], $priority, 'pending', $relatedTypeValue];
                     $placeholders = ['?', '?', '?', '?', '?', '?'];
 
                     if ($assignedId > 0) {
@@ -204,14 +209,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'due_date' => $dueDate
                         ]
                     );
-
-                    $worker = null;
-                    foreach ($productionUsers as $user) {
-                        if ((int)$user['id'] === $assignedId) {
-                            $worker = $user;
-                            break;
-                        }
-                    }
 
                     $notificationTitle = 'مهمة جديدة من الإدارة';
                     $notificationMessage = $title;
@@ -281,9 +278,24 @@ try {
 }
 
 $recentTasks = [];
+$statusStyles = [
+    'pending' => ['class' => 'warning', 'label' => 'معلقة'],
+    'received' => ['class' => 'info', 'label' => 'مستلمة'],
+    'in_progress' => ['class' => 'primary', 'label' => 'قيد التنفيذ'],
+    'completed' => ['class' => 'success', 'label' => 'مكتملة'],
+    'cancelled' => ['class' => 'danger', 'label' => 'ملغاة']
+];
+
+$priorityStyles = [
+    'low' => ['class' => 'secondary', 'label' => 'منخفضة'],
+    'normal' => ['class' => 'info', 'label' => 'عادية'],
+    'high' => ['class' => 'warning', 'label' => 'مرتفعة'],
+    'urgent' => ['class' => 'danger', 'label' => 'عاجلة']
+];
+
 try {
     $recentTasks = $db->query("
-        SELECT t.id, t.title, t.status, t.priority, t.due_date, t.created_at, t.task_type, t.product_id,
+        SELECT t.id, t.title, t.status, t.priority, t.due_date, t.created_at, t.product_id,
                t.quantity, t.notes, u.full_name AS assigned_name, p.name AS product_name
         FROM tasks t
         LEFT JOIN users u ON t.assigned_to = u.id
@@ -484,42 +496,24 @@ try {
                                     </td>
                                     <td><?php echo htmlspecialchars($task['assigned_name'] ?? 'غير محدد'); ?></td>
                                     <td>
-                                        <span class="badge bg-<?php echo match ($task['status']) {
-                                            'pending' => 'warning',
-                                            'received' => 'info',
-                                            'in_progress' => 'primary',
-                                            'completed' => 'success',
-                                            'cancelled' => 'danger',
-                                            default => 'secondary'
-                                        }; ?>">
-                                            <?php echo match ($task['status']) {
-                                                'pending' => 'معلقة',
-                                                'received' => 'مستلمة',
-                                                'in_progress' => 'قيد التنفيذ',
-                                                'completed' => 'مكتملة',
-                                                'cancelled' => 'ملغاة',
-                                                default => 'غير معروفة'
-                                            }; ?>
+                                        <?php
+                                        $statusKey = $task['status'] ?? '';
+                                        $statusMeta = $statusStyles[$statusKey] ?? ['class' => 'secondary', 'label' => 'غير معروفة'];
+                                        ?>
+                                        <span class="badge bg-<?php echo htmlspecialchars($statusMeta['class']); ?>">
+                                            <?php echo htmlspecialchars($statusMeta['label']); ?>
                                         </span>
                                     </td>
                                     <td>
-                                        <span class="badge bg-<?php echo match ($task['priority']) {
-                                            'low' => 'secondary',
-                                            'normal' => 'info',
-                                            'high' => 'warning',
-                                            'urgent' => 'danger',
-                                            default => 'secondary'
-                                        }; ?>">
-                                            <?php echo match ($task['priority']) {
-                                                'low' => 'منخفضة',
-                                                'normal' => 'عادية',
-                                                'high' => 'مرتفعة',
-                                                'urgent' => 'عاجلة',
-                                                default => 'غير محدد'
-                                            }; ?>
+                                        <?php
+                                        $priorityKey = $task['priority'] ?? '';
+                                        $priorityMeta = $priorityStyles[$priorityKey] ?? ['class' => 'secondary', 'label' => 'غير محدد'];
+                                        ?>
+                                        <span class="badge bg-<?php echo htmlspecialchars($priorityMeta['class']); ?>">
+                                            <?php echo htmlspecialchars($priorityMeta['label']); ?>
                                         </span>
                                     </td>
-                                    <td><?php echo $task['due_date'] ? htmlspecialchars($task['due_date']) : '<span class=\"text-muted\">غير محدد</span>'; ?></td>
+                                    <td><?php echo $task['due_date'] ? htmlspecialchars($task['due_date']) : '<span class="text-muted">غير محدد</span>'; ?></td>
                                     <td><?php echo htmlspecialchars($task['created_at']); ?></td>
                                 </tr>
                             <?php endforeach; ?>

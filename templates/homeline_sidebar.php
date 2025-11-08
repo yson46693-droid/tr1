@@ -67,6 +67,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => 'مهام الإنتاج',
+                'icon' => 'bi-list-task',
+                'url' => $baseUrl . 'manager.php?page=production_tasks',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'production_tasks'),
+                'badge' => null
+            ],
+            [
                 'title' => 'مخزن أدوات التعبئة',
                 'icon' => 'bi-box-seam',
                 'url' => $baseUrl . 'manager.php?page=packaging_warehouse',

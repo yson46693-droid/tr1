@@ -46,6 +46,72 @@ try {
     error_log("Error updating suppliers table: " . $e->getMessage());
 }
 
+$pagesPath = __DIR__ . '/../../includes/pagination.php';
+if (file_exists($pagesPath)) {
+    require_once $pagesPath;
+}
+
+try {
+    $balanceAuditCheck = $db->queryOne("SHOW TABLES LIKE 'supplier_balance_history'");
+    if (empty($balanceAuditCheck)) {
+        $db->execute("
+            CREATE TABLE IF NOT EXISTS `supplier_balance_history` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `supplier_id` int(11) NOT NULL,
+              `change_amount` decimal(15,2) NOT NULL,
+              `previous_balance` decimal(15,2) NOT NULL DEFAULT 0.00,
+              `new_balance` decimal(15,2) NOT NULL DEFAULT 0.00,
+              `type` enum('topup','payment') NOT NULL,
+              `notes` text DEFAULT NULL,
+              `reference_id` int(11) DEFAULT NULL COMMENT 'ID of related record (financial transaction, etc)',
+              `created_by` int(11) NOT NULL,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `supplier_id` (`supplier_id`),
+              KEY `created_by` (`created_by`),
+              KEY `type` (`type`),
+              KEY `created_at` (`created_at`),
+              CONSTRAINT `supplier_balance_history_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `supplier_balance_history_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+} catch (Exception $e) {
+    error_log("Error creating supplier_balance_history table: " . $e->getMessage());
+}
+
+try {
+    $financialTransactionsCheck = $db->queryOne("SHOW TABLES LIKE 'financial_transactions'");
+    if (empty($financialTransactionsCheck)) {
+        $db->execute("
+            CREATE TABLE IF NOT EXISTS `financial_transactions` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `type` enum('expense','income','transfer','payment') NOT NULL,
+              `amount` decimal(15,2) NOT NULL,
+              `supplier_id` int(11) DEFAULT NULL,
+              `description` text NOT NULL,
+              `reference_number` varchar(50) DEFAULT NULL,
+              `status` enum('pending','approved','rejected') DEFAULT 'pending',
+              `approved_by` int(11) DEFAULT NULL,
+              `created_by` int(11) NOT NULL,
+              `approved_at` timestamp NULL DEFAULT NULL,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `supplier_id` (`supplier_id`),
+              KEY `created_by` (`created_by`),
+              KEY `approved_by` (`approved_by`),
+              KEY `status` (`status`),
+              KEY `created_at` (`created_at`),
+              CONSTRAINT `financial_transactions_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE SET NULL,
+              CONSTRAINT `financial_transactions_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `financial_transactions_ibfk_3` FOREIGN KEY (`approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+} catch (Exception $e) {
+    error_log("Error creating financial_transactions table: " . $e->getMessage());
+}
+
 /**
  * دالة لتوليد كود مورد فريد بناءً على نوع المورد
  */
@@ -134,6 +200,39 @@ $suppliersQuery = "SELECT * FROM suppliers $whereClause ORDER BY created_at DESC
 $queryParams = array_merge($params, [$perPage, $offset]);
 $suppliers = $db->query($suppliersQuery, $queryParams);
 
+$historyPage = isset($_GET['history_page']) ? max(1, intval($_GET['history_page'])) : 1;
+$historyLimit = 10;
+$historyOffset = ($historyPage - 1) * $historyLimit;
+
+$historyWhereClause = '';
+$historyParams = [];
+if (!empty($search)) {
+    $historyWhereClause = "WHERE s.name LIKE ?";
+    $historyParams[] = "%$search%";
+}
+
+$historyQuery = "
+    SELECT h.*, s.name AS supplier_name, u.full_name AS user_name
+    FROM supplier_balance_history h
+    LEFT JOIN suppliers s ON h.supplier_id = s.id
+    LEFT JOIN users u ON h.created_by = u.id
+    $historyWhereClause
+    ORDER BY h.created_at DESC
+    LIMIT ? OFFSET ?
+";
+$historyParams[] = $historyLimit;
+$historyParams[] = $historyOffset;
+$balanceHistory = $db->query($historyQuery, $historyParams);
+
+$historyCountQuery = "
+    SELECT COUNT(*) as total
+    FROM supplier_balance_history h
+    LEFT JOIN suppliers s ON h.supplier_id = s.id
+    $historyWhereClause
+";
+$historyTotal = $db->queryOne($historyCountQuery, array_slice($historyParams, 0, -2))['total'] ?? 0;
+$historyTotalPages = ceil($historyTotal / $historyLimit);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     
@@ -152,7 +251,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'نوع المورد مطلوب';
         } else {
             try {
-                // توليد كود المورد تلقائياً
                 $supplierCode = generateSupplierCode($type, $db);
                 
                 $db->execute(
@@ -160,7 +258,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     [$supplierCode, $type, $name, $contact_person ?: null, $phone ?: null, $email ?: null, $address ?: null, $status]
                 );
                 $success = 'تم إضافة المورد بنجاح - كود المورد: ' . $supplierCode;
-                // Redirect to same page with success message
                 if (!headers_sent()) {
                     header('Location: ?page=suppliers&success=' . urlencode($success));
                     exit;
@@ -188,10 +285,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'نوع المورد مطلوب';
         } else {
             try {
-                // الحصول على المورد الحالي
                 $currentSupplier = $db->queryOne("SELECT type, supplier_code FROM suppliers WHERE id = ?", [$id]);
                 
-                // إذا تغير نوع المورد، توليد كود جديد
                 $supplierCode = $currentSupplier['supplier_code'] ?? null;
                 if ($currentSupplier && $currentSupplier['type'] !== $type) {
                     $supplierCode = generateSupplierCode($type, $db);
@@ -202,7 +297,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     [$supplierCode, $type, $name, $contact_person ?: null, $phone ?: null, $email ?: null, $address ?: null, $status, $id]
                 );
                 $success = 'تم تحديث المورد بنجاح';
-                // Redirect to same page with success message
                 if (!headers_sent()) {
                     header('Location: ?page=suppliers&success=' . urlencode($success));
                     exit;
@@ -214,13 +308,122 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'حدث خطأ: ' . $e->getMessage();
             }
         }
+    } elseif ($action === 'add_balance' || $action === 'record_payment') {
+        $supplierId = intval($_POST['supplier_id'] ?? 0);
+        $amount = cleanFinancialValue($_POST['amount'] ?? 0);
+        $notes = trim($_POST['notes'] ?? '');
+        
+        if ($supplierId <= 0) {
+            $error = 'المورد غير محدد.';
+        } elseif ($amount <= 0) {
+            $error = 'يجب إدخال مبلغ صالح.';
+        } else {
+            $supplier = $db->queryOne("SELECT id, name, balance FROM suppliers WHERE id = ?", [$supplierId]);
+            if (!$supplier) {
+                $error = 'لم يتم العثور على المورد.';
+            } else {
+                $previousBalance = cleanFinancialValue($supplier['balance'] ?? 0);
+                $changeAmount = $amount;
+                $newBalance = $previousBalance;
+                $historyType = $action === 'add_balance' ? 'topup' : 'payment';
+                $transactionType = $action === 'add_balance' ? 'expense' : 'payment';
+                $description = $action === 'add_balance'
+                    ? 'إضافة رصيد للمورد: ' . $supplier['name']
+                    : 'تسجيل سداد للمورد: ' . $supplier['name'];
+                
+                if ($action === 'add_balance') {
+                    $newBalance = $previousBalance + $changeAmount;
+                } else {
+                    if ($amount > $previousBalance) {
+                        $error = 'قيمة السداد تتجاوز الرصيد الحالي للمورد.';
+                    } else {
+                        $newBalance = $previousBalance - $changeAmount;
+                        $changeAmount = -$changeAmount;
+                    }
+                }
+                
+                if (empty($error)) {
+                    try {
+                        $db->beginTransaction();
+                        
+                        $db->execute(
+                            "UPDATE suppliers SET balance = ?, updated_at = NOW() WHERE id = ?",
+                            [$newBalance, $supplierId]
+                        );
+                        
+                        $db->execute(
+                            "INSERT INTO supplier_balance_history (supplier_id, change_amount, previous_balance, new_balance, type, notes, created_by)
+                             VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            [
+                                $supplierId,
+                                $changeAmount,
+                                $previousBalance,
+                                $newBalance,
+                                $historyType,
+                                $notes ?: null,
+                                $currentUser['id']
+                            ]
+                        );
+                        $historyId = $db->lastInsertId();
+                        
+                        $db->execute(
+                            "INSERT INTO financial_transactions (type, amount, supplier_id, description, reference_number, status, approved_by, created_by, approved_at)
+                             VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, NOW())",
+                            [
+                                $transactionType,
+                                abs($changeAmount),
+                                $supplierId,
+                                $description . ($notes ? ' - ملاحظات: ' . $notes : ''),
+                                'SUP-' . $supplierId . '-' . date('YmdHis'),
+                                $currentUser['id'],
+                                $currentUser['id']
+                            ]
+                        );
+                        $transactionId = $db->lastInsertId();
+                        
+                        $db->execute(
+                            "UPDATE supplier_balance_history SET reference_id = ? WHERE id = ?",
+                            [$transactionId, $historyId]
+                        );
+                        
+                        logAudit(
+                            $currentUser['id'],
+                            $action === 'add_balance' ? 'supplier_balance_topup' : 'supplier_payment',
+                            'supplier',
+                            $supplierId,
+                            ['balance' => $previousBalance],
+                            ['amount' => $amount, 'new_balance' => $newBalance, 'notes' => $notes]
+                        );
+                        
+                        $db->commit();
+                        
+                        $success = $action === 'add_balance'
+                            ? 'تم إضافة الرصيد للمورد بنجاح.'
+                            : 'تم تسجيل السداد للمورد بنجاح.';
+                        $redirectUrl = '?page=suppliers&success=' . urlencode($success);
+                        if (!headers_sent()) {
+                            header('Location: ' . $redirectUrl);
+                            exit;
+                        } else {
+                            echo '<script>window.location.href = "' . $redirectUrl . '";</script>';
+                            exit;
+                        }
+                    } catch (Exception $e) {
+                        if ($db->inTransaction()) {
+                            $db->rollBack();
+                        }
+                        error_log("Supplier balance update error: " . $e->getMessage());
+                        $error = 'حدث خطأ أثناء تحديث رصيد المورد. يرجى المحاولة مرة أخرى.';
+                    }
+                }
+            }
+        }
     } elseif ($action === 'delete') {
         $id = intval($_POST['id'] ?? 0);
         if ($id > 0) {
             try {
                 $db->execute("DELETE FROM suppliers WHERE id = ?", [$id]);
                 $success = 'تم حذف المورد بنجاح';
-                // Redirect to same page with success message
                 if (!headers_sent()) {
                     header('Location: ?page=suppliers&success=' . urlencode($success));
                     exit;
@@ -358,12 +561,32 @@ if (isset($_GET['edit'])) {
                                     </span>
                                 </td>
                                 <td data-label="الإجراءات">
-                                    <div class="btn-group btn-group-sm">
-                                        <a href="?page=suppliers&edit=<?php echo $supplier['id']; ?>" class="btn btn-outline" data-bs-toggle="tooltip" title="<?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?>">
+                                    <div class="btn-group btn-group-sm flex-wrap">
+                                        <button type="button"
+                                                class="btn btn-success mb-1"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#addSupplierBalanceModal"
+                                                data-supplier-id="<?php echo $supplier['id']; ?>"
+                                                data-supplier-name="<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-supplier-balance="<?php echo $balance; ?>">
+                                            <i class="bi bi-plus-circle"></i>
+                                            <span class="d-none d-lg-inline">إضافة رصيد</span>
+                                        </button>
+                                        <button type="button"
+                                                class="btn btn-warning mb-1"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#supplierPaymentModal"
+                                                data-supplier-id="<?php echo $supplier['id']; ?>"
+                                                data-supplier-name="<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-supplier-balance="<?php echo $balance; ?>">
+                                            <i class="bi bi-cash-coin"></i>
+                                            <span class="d-none d-lg-inline">تسجيل سداد</span>
+                                        </button>
+                                        <a href="?page=suppliers&edit=<?php echo $supplier['id']; ?>" class="btn btn-outline mb-1" data-bs-toggle="tooltip" title="<?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?>">
                                             <i class="bi bi-pencil"></i>
                                             <span class="d-none d-md-inline"><?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?></span>
                                         </a>
-                                        <button type="button" class="btn btn-outline-danger" onclick="deleteSupplier(<?php echo $supplier['id']; ?>, '<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES); ?>')" data-bs-toggle="tooltip" title="<?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?>">
+                                        <button type="button" class="btn btn-outline-danger mb-1" onclick="deleteSupplier(<?php echo $supplier['id']; ?>, '<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES); ?>')" data-bs-toggle="tooltip" title="<?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?>">
                                             <i class="bi bi-trash"></i>
                                             <span class="d-none d-md-inline"><?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?></span>
                                         </button>
@@ -555,6 +778,83 @@ if (isset($_GET['edit'])) {
 </div>
 <?php endif; ?>
 
+<!-- Add Balance Modal -->
+<div class="modal fade" id="addSupplierBalanceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="add_balance">
+                <input type="hidden" name="supplier_id" id="balanceSupplierId">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إضافة رصيد للمورد</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="balanceSupplierName" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الرصيد الحالي</label>
+                        <input type="text" class="form-control" id="balancePreviousValue" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">المبلغ المطلوب إضافته <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.01" class="form-control" name="amount" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">ملاحظات (اختياري)</label>
+                        <textarea class="form-control" name="notes" rows="3" placeholder="سبب إضافة الرصيد أو تفاصيل العملية"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-success">حفظ الرصيد</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Record Payment Modal -->
+<div class="modal fade" id="supplierPaymentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="record_payment">
+                <input type="hidden" name="supplier_id" id="paymentSupplierId">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-cash-coin me-2"></i>تسجيل سداد للمورد</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="paymentSupplierName" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الرصيد الحالي</label>
+                        <input type="text" class="form-control" id="paymentCurrentBalance" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">مبلغ السداد <span class="text-danger">*</span></label>
+                        <input type="number" step="0.01" min="0.01" class="form-control" name="amount" required>
+                        <small class="text-muted d-block mt-1">لا يمكن إدخال مبلغ أكبر من الرصيد الحالي.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">ملاحظات (اختياري)</label>
+                        <textarea class="form-control" name="notes" rows="3" placeholder="تفاصيل الدفع، رقم الإيصال، إلخ"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-warning text-white">حفظ السداد</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
 function deleteSupplier(id, name) {
     if (confirm('<?php echo isset($lang['confirm_delete']) ? $lang['confirm_delete'] : 'هل أنت متأكد من حذف'; ?> "' + name + '"؟')) {
@@ -570,19 +870,56 @@ function deleteSupplier(id, name) {
     }
 }
 
-// Initialize tooltips and show edit modal
+// Initialize tooltips and modal helpers
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize tooltips
     const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
     tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
-    
-    // Show edit modal if supplier is being edited
+
     <?php if ($editSupplier): ?>
     const editModal = new bootstrap.Modal(document.getElementById('editSupplierModal'));
     editModal.show();
     <?php endif; ?>
+
+    const balanceModal = document.getElementById('addSupplierBalanceModal');
+    const paymentModal = document.getElementById('supplierPaymentModal');
+
+    document.querySelectorAll('[data-bs-target="#addSupplierBalanceModal"]').forEach(function(button) {
+        button.addEventListener('click', function() {
+            if (!balanceModal) {
+                return;
+            }
+            const supplierId = this.getAttribute('data-supplier-id');
+            const supplierName = this.getAttribute('data-supplier-name');
+            const balance = parseFloat(this.getAttribute('data-supplier-balance') || 0);
+
+            balanceModal.querySelector('#balanceSupplierId').value = supplierId;
+            balanceModal.querySelector('#balanceSupplierName').value = supplierName;
+            balanceModal.querySelector('#balancePreviousValue').value = balance.toLocaleString('ar-EG', { style: 'currency', currency: 'EGP' });
+            balanceModal.querySelector('input[name="amount"]').value = '';
+            balanceModal.querySelector('textarea[name="notes"]').value = '';
+        });
+    });
+
+    document.querySelectorAll('[data-bs-target="#supplierPaymentModal"]').forEach(function(button) {
+        button.addEventListener('click', function() {
+            if (!paymentModal) {
+                return;
+            }
+            const supplierId = this.getAttribute('data-supplier-id');
+            const supplierName = this.getAttribute('data-supplier-name');
+            const balance = parseFloat(this.getAttribute('data-supplier-balance') || 0);
+
+            paymentModal.querySelector('#paymentSupplierId').value = supplierId;
+            paymentModal.querySelector('#paymentSupplierName').value = supplierName;
+            paymentModal.querySelector('#paymentCurrentBalance').value = balance.toLocaleString('ar-EG', { style: 'currency', currency: 'EGP' });
+            const amountInput = paymentModal.querySelector('input[name="amount"]');
+            amountInput.value = '';
+            amountInput.max = balance.toFixed(2);
+            paymentModal.querySelector('textarea[name="notes"]').value = '';
+        });
+    });
 });
 </script>
 
