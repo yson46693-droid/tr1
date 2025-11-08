@@ -1,6 +1,6 @@
 <?php
 /**
- * صفحة إدارة طلبات السلفة للمحاسب
+ * صفحة إدارة طلبات السلفة للمحاسب والمدير
  */
 
 if (!defined('ACCESS_ALLOWED')) {
@@ -10,181 +10,281 @@ if (!defined('ACCESS_ALLOWED')) {
 require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
-require_once __DIR__ . '/../../includes/salary_calculator.php';
 require_once __DIR__ . '/../../includes/notifications.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/path_helper.php';
 
-requireRole('accountant');
+requireAnyRole(['accountant', 'manager']);
 
 $currentUser = getCurrentUser();
 $db = db();
 $error = '';
 $success = '';
 
-// التحقق من وجود جدول advance_requests
-$tableCheck = $db->queryOne("SHOW TABLES LIKE 'advance_requests'");
-if (empty($tableCheck)) {
-    // إنشاء الجدول تلقائياً
+// التأكد من وجود جدول salary_advances
+$salaryAdvancesTable = $db->queryOne("SHOW TABLES LIKE 'salary_advances'");
+if (empty($salaryAdvancesTable)) {
     try {
         $db->execute("
-            CREATE TABLE IF NOT EXISTS `advance_requests` (
+            CREATE TABLE IF NOT EXISTS `salary_advances` (
               `id` int(11) NOT NULL AUTO_INCREMENT,
-              `user_id` int(11) NOT NULL,
-              `amount` decimal(15,2) NOT NULL,
-              `requested_month` int(2) NOT NULL,
-              `requested_year` int(4) NOT NULL,
-              `salary_id` int(11) DEFAULT NULL,
-              `reason` text DEFAULT NULL,
-              `status` enum('pending','approved','rejected') DEFAULT 'pending',
-              `approved_by` int(11) DEFAULT NULL,
-              `approved_at` timestamp NULL DEFAULT NULL,
-              `rejection_reason` text DEFAULT NULL,
+              `user_id` int(11) NOT NULL COMMENT 'الموظف',
+              `amount` decimal(10,2) NOT NULL COMMENT 'مبلغ السلفة',
+              `reason` text DEFAULT NULL COMMENT 'سبب السلفة',
+              `request_date` date NOT NULL COMMENT 'تاريخ الطلب',
+              `status` enum('pending','accountant_approved','manager_approved','rejected') DEFAULT 'pending' COMMENT 'حالة الطلب',
+              `accountant_approved_by` int(11) DEFAULT NULL,
+              `accountant_approved_at` timestamp NULL DEFAULT NULL,
+              `manager_approved_by` int(11) DEFAULT NULL,
+              `manager_approved_at` timestamp NULL DEFAULT NULL,
+              `deducted_from_salary_id` int(11) DEFAULT NULL COMMENT 'الراتب الذي تم خصم السلفة منه',
+              `notes` text DEFAULT NULL,
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
               PRIMARY KEY (`id`),
               KEY `user_id` (`user_id`),
-              KEY `salary_id` (`salary_id`),
-              KEY `approved_by` (`approved_by`),
               KEY `status` (`status`),
-              KEY `requested_month_year` (`requested_month`, `requested_year`),
-              CONSTRAINT `advance_requests_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-              CONSTRAINT `advance_requests_ibfk_2` FOREIGN KEY (`salary_id`) REFERENCES `salaries` (`id`) ON DELETE SET NULL,
-              CONSTRAINT `advance_requests_ibfk_3` FOREIGN KEY (`approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+              KEY `request_date` (`request_date`),
+              KEY `accountant_approved_by` (`accountant_approved_by`),
+              KEY `manager_approved_by` (`manager_approved_by`),
+              KEY `deducted_from_salary_id` (`deducted_from_salary_id`),
+              CONSTRAINT `salary_advances_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `salary_advances_ibfk_2` FOREIGN KEY (`accountant_approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+              CONSTRAINT `salary_advances_ibfk_3` FOREIGN KEY (`manager_approved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+              CONSTRAINT `salary_advances_ibfk_4` FOREIGN KEY (`deducted_from_salary_id`) REFERENCES `salaries` (`id`) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
     } catch (Exception $e) {
-        error_log("Error creating advance_requests table: " . $e->getMessage());
+        error_log("Error creating salary_advances table: " . $e->getMessage());
+        $error = 'تعذر إنشاء جدول السلف. يرجى التواصل مع الدعم.';
     }
 }
 
-// معالجة الموافقة/الرفض
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+/**
+ * إعادة توجيه بعد نجاح العملية مع رسالة
+ */
+function redirectWithSuccess($message, $role)
+{
+    preventDuplicateSubmission($message, ['page' => 'advance_requests'], null, $role);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && empty($error)) {
     $action = $_POST['action'] ?? '';
-    $requestId = intval($_POST['request_id'] ?? 0);
+    $advanceId = intval($_POST['advance_id'] ?? 0);
     
-    if ($action === 'approve' && $requestId > 0) {
-        $request = $db->queryOne("SELECT * FROM advance_requests WHERE id = ?", [$requestId]);
+    if ($advanceId <= 0) {
+        $error = 'معرّف الطلب غير صحيح';
+    } else {
+        $advance = $db->queryOne(
+            "SELECT sa.*, u.full_name, u.username 
+             FROM salary_advances sa 
+             LEFT JOIN users u ON sa.user_id = u.id 
+             WHERE sa.id = ?",
+            [$advanceId]
+        );
         
-        if (!$request) {
+        if (!$advance) {
             $error = 'طلب السلفة غير موجود';
-        } elseif ($request['status'] !== 'pending') {
-            $error = 'تمت معالجة هذا الطلب بالفعل';
         } else {
-            // الموافقة على الطلب
-            $db->execute(
-                "UPDATE advance_requests 
-                 SET status = 'approved', approved_by = ?, approved_at = NOW() 
-                 WHERE id = ?",
-                [$currentUser['id'], $requestId]
-            );
-            
-            // إرسال إشعار للمستخدم
-            createNotification(
-                $request['user_id'],
-                'موافقة على طلب السلفة',
-                'تم الموافقة على طلب السلفة بقيمة ' . formatCurrency($request['amount']),
-                'success',
-                null,
-                false
-            );
-            
-            logAudit($currentUser['id'], 'approve_advance', 'advance_request', $requestId, null, [
-                'user_id' => $request['user_id'],
-                'amount' => $request['amount']
-            ]);
-            
-            $success = 'تم الموافقة على طلب السلفة بنجاح';
-        }
-        
-    } elseif ($action === 'reject' && $requestId > 0) {
-        $rejectionReason = trim($_POST['rejection_reason'] ?? '');
-        
-        if (empty($rejectionReason)) {
-            $error = 'يجب إدخال سبب الرفض';
-        } else {
-            $request = $db->queryOne("SELECT * FROM advance_requests WHERE id = ?", [$requestId]);
-            
-            if (!$request) {
-                $error = 'طلب السلفة غير موجود';
-            } elseif ($request['status'] !== 'pending') {
-                $error = 'تمت معالجة هذا الطلب بالفعل';
-            } else {
-                // رفض الطلب
-                $db->execute(
-                    "UPDATE advance_requests 
-                     SET status = 'rejected', approved_by = ?, approved_at = NOW(), rejection_reason = ? 
-                     WHERE id = ?",
-                    [$currentUser['id'], $rejectionReason, $requestId]
-                );
+            switch ($action) {
+                case 'accountant_approve':
+                    if (!in_array($currentUser['role'], ['accountant', 'manager'])) {
+                        $error = 'غير مصرح لك بهذا الإجراء';
+                        break;
+                    }
+                    
+                    if ($advance['status'] !== 'pending') {
+                        $error = 'تمت معالجة هذا الطلب بالفعل';
+                        break;
+                    }
+                    
+                    $db->execute(
+                        "UPDATE salary_advances 
+                         SET status = 'accountant_approved',
+                             accountant_approved_by = ?,
+                             accountant_approved_at = NOW()
+                         WHERE id = ?",
+                        [$currentUser['id'], $advanceId]
+                    );
+                    
+                    logAudit($currentUser['id'], 'accountant_approve_advance', 'salary_advance', $advanceId, null, [
+                        'user_id' => $advance['user_id'],
+                        'amount' => $advance['amount']
+                    ]);
+                    
+                    // إشعار المديرين بالموافقة النهائية
+                    $managers = $db->query("SELECT id FROM users WHERE role = 'manager' AND status = 'active'");
+                    foreach ($managers as $manager) {
+                        createNotification(
+                            $manager['id'],
+                            'طلب سلفة يحتاج موافقتك',
+                            'طلب سلفة بمبلغ ' . number_format($advance['amount'], 2) . ' ج.م يحتاج موافقتك النهائية.',
+                            'warning',
+                            getDashboardUrl('manager') . '?page=salaries&view=advances',
+                            false
+                        );
+                    }
+                    
+                    redirectWithSuccess('تم استلام طلب السلفة وإرساله للمدير للموافقة النهائية.', $currentUser['role']);
+                    break;
                 
-                // إرسال إشعار للمستخدم
-                createNotification(
-                    $request['user_id'],
-                    'رفض طلب السلفة',
-                    'تم رفض طلب السلفة بقيمة ' . formatCurrency($request['amount']) . '. السبب: ' . $rejectionReason,
-                    'danger',
-                    null,
-                    false
-                );
+                case 'manager_approve':
+                    if ($currentUser['role'] !== 'manager') {
+                        $error = 'غير مصرح لك بهذا الإجراء';
+                        break;
+                    }
+                    
+                    if (!in_array($advance['status'], ['pending', 'accountant_approved'])) {
+                        $error = 'لا يمكن الموافقة على الطلب في حالته الحالية';
+                        break;
+                    }
+                    
+                    if ($advance['status'] === 'pending') {
+                        // في حال اعتماد المدير مباشرة
+                        $db->execute(
+                            "UPDATE salary_advances 
+                             SET status = 'manager_approved',
+                                 accountant_approved_by = ?,
+                                 accountant_approved_at = NOW(),
+                                 manager_approved_by = ?,
+                                 manager_approved_at = NOW()
+                             WHERE id = ?",
+                            [$currentUser['id'], $currentUser['id'], $advanceId]
+                        );
+                    } else {
+                        $db->execute(
+                            "UPDATE salary_advances 
+                             SET status = 'manager_approved',
+                                 manager_approved_by = ?,
+                                 manager_approved_at = NOW()
+                             WHERE id = ?",
+                            [$currentUser['id'], $advanceId]
+                        );
+                    }
+                    
+                    logAudit($currentUser['id'], 'manager_approve_advance', 'salary_advance', $advanceId, null, [
+                        'user_id' => $advance['user_id'],
+                        'amount' => $advance['amount']
+                    ]);
+                    
+                    createNotification(
+                        $advance['user_id'],
+                        'تمت الموافقة على طلب السلفة',
+                        'تمت الموافقة على طلب السلفة بمبلغ ' . number_format($advance['amount'], 2) . ' ج.م. سيتم خصمه من راتبك القادم.',
+                        'success',
+                        null,
+                        false
+                    );
+                    
+                    redirectWithSuccess('تمت الموافقة على السلفة بنجاح.', $currentUser['role']);
+                    break;
                 
-                logAudit($currentUser['id'], 'reject_advance', 'advance_request', $requestId, null, [
-                    'user_id' => $request['user_id'],
-                    'amount' => $request['amount'],
-                    'reason' => $rejectionReason
-                ]);
+                case 'reject':
+                    if (!in_array($currentUser['role'], ['accountant', 'manager'])) {
+                        $error = 'غير مصرح لك بهذا الإجراء';
+                        break;
+                    }
+                    
+                    $rejectionReason = trim($_POST['rejection_reason'] ?? '');
+                    if ($rejectionReason === '') {
+                        $error = 'يجب إدخال سبب الرفض';
+                        break;
+                    }
+                    
+                    if ($advance['status'] === 'manager_approved') {
+                        $error = 'لا يمكن رفض سلفة تمت الموافقة عليها';
+                        break;
+                    }
+                    
+                    $db->execute(
+                        "UPDATE salary_advances 
+                         SET status = 'rejected',
+                             notes = ?
+                         WHERE id = ?",
+                        [$rejectionReason, $advanceId]
+                    );
+                    
+                    logAudit($currentUser['id'], 'reject_salary_advance', 'salary_advance', $advanceId, null, [
+                        'user_id' => $advance['user_id'],
+                        'amount' => $advance['amount'],
+                        'reason' => $rejectionReason
+                    ]);
+                    
+                    createNotification(
+                        $advance['user_id'],
+                        'تم رفض طلب السلفة',
+                        'تم رفض طلب السلفة بمبلغ ' . number_format($advance['amount'], 2) . ' ج.م. السبب: ' . $rejectionReason,
+                        'error',
+                        null,
+                        false
+                    );
+                    
+                    redirectWithSuccess('تم رفض طلب السلفة.', $currentUser['role']);
+                    break;
                 
-                $success = 'تم رفض طلب السلفة';
+                default:
+                    $error = 'إجراء غير معروف';
             }
         }
     }
 }
 
-// الفلترة
+// الفلاتر
 $statusFilter = $_GET['status'] ?? 'pending';
 $monthFilter = isset($_GET['month']) ? intval($_GET['month']) : 0;
 $yearFilter = isset($_GET['year']) ? intval($_GET['year']) : 0;
 
-// بناء استعلام
-$whereConditions = [];
+$whereClauses = [];
 $params = [];
 
 if ($statusFilter && $statusFilter !== 'all') {
-    $whereConditions[] = "ar.status = ?";
+    $whereClauses[] = "sa.status = ?";
     $params[] = $statusFilter;
 }
 
 if ($monthFilter > 0) {
-    $whereConditions[] = "ar.requested_month = ?";
+    $whereClauses[] = "MONTH(sa.request_date) = ?";
     $params[] = $monthFilter;
 }
 
 if ($yearFilter > 0) {
-    $whereConditions[] = "ar.requested_year = ?";
+    $whereClauses[] = "YEAR(sa.request_date) = ?";
     $params[] = $yearFilter;
 }
 
-$whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
+$whereClause = !empty($whereClauses) ? "WHERE " . implode(" AND ", $whereClauses) : "";
 
-// الحصول على طلبات السلفة
+// جلب الطلبات
 $advanceRequests = $db->query(
-    "SELECT ar.*, u.full_name, u.username, u.role, 
-            s.total_amount as salary_amount,
-            approver.full_name as approver_name
-     FROM advance_requests ar
-     LEFT JOIN users u ON ar.user_id = u.id
-     LEFT JOIN salaries s ON ar.salary_id = s.id
-     LEFT JOIN users approver ON ar.approved_by = approver.id
+    "SELECT sa.*, 
+            u.full_name, u.username, u.role,
+            accountant.full_name AS accountant_name,
+            manager.full_name AS manager_name,
+            salaries.total_amount AS salary_total
+     FROM salary_advances sa
+     LEFT JOIN users u ON sa.user_id = u.id
+     LEFT JOIN users accountant ON sa.accountant_approved_by = accountant.id
+     LEFT JOIN users manager ON sa.manager_approved_by = manager.id
+     LEFT JOIN salaries ON sa.deducted_from_salary_id = salaries.id
      $whereClause
-     ORDER BY ar.created_at DESC",
+     ORDER BY sa.created_at DESC",
     $params
 );
 
-// إحصائيات
+// إحصائيات عامة
 $stats = [
-    'pending' => $db->queryOne("SELECT COUNT(*) as count FROM advance_requests WHERE status = 'pending'")['count'] ?? 0,
-    'approved' => $db->queryOne("SELECT COUNT(*) as count FROM advance_requests WHERE status = 'approved'")['count'] ?? 0,
-    'rejected' => $db->queryOne("SELECT COUNT(*) as count FROM advance_requests WHERE status = 'rejected'")['count'] ?? 0,
-    'total_amount_pending' => $db->queryOne("SELECT COALESCE(SUM(amount), 0) as total FROM advance_requests WHERE status = 'pending'")['total'] ?? 0
+    'pending' => $db->queryOne("SELECT COUNT(*) as count FROM salary_advances WHERE status = 'pending'")['count'] ?? 0,
+    'accountant_approved' => $db->queryOne("SELECT COUNT(*) as count FROM salary_advances WHERE status = 'accountant_approved'")['count'] ?? 0,
+    'manager_approved' => $db->queryOne("SELECT COUNT(*) as count FROM salary_advances WHERE status = 'manager_approved'")['count'] ?? 0,
+    'rejected' => $db->queryOne("SELECT COUNT(*) as count FROM salary_advances WHERE status = 'rejected'")['count'] ?? 0,
+    'pending_amount' => $db->queryOne("SELECT COALESCE(SUM(amount), 0) as total FROM salary_advances WHERE status IN ('pending','accountant_approved')")['total'] ?? 0
+];
+
+// إعدادات العرض
+$statusLabels = [
+    'pending' => ['class' => 'warning', 'text' => 'قيد الانتظار (بانتظار المحاسب)'],
+    'accountant_approved' => ['class' => 'info', 'text' => 'تم الاستلام من المحاسب'],
+    'manager_approved' => ['class' => 'success', 'text' => 'تمت الموافقة النهائية'],
+    'rejected' => ['class' => 'danger', 'text' => 'مرفوض']
 ];
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -210,72 +310,53 @@ $stats = [
 <!-- إحصائيات -->
 <div class="row mb-4">
     <div class="col-md-3 col-sm-6 mb-3">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                        <div class="stat-card-icon warning">
-                            <i class="bi bi-hourglass-split"></i>
-                        </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                        <div class="text-muted small">طلبات معلقة</div>
-                        <div class="h4 mb-0"><?php echo $stats['pending']; ?></div>
-                    </div>
+        <div class="card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="stat-card-icon warning me-3">
+                    <i class="bi bi-hourglass-split"></i>
+                </div>
+                <div>
+                    <div class="text-muted small">طلبات بانتظار المحاسب</div>
+                    <div class="h4 mb-0"><?php echo $stats['pending']; ?></div>
                 </div>
             </div>
         </div>
     </div>
-    
     <div class="col-md-3 col-sm-6 mb-3">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                        <div class="stat-card-icon success">
-                            <i class="bi bi-check-circle"></i>
-                        </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                        <div class="text-muted small">طلبات موافق عليها</div>
-                        <div class="h4 mb-0"><?php echo $stats['approved']; ?></div>
-                    </div>
+        <div class="card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="stat-card-icon info me-3">
+                    <i class="bi bi-person-check"></i>
+                </div>
+                <div>
+                    <div class="text-muted small">بانتظار المدير</div>
+                    <div class="h4 mb-0"><?php echo $stats['accountant_approved']; ?></div>
                 </div>
             </div>
         </div>
     </div>
-    
     <div class="col-md-3 col-sm-6 mb-3">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                        <div class="stat-card-icon danger">
-                            <i class="bi bi-x-circle"></i>
-                        </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                        <div class="text-muted small">طلبات مرفوضة</div>
-                        <div class="h4 mb-0"><?php echo $stats['rejected']; ?></div>
-                    </div>
+        <div class="card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="stat-card-icon success me-3">
+                    <i class="bi bi-check-circle"></i>
+                </div>
+                <div>
+                    <div class="text-muted small">طلبات معتمدة</div>
+                    <div class="h4 mb-0"><?php echo $stats['manager_approved']; ?></div>
                 </div>
             </div>
         </div>
     </div>
-    
     <div class="col-md-3 col-sm-6 mb-3">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <div class="d-flex align-items-center">
-                    <div class="flex-shrink-0">
-                        <div class="stat-card-icon info">
-                            <i class="bi bi-currency-dollar"></i>
-                        </div>
-                    </div>
-                    <div class="flex-grow-1 ms-3">
-                        <div class="text-muted small">إجمالي المعلقة</div>
-                        <div class="h4 mb-0"><?php echo formatCurrency($stats['total_amount_pending']); ?></div>
-                    </div>
+        <div class="card shadow-sm h-100">
+            <div class="card-body d-flex align-items-center">
+                <div class="stat-card-icon danger me-3">
+                    <i class="bi bi-x-circle"></i>
+                </div>
+                <div>
+                    <div class="text-muted small">طلبات مرفوضة</div>
+                    <div class="h4 mb-0"><?php echo $stats['rejected']; ?></div>
                 </div>
             </div>
         </div>
@@ -286,32 +367,34 @@ $stats = [
 <div class="card shadow-sm mb-4">
     <div class="card-body">
         <form method="GET" class="row g-3">
-            <div class="col-md-3">
+            <input type="hidden" name="page" value="advance_requests">
+            <div class="col-md-4">
                 <label class="form-label">الحالة</label>
                 <select class="form-select" name="status" onchange="this.form.submit()">
                     <option value="all" <?php echo $statusFilter === 'all' ? 'selected' : ''; ?>>الكل</option>
-                    <option value="pending" <?php echo $statusFilter === 'pending' ? 'selected' : ''; ?>>معلق</option>
-                    <option value="approved" <?php echo $statusFilter === 'approved' ? 'selected' : ''; ?>>موافق عليه</option>
+                    <option value="pending" <?php echo $statusFilter === 'pending' ? 'selected' : ''; ?>>قيد الانتظار</option>
+                    <option value="accountant_approved" <?php echo $statusFilter === 'accountant_approved' ? 'selected' : ''; ?>>بانتظار المدير</option>
+                    <option value="manager_approved" <?php echo $statusFilter === 'manager_approved' ? 'selected' : ''; ?>>موافق عليه</option>
                     <option value="rejected" <?php echo $statusFilter === 'rejected' ? 'selected' : ''; ?>>مرفوض</option>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
                 <label class="form-label">الشهر</label>
                 <select class="form-select" name="month" onchange="this.form.submit()">
                     <option value="0">الكل</option>
                     <?php for ($m = 1; $m <= 12; $m++): ?>
-                        <option value="<?php echo $m; ?>" <?php echo $monthFilter == $m ? 'selected' : ''; ?>>
+                        <option value="<?php echo $m; ?>" <?php echo $monthFilter === $m ? 'selected' : ''; ?>>
                             <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
                         </option>
                     <?php endfor; ?>
                 </select>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-4">
                 <label class="form-label">السنة</label>
                 <select class="form-select" name="year" onchange="this.form.submit()">
                     <option value="0">الكل</option>
                     <?php for ($y = date('Y'); $y >= date('Y') - 2; $y--): ?>
-                        <option value="<?php echo $y; ?>" <?php echo $yearFilter == $y ? 'selected' : ''; ?>>
+                        <option value="<?php echo $y; ?>" <?php echo $yearFilter === $y ? 'selected' : ''; ?>>
                             <?php echo $y; ?>
                         </option>
                     <?php endfor; ?>
@@ -323,82 +406,107 @@ $stats = [
 
 <!-- قائمة طلبات السلفة -->
 <div class="card shadow-sm">
-    <div class="card-header bg-primary text-white">
+    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0">قائمة طلبات السلفة</h5>
+        <?php if ($stats['pending'] + $stats['accountant_approved'] > 0): ?>
+            <span class="badge bg-light text-dark">إجمالي المبالغ المعلقة: <?php echo formatCurrency($stats['pending_amount']); ?></span>
+        <?php endif; ?>
     </div>
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-striped table-hover">
+            <table class="table table-striped table-hover align-middle">
                 <thead>
                     <tr>
-                        <th>المستخدم</th>
+                        <th>#</th>
+                        <th>الموظف</th>
                         <th>التاريخ</th>
-                        <th>الشهر المطلوب</th>
                         <th>المبلغ</th>
-                        <th>الراتب الحالي</th>
                         <th>السبب</th>
                         <th>الحالة</th>
+                        <th>المحاسب</th>
+                        <th>المدير</th>
                         <th>الإجراءات</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($advanceRequests)): ?>
                         <tr>
-                            <td colspan="8" class="text-center text-muted">لا توجد طلبات سلفة</td>
+                            <td colspan="9" class="text-center text-muted">لا توجد طلبات سلفة</td>
                         </tr>
                     <?php else: ?>
-                        <?php foreach ($advanceRequests as $request): ?>
+                        <?php foreach ($advanceRequests as $index => $request): ?>
+                            <?php 
+                            $statusInfo = $statusLabels[$request['status']] ?? ['class' => 'secondary', 'text' => $request['status']];
+                            ?>
                             <tr>
-                                <td data-label="المستخدم">
+                                <td><?php echo $index + 1; ?></td>
+                                <td>
                                     <strong><?php echo htmlspecialchars($request['full_name'] ?? $request['username']); ?></strong>
-                                    <br><small class="text-muted"><?php echo $request['role']; ?></small>
+                                    <br><small class="text-muted">@<?php echo htmlspecialchars($request['username']); ?></small>
                                 </td>
-                                <td data-label="التاريخ"><?php echo formatDateTime($request['created_at']); ?></td>
-                                <td data-label="الشهر المطلوب">
-                                    <?php echo date('F', mktime(0, 0, 0, $request['requested_month'], 1)); ?> 
-                                    <?php echo $request['requested_year']; ?>
+                                <td>
+                                    <?php echo formatDate($request['request_date']); ?>
+                                    <br><small class="text-muted"><?php echo formatDateTime($request['created_at']); ?></small>
                                 </td>
-                                <td data-label="المبلغ">
-                                    <strong class="text-warning"><?php echo formatCurrency($request['amount']); ?></strong>
-                                </td>
-                                <td data-label="الراتب الحالي">
-                                    <?php echo $request['salary_amount'] ? formatCurrency($request['salary_amount']) : '-'; ?>
-                                </td>
-                                <td data-label="السبب">
-                                    <?php echo htmlspecialchars($request['reason'] ?? '-'); ?>
-                                </td>
-                                <td data-label="الحالة">
-                                    <span class="badge bg-<?php 
-                                        echo $request['status'] === 'approved' ? 'success' : 
-                                            ($request['status'] === 'rejected' ? 'danger' : 'warning'); 
-                                    ?>">
-                                        <?php 
-                                        $statusLabels = [
-                                            'pending' => 'قيد المراجعة',
-                                            'approved' => 'موافق عليه',
-                                            'rejected' => 'مرفوض'
-                                        ];
-                                        echo $statusLabels[$request['status']] ?? $request['status']; 
-                                        ?>
-                                    </span>
-                                    <?php if ($request['approved_by']): ?>
-                                        <br><small class="text-muted">بواسطة: <?php echo htmlspecialchars($request['approver_name'] ?? '-'); ?></small>
+                                <td><strong class="text-primary"><?php echo formatCurrency($request['amount']); ?></strong></td>
+                                <td>
+                                    <?php if (!empty($request['reason'])): ?>
+                                        <small><?php echo htmlspecialchars($request['reason']); ?></small>
+                                    <?php else: ?>
+                                        <span class="text-muted">—</span>
                                     <?php endif; ?>
                                 </td>
-                                <td data-label="الإجراءات">
-                                    <?php if ($request['status'] === 'pending'): ?>
-                                        <div class="btn-group btn-group-sm">
-                                            <button type="button" class="btn btn-success" 
-                                                    onclick="approveRequest(<?php echo $request['id']; ?>)">
-                                                <i class="bi bi-check-circle"></i> موافقة
+                                <td>
+                                    <span class="badge bg-<?php echo $statusInfo['class']; ?>">
+                                        <?php echo $statusInfo['text']; ?>
+                                    </span>
+                                    <?php if ($request['status'] === 'rejected' && !empty($request['notes'])): ?>
+                                        <br><small class="text-danger">سبب الرفض: <?php echo htmlspecialchars($request['notes']); ?></small>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (!empty($request['accountant_name'])): ?>
+                                        <small><?php echo htmlspecialchars($request['accountant_name']); ?><br><?php echo formatDateTime($request['accountant_approved_at']); ?></small>
+                                    <?php else: ?>
+                                        <span class="text-muted">—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if (!empty($request['manager_name'])): ?>
+                                        <small><?php echo htmlspecialchars($request['manager_name']); ?><br><?php echo formatDateTime($request['manager_approved_at']); ?></small>
+                                    <?php else: ?>
+                                        <span class="text-muted">—</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td>
+                                    <?php if ($request['status'] === 'pending' && in_array($currentUser['role'], ['accountant', 'manager'])): ?>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <form method="POST" onsubmit="return confirm('تأكيد استلام الطلب من قبل المحاسب؟');">
+                                                <input type="hidden" name="action" value="accountant_approve">
+                                                <input type="hidden" name="advance_id" value="<?php echo $request['id']; ?>">
+                                                <button type="submit" class="btn btn-sm btn-info">
+                                                    <i class="bi bi-check-circle me-1"></i>استلام
+                                                </button>
+                                            </form>
+                                            <button type="button" class="btn btn-sm btn-danger" onclick="openRejectModal(<?php echo $request['id']; ?>)">
+                                                <i class="bi bi-x-circle me-1"></i>رفض
                                             </button>
-                                            <button type="button" class="btn btn-danger" 
-                                                    onclick="rejectRequest(<?php echo $request['id']; ?>)">
-                                                <i class="bi bi-x-circle"></i> رفض
+                                        </div>
+                                    <?php elseif ($request['status'] === 'accountant_approved' && $currentUser['role'] === 'manager'): ?>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            <form method="POST" onsubmit="return confirm('تأكيد الموافقة النهائية على السلفة؟');">
+                                                <input type="hidden" name="action" value="manager_approve">
+                                                <input type="hidden" name="advance_id" value="<?php echo $request['id']; ?>">
+                                                <button type="submit" class="btn btn-sm btn-success">
+                                                    <i class="bi bi-check-circle-fill me-1"></i>موافقة
+                                                </button>
+                                            </form>
+                                            <button type="button" class="btn btn-sm btn-danger" onclick="openRejectModal(<?php echo $request['id']; ?>)">
+                                                <i class="bi bi-x-circle me-1"></i>رفض
                                             </button>
                                         </div>
                                     <?php else: ?>
-                                        <span class="text-muted">-</span>
+                                        <span class="text-muted">—</span>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -410,50 +518,30 @@ $stats = [
     </div>
 </div>
 
-<!-- Modal الموافقة -->
-<div class="modal fade" id="approveModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title">الموافقة على طلب السلفة</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST" id="approveForm">
-                <input type="hidden" name="action" value="approve">
-                <input type="hidden" name="request_id" id="approveRequestId">
-                <div class="modal-body">
-                    <p>هل أنت متأكد من الموافقة على هذا الطلب؟</p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                    <button type="submit" class="btn btn-success">موافقة</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <!-- Modal الرفض -->
 <div class="modal fade" id="rejectModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
-                <h5 class="modal-title">رفض طلب السلفة</h5>
+                <h5 class="modal-title"><i class="bi bi-x-circle me-2"></i>رفض طلب السلفة</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="rejectForm">
+            <form method="POST">
                 <input type="hidden" name="action" value="reject">
-                <input type="hidden" name="request_id" id="rejectRequestId">
+                <input type="hidden" name="advance_id" id="rejectAdvanceId">
                 <div class="modal-body">
                     <div class="mb-3">
                         <label for="rejection_reason" class="form-label">سبب الرفض <span class="text-danger">*</span></label>
-                        <textarea class="form-control" id="rejection_reason" name="rejection_reason" rows="3" required 
-                                  placeholder="اذكر سبب رفض الطلب"></textarea>
+                        <textarea name="rejection_reason" id="rejection_reason" class="form-control" rows="3" required placeholder="اذكر سبب الرفض"></textarea>
+                    </div>
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-info-circle me-2"></i>
+                        سيتم إرسال السبب للموظف في إشعار فوري.
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
-                    <button type="submit" class="btn btn-danger">رفض</button>
+                    <button type="submit" class="btn btn-danger">رفض الطلب</button>
                 </div>
             </form>
         </div>
@@ -461,16 +549,10 @@ $stats = [
 </div>
 
 <script>
-function approveRequest(requestId) {
-    document.getElementById('approveRequestId').value = requestId;
-    const modal = new bootstrap.Modal(document.getElementById('approveModal'));
-    modal.show();
-}
-
-function rejectRequest(requestId) {
-    document.getElementById('rejectRequestId').value = requestId;
-    const modal = new bootstrap.Modal(document.getElementById('rejectModal'));
-    modal.show();
+function openRejectModal(advanceId) {
+    document.getElementById('rejectAdvanceId').value = advanceId;
+    const rejectModal = new bootstrap.Modal(document.getElementById('rejectModal'));
+    rejectModal.show();
 }
 </script>
 
