@@ -243,10 +243,6 @@ $dashboardUrl = $currentUser ? getDashboardUrl($currentUser['role']) : '#';
                            class="btn btn-success btn-action" target="_blank">
                             <i class="bi bi-printer me-2"></i>طباعة الباركود
                         </a>
-                        <a href="scan_barcode.php?batch=<?php echo urlencode($batchNumber); ?>" 
-                           class="btn btn-info btn-action">
-                            <i class="bi bi-upc-scan me-2"></i>فحص الباركود
-                        </a>
                     </div>
                     <?php else: ?>
                     <div class="action-buttons">

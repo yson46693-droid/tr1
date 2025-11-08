@@ -136,7 +136,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 // معالجة طلب السلفة
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'request_advance') {
-    $isAjaxRequest = isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+    $isAjaxRequest = (
+        (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest')
+        || !empty($_POST['is_ajax'])
+        || (
+            isset($_SERVER['HTTP_ACCEPT']) &&
+            stripos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false
+        )
+    );
     $sendAdvanceAjaxResponse = function ($success, $message, $redirect = null) use ($isAjaxRequest) {
         if (!$isAjaxRequest) {
             return false;
@@ -1373,6 +1380,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         const formData = new FormData(advanceForm);
+        formData.append('is_ajax', '1');
 
         fetch(window.location.href, {
             method: 'POST',
@@ -1382,10 +1390,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         })
             .then(response => {
+                const contentType = response.headers.get('content-type') || '';
                 if (!response.ok) {
                     throw new Error('تعذر الاتصال بالخادم. يرجى المحاولة مرة أخرى.');
                 }
-                return response.json();
+                if (contentType.includes('application/json')) {
+                    return response.json();
+                }
+                return response.text().then(text => {
+                    console.error('Unexpected response body:', text);
+                    throw new Error('حدث خطأ غير متوقع في الخادم. يرجى المحاولة لاحقاً.');
+                });
             })
             .then(data => {
                 const alert = document.createElement('div');

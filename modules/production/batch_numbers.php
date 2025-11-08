@@ -177,10 +177,6 @@ if (isset($_GET['id'])) {
         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
             <h5 class="mb-0">رقم التشغيلة: <?php echo htmlspecialchars($selectedBatch['batch_number']); ?></h5>
             <div>
-                <a href="<?php echo getRelativeUrl('scan_barcode.php'); ?>?batch=<?php echo urlencode($selectedBatch['batch_number']); ?>" 
-                   class="btn btn-light btn-sm">
-                    <i class="bi bi-upc-scan me-2"></i>فحص الباركود
-                </a>
                 <a href="print_barcode.php?batch=<?php echo urlencode($selectedBatch['batch_number']); ?>&quantity=1" 
                    class="btn btn-light btn-sm" target="_blank">
                     <i class="bi bi-printer me-2"></i>طباعة باركود

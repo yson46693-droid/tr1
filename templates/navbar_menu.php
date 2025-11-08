@@ -265,13 +265,6 @@ switch ($role) {
             ],
             ['divider' => true, 'title' => 'Production'],
             [
-                'title' => 'فحص الباركود',
-                'icon' => 'bi-qr-code-scan',
-                'url' => getRelativeUrl('scan_barcode.php'),
-                'active' => false,
-                'badge' => null
-            ],
-            [
                 'title' => 'تقارير الإنتاجية',
                 'icon' => 'bi-graph-up-arrow',
                 'url' => $baseUrl . 'production.php?page=productivity_reports',

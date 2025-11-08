@@ -317,13 +317,6 @@ switch ($role) {
                 'badge' => null
             ],
             [
-                'title' => 'فحص الباركود',
-                'icon' => 'bi-qr-code-scan',
-                'url' => getRelativeUrl('scan_barcode.php'),
-                'active' => ($currentPage === 'scan_barcode.php'),
-                'badge' => null
-            ],
-            [
                 'title' => isset($lang['menu_tasks']) ? $lang['menu_tasks'] : 'المهام',
                 'icon' => 'bi-list-check',
                 'url' => $baseUrl . 'production.php?page=tasks',
