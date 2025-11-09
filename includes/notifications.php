@@ -315,7 +315,7 @@ function handleAttendanceRemindersForUser($user) {
     }
 
     // تذكير تسجيل الانصراف
-    $checkOutReminderThreshold = (clone $endTime)->modify('-15 minutes');
+    $checkOutReminderThreshold = (clone $endTime)->modify('-10 minutes');
     if ($hasOpenAttendance && $now >= $checkOutReminderThreshold) {
         $title = 'تنبيه تسجيل الانصراف';
         $message = 'تنبيه هام لتسجيل الانصراف لتفادي الخصومات. يرجى تسجيل الانصراف قبل مغادرة العمل.';
