@@ -140,21 +140,9 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             error_log('Daily Backup: failed loading job state - ' . $stateError->getMessage());
         }
 
-        $jobReportPath = null;
-        if (!empty($jobState['last_file_path'])) {
-            $candidateJob = rtrim(defined('BACKUPS_PATH') ? BACKUPS_PATH : (dirname(__DIR__) . '/backups'), '/\\')
-                . '/' . ltrim((string)$jobState['last_file_path'], '/\\');
-            if (is_file($candidateJob)) {
-                $jobReportPath = $candidateJob;
-            }
-        }
-
         if (!empty($jobState['last_sent_at'])) {
             $lastSentDate = substr((string) $jobState['last_sent_at'], 0, 10);
-            if (
-                $lastSentDate === $todayDate &&
-                ($jobReportPath !== null)
-            ) {
+            if ($lastSentDate === $todayDate) {
                 $statusData['status'] = 'already_sent';
                 $statusData['last_sent_at'] = $jobState['last_sent_at'];
                 $statusData['file_path'] = $jobState['last_file_path'] ?? null;
@@ -196,8 +184,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             if (
                 !empty($existingData) &&
                 ($existingData['date'] ?? null) === $todayDate &&
-                in_array($existingData['status'] ?? null, ['completed', 'sent'], true) &&
-                $existingDataHasFile
+                in_array($existingData['status'] ?? null, ['completed', 'sent'], true)
             ) {
                 $db->commit();
                 dailyBackupNotifyManager('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.');
