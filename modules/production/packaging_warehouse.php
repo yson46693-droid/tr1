@@ -420,6 +420,67 @@ if (!function_exists('storePackagingReportDocument')) {
     }
 }
 
+if (!function_exists('normalizePackagingString')) {
+    /**
+     * Normalize strings for case-insensitive, whitespace-insensitive comparison.
+     */
+    function normalizePackagingString(?string $value): string
+    {
+        $normalized = mb_strtolower(trim((string)$value), 'UTF-8');
+        // Replace multiple whitespace characters with a single space.
+        $normalized = preg_replace('/\s+/u', ' ', $normalized);
+        return $normalized ?? '';
+    }
+}
+
+if (!function_exists('shouldShowPackagingUseButton')) {
+    /**
+     * Determine whether the quick-use button should be displayed for the given material.
+     *
+     * @param array<string, mixed> $material
+     */
+    function shouldShowPackagingUseButton(array $material): bool
+    {
+        $type = normalizePackagingString($material['type'] ?? $material['category'] ?? '');
+        $name = normalizePackagingString($material['name'] ?? '');
+        $alias = normalizePackagingString($material['alias'] ?? '');
+
+        $targetTypes = [
+            'اكياس - لوازم التعبئة',
+            'اكياس - لوازم التعبئه',
+            'أكياس - لوازم التعبئة',
+            'أكياس - لوازم التعبئه',
+        ];
+
+        $normalizedTargetTypes = array_map('normalizePackagingString', $targetTypes);
+        if ($type !== '') {
+            foreach ($normalizedTargetTypes as $target) {
+                if ($type === $target) {
+                    return true;
+                }
+            }
+            if (mb_strpos($type, 'اكياس', 0, 'UTF-8') !== false && mb_strpos($type, 'لوازم', 0, 'UTF-8') !== false) {
+                return true;
+            }
+        }
+
+        $targetNames = ['بابلز', 'bubble', 'bubbles'];
+        foreach ($targetNames as $targetName) {
+            $normalizedTarget = normalizePackagingString($targetName);
+            if ($normalizedTarget !== '') {
+                if ($name !== '' && mb_strpos($name, $normalizedTarget, 0, 'UTF-8') !== false) {
+                    return true;
+                }
+                if ($alias !== '' && mb_strpos($alias, $normalizedTarget, 0, 'UTF-8') !== false) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+}
+
 requireAnyRole(['production', 'accountant', 'manager']);
 
 $currentUser = getCurrentUser();
@@ -487,6 +548,36 @@ if (empty($damageLogTableCheck)) {
     }
 }
 
+$usageLogTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_usage_logs'");
+$hasPackagingUsageLogs = !empty($usageLogTableCheck);
+if (!$hasPackagingUsageLogs) {
+    try {
+        $db->execute("
+            CREATE TABLE IF NOT EXISTS `packaging_usage_logs` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `material_id` int(11) NOT NULL,
+              `material_name` varchar(255) DEFAULT NULL,
+              `material_code` varchar(100) DEFAULT NULL,
+              `source_table` enum('packaging_materials','products') NOT NULL DEFAULT 'packaging_materials',
+              `quantity_before` decimal(15,4) DEFAULT 0.0000,
+              `quantity_used` decimal(15,4) NOT NULL,
+              `quantity_after` decimal(15,4) DEFAULT 0.0000,
+              `unit` varchar(50) DEFAULT NULL,
+              `used_by` int(11) DEFAULT NULL,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `material_id` (`material_id`),
+              KEY `used_by` (`used_by`),
+              KEY `source_table` (`source_table`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+        $hasPackagingUsageLogs = true;
+    } catch (Exception $e) {
+        $hasPackagingUsageLogs = false;
+        error_log("Error creating packaging_usage_logs table: " . $e->getMessage());
+    }
+}
+
 // معالجة طلبات إضافة الكميات
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
@@ -547,6 +638,142 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode([
                 'success' => false,
                 'message' => 'تعذّر حفظ الاسم المستعار: ' . $aliasUpdateError->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+        exit;
+    } elseif ($action === 'use_packaging_material') {
+        header('Content-Type: application/json; charset=utf-8');
+
+        $materialId = intval($_POST['material_id'] ?? 0);
+        $useQuantity = 1.0;
+
+        if ($materialId <= 0) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'معرّف الأداة غير صحيح.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        try {
+            $db->beginTransaction();
+
+            if ($usePackagingTable) {
+                $material = $db->queryOne(
+                    "SELECT id, material_id, name, quantity, unit 
+                     FROM packaging_materials 
+                     WHERE id = ? AND status = 'active' 
+                     FOR UPDATE",
+                    [$materialId]
+                );
+            } else {
+                $unitColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'unit'");
+                $selectColumns = $unitColumnCheck ? 'id, name, quantity, unit' : 'id, name, quantity';
+                $material = $db->queryOne(
+                    "SELECT {$selectColumns} 
+                     FROM products 
+                     WHERE id = ? AND status = 'active' 
+                     FOR UPDATE",
+                    [$materialId]
+                );
+                if ($unitColumnCheck && $material && !array_key_exists('unit', $material)) {
+                    $material['unit'] = null;
+                }
+            }
+
+            if (!$material) {
+                throw new Exception('أداة التعبئة غير موجودة أو غير مفعّلة.');
+            }
+
+            $quantityBefore = (float)($material['quantity'] ?? 0);
+            if ($quantityBefore < $useQuantity) {
+                throw new Exception('الكمية المتاحة أقل من المطلوب للاستخدام.');
+            }
+
+            $quantityAfter = max(round($quantityBefore - $useQuantity, 4), 0.0);
+
+            if ($usePackagingTable) {
+                $db->execute(
+                    "UPDATE packaging_materials 
+                     SET quantity = ?, updated_at = NOW() 
+                     WHERE id = ?",
+                    [$quantityAfter, $materialId]
+                );
+            } else {
+                $db->execute(
+                    "UPDATE products 
+                     SET quantity = ? 
+                     WHERE id = ?",
+                    [$quantityAfter, $materialId]
+                );
+            }
+
+            if ($hasPackagingUsageLogs) {
+                try {
+                    $db->execute(
+                        "INSERT INTO packaging_usage_logs 
+                         (material_id, material_name, material_code, source_table, quantity_before, quantity_used, quantity_after, unit, used_by) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [
+                            $materialId,
+                            $material['name'] ?? null,
+                            $material['material_id'] ?? null,
+                            $usePackagingTable ? 'packaging_materials' : 'products',
+                            $quantityBefore,
+                            $useQuantity,
+                            $quantityAfter,
+                            $material['unit'] ?? 'وحدة',
+                            $currentUser['id'] ?? null
+                        ]
+                    );
+                } catch (Exception $logError) {
+                    error_log('Packaging use log insert failed: ' . $logError->getMessage());
+                }
+            }
+
+            logAudit(
+                $currentUser['id'],
+                'use_packaging_material',
+                $usePackagingTable ? 'packaging_materials' : 'products',
+                $materialId,
+                [
+                    'quantity_before' => $quantityBefore
+                ],
+                [
+                    'quantity_after' => $quantityAfter,
+                    'used_quantity' => $useQuantity
+                ]
+            );
+
+            $db->commit();
+
+            $unitLabel = $material['unit'] ?? 'وحدة';
+            $materialName = $material['name'] ?? ('أداة #' . $materialId);
+            $successMessage = sprintf(
+                'تم استخدام %s %s من %s بنجاح.',
+                rtrim(rtrim(number_format($useQuantity, 2), '0'), '.'),
+                $unitLabel,
+                $materialName
+            );
+
+            $_SESSION['success_message'] = $successMessage;
+
+            echo json_encode([
+                'success' => true,
+                'message' => $successMessage,
+                'reload' => true
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Exception $e) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+
+            error_log('Packaging use error: ' . $e->getMessage());
+            $errorMessage = $e->getMessage() ?: 'حدث خطأ غير متوقع.';
+
+            echo json_encode([
+                'success' => false,
+                'message' => 'تعذّر استخدام الأداة: ' . $errorMessage
             ], JSON_UNESCAPED_UNICODE);
         }
         exit;
@@ -1193,6 +1420,69 @@ try {
     error_log("Batch usage processing error: " . $e->getMessage());
 }
 
+if ($hasPackagingUsageLogs) {
+    try {
+        $manualUsageRows = $db->query(
+            "SELECT material_id, source_table, 
+                    SUM(quantity_used) AS total_used, 
+                    COUNT(*) AS usage_count,
+                    MIN(created_at) AS first_used,
+                    MAX(created_at) AS last_used
+             FROM packaging_usage_logs
+             GROUP BY material_id, source_table"
+        );
+
+        foreach ($manualUsageRows as $manualUsage) {
+            $manualSource = $manualUsage['source_table'] ?? 'packaging_materials';
+            if ($usePackagingTable) {
+                if ($manualSource !== 'packaging_materials') {
+                    continue;
+                }
+            } else {
+                if ($manualSource !== 'products') {
+                    continue;
+                }
+            }
+
+            $manualMaterialId = intval($manualUsage['material_id'] ?? 0);
+            if ($manualMaterialId <= 0) {
+                continue;
+            }
+
+            if (!isset($usageData[$manualMaterialId])) {
+                $usageData[$manualMaterialId] = [
+                    'total_used' => 0,
+                    'production_count' => 0,
+                    'first_used' => null,
+                    'last_used' => null
+                ];
+            }
+
+            $usageData[$manualMaterialId]['total_used'] += (float)($manualUsage['total_used'] ?? 0);
+            $usageData[$manualMaterialId]['production_count'] += (int)($manualUsage['usage_count'] ?? 0);
+
+            $manualFirstUsed = $manualUsage['first_used'] ?? null;
+            $manualLastUsed = $manualUsage['last_used'] ?? null;
+
+            if ($manualFirstUsed !== null) {
+                $currentFirst = $usageData[$manualMaterialId]['first_used'];
+                if (empty($currentFirst) || $manualFirstUsed < $currentFirst) {
+                    $usageData[$manualMaterialId]['first_used'] = $manualFirstUsed;
+                }
+            }
+
+            if ($manualLastUsed !== null) {
+                $currentLast = $usageData[$manualMaterialId]['last_used'];
+                if (empty($currentLast) || $manualLastUsed > $currentLast) {
+                    $usageData[$manualMaterialId]['last_used'] = $manualLastUsed;
+                }
+            }
+        }
+    } catch (Exception $manualUsageError) {
+        error_log('Manual packaging usage aggregation error: ' . $manualUsageError->getMessage());
+    }
+}
+
 // تطبيق الفلاتر
 $filteredMaterials = [];
 foreach ($packagingMaterials as $material) {
@@ -1564,9 +1854,21 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                     <?php endif; ?>
                                 </td>
                                 <td style="padding: 0.4rem 0.25rem; font-size: 0.8rem;"><?php echo htmlspecialchars($material['type'] ?? $material['category'] ?? '-'); ?></td>
+                                <?php
+                                    $materialQuantity = isset($material['quantity']) ? (float)$material['quantity'] : 0.0;
+                                    $showUseButton = $usePackagingTable && shouldShowPackagingUseButton($material);
+                                    $useButtonDisabled = $materialQuantity < 1;
+                                    $quantityElementId = 'material-quantity-' . $material['id'];
+                                ?>
                                 <td style="padding: 0.4rem 0.25rem;">
-                                    <div style="font-weight: 600; font-size: 0.875rem;" class="text-<?php echo $material['quantity'] > 0 ? 'success' : 'danger'; ?>">
-                                        <?php echo number_format($material['quantity'], 2); ?>
+                                    <div
+                                        id="<?php echo htmlspecialchars($quantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
+                                        style="font-weight: 600; font-size: 0.875rem;"
+                                        class="text-<?php echo $materialQuantity > 0 ? 'success' : 'danger'; ?>"
+                                        data-value="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
+                                        data-unit-label="<?php echo htmlspecialchars($material['unit'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-append-unit="0">
+                                        <?php echo number_format($materialQuantity, 2); ?>
                                     </div>
                                     <?php if (!empty($material['unit'])): ?>
                                         <div style="font-size: 0.7rem; color: #6c757d;"><?php echo htmlspecialchars($material['unit']); ?></div>
@@ -1579,11 +1881,25 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                 </td>
                                 <td style="padding: 0.4rem 0.25rem;">
                                     <div class="btn-group btn-group-sm">
+                                        <?php if ($showUseButton): ?>
+                                            <button class="btn btn-outline-primary btn-sm"
+                                                    data-id="<?php echo $material['id']; ?>"
+                                                    data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                    data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
+                                                    data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
+                                                    data-quantity-target="<?php echo htmlspecialchars($quantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
+                                                    data-use-quantity="1"
+                                                    onclick="usePackagingMaterial(this)"
+                                                    title="استخدام وحدة واحدة"
+                                                    style="padding: 0.2rem 0.4rem; font-size: 0.75rem;"<?php echo $useButtonDisabled ? ' disabled' : ''; ?>>
+                                                <i class="bi bi-check2-circle"></i>
+                                            </button>
+                                        <?php endif; ?>
                                         <button class="btn btn-success btn-sm"
                                                 data-id="<?php echo $material['id']; ?>"
                                                 data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                                 data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
-                                                data-quantity="<?php echo number_format((float)($material['quantity'] ?? 0), 4, '.', ''); ?>"
+                                                data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
                                                 onclick="openAddQuantityModal(this)"
                                                 title="إضافة كمية"
                                                 style="padding: 0.2rem 0.4rem; font-size: 0.75rem;">
@@ -1593,7 +1909,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                                 data-id="<?php echo $material['id']; ?>"
                                                 data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                                 data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
-                                                data-quantity="<?php echo number_format((float)($material['quantity'] ?? 0), 4, '.', ''); ?>"
+                                                data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
                                                 onclick="openRecordDamageModal(this)"
                                                 title="تسجيل تالف"
                                                 style="padding: 0.2rem 0.4rem; font-size: 0.75rem;">
@@ -1658,6 +1974,12 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                 <span class="badge bg-primary">#<?php echo $offset + $index + 1; ?></span>
                             </div>
                             
+                            <?php
+                                $materialQuantity = isset($material['quantity']) ? (float)$material['quantity'] : 0.0;
+                                $showUseButton = $usePackagingTable && shouldShowPackagingUseButton($material);
+                                $useButtonDisabled = $materialQuantity < 1;
+                                $mobileQuantityElementId = 'material-quantity-' . $material['id'] . '-mobile';
+                            ?>
                             <div class="row g-2 mb-2">
                                 <div class="col-6">
                                     <small class="text-muted d-block">الفئة:</small>
@@ -1665,8 +1987,13 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                 </div>
                                 <div class="col-6">
                                     <small class="text-muted d-block">الكمية:</small>
-                                    <strong class="text-<?php echo $material['quantity'] > 0 ? 'success' : 'danger'; ?>">
-                                        <?php echo number_format($material['quantity'], 2); ?> 
+                                    <strong
+                                        id="<?php echo htmlspecialchars($mobileQuantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
+                                        class="text-<?php echo $materialQuantity > 0 ? 'success' : 'danger'; ?>"
+                                        data-value="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
+                                        data-unit-label="<?php echo htmlspecialchars($material['unit'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-append-unit="1">
+                                        <?php echo number_format($materialQuantity, 2); ?>
                                         <?php echo htmlspecialchars($material['unit'] ?? ''); ?>
                                     </strong>
                                 </div>
@@ -1680,11 +2007,23 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                             </div>
                             
                             <div class="d-grid gap-2 d-flex mt-3">
+                                <?php if ($showUseButton): ?>
+                                    <button class="btn btn-sm btn-outline-primary flex-fill"
+                                            data-id="<?php echo $material['id']; ?>"
+                                            data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
+                                            data-quantity-target="<?php echo htmlspecialchars($mobileQuantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-use-quantity="1"
+                                            onclick="usePackagingMaterial(this)"<?php echo $useButtonDisabled ? ' disabled' : ''; ?>>
+                                        <i class="bi bi-check2-circle me-2"></i>استخدام
+                                    </button>
+                                <?php endif; ?>
                                 <button class="btn btn-sm btn-success flex-fill"
                                         data-id="<?php echo $material['id']; ?>"
                                         data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                         data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
-                                        data-quantity="<?php echo number_format((float)($material['quantity'] ?? 0), 4, '.', ''); ?>"
+                                        data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
                                         onclick="openAddQuantityModal(this)">
                                     <i class="bi bi-plus-circle me-2"></i>إضافة كمية
                                 </button>
@@ -1692,7 +2031,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                         data-id="<?php echo $material['id']; ?>"
                                         data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                         data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
-                                        data-quantity="<?php echo number_format((float)($material['quantity'] ?? 0), 4, '.', ''); ?>"
+                                        data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
                                         onclick="openRecordDamageModal(this)">
                                     <i class="bi bi-exclamation-octagon me-2"></i>تسجيل تالف
                                 </button>
@@ -2002,6 +2341,8 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
 </div>
 
 <script>
+const aliasApiUrl = '<?php echo getRelativeUrl('api/update_packaging_alias.php'); ?>';
+
 document.addEventListener('DOMContentLoaded', function () {
     const reportButton = document.getElementById('generatePackagingReportBtn');
     const reportModalElement = document.getElementById('packagingReportModal');
@@ -2062,6 +2403,113 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 });
+
+async function usePackagingMaterial(trigger) {
+    if (!trigger) {
+        return;
+    }
+
+    const materialId = trigger.dataset.id;
+    if (!materialId) {
+        console.warn('Material id is missing for use action.');
+        return;
+    }
+
+    const materialName = trigger.dataset.name || 'أداة التعبئة';
+    const unitLabel = (trigger.dataset.unit || 'وحدة').trim() || 'وحدة';
+    const useQuantity = parseFloat(trigger.dataset.useQuantity || '1') || 1;
+    const isIntegerQuantity = Math.abs(useQuantity - Math.round(useQuantity)) < 1e-9;
+    const quantityDisplay = useQuantity.toLocaleString('ar-EG', {
+        minimumFractionDigits: isIntegerQuantity ? 0 : 2,
+        maximumFractionDigits: isIntegerQuantity ? 0 : 2
+    });
+    const confirmationMessage = `سيتم خصم ${quantityDisplay} ${unitLabel} من "${materialName}". هل تريد المتابعة؟`;
+
+    if (!window.confirm(confirmationMessage)) {
+        return;
+    }
+
+    const originalHtml = trigger.innerHTML;
+    const originalDisabledState = trigger.disabled;
+    trigger.disabled = true;
+    trigger.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+
+    let shouldReload = false;
+
+    try {
+        const response = await fetch(window.location.href, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: new URLSearchParams({
+                action: 'use_packaging_material',
+                material_id: materialId
+            })
+        });
+
+        const contentType = response.headers.get('Content-Type') || '';
+        let payload = null;
+        if (contentType.includes('application/json')) {
+            payload = await response.json();
+        } else {
+            const text = await response.text();
+            throw new Error(text.substring(0, 200) || 'استجابة غير صالحة من الخادم.');
+        }
+
+        if (response.ok && payload?.success) {
+            shouldReload = !!payload.reload;
+            if (shouldReload) {
+                window.location.reload();
+                return;
+            }
+
+            const targetId = trigger.dataset.quantityTarget;
+            if (targetId) {
+                const quantityElement = document.getElementById(targetId);
+                if (quantityElement) {
+                    const currentRaw = quantityElement.getAttribute('data-value') || quantityElement.dataset.value || '0';
+                    const currentValue = parseFloat(currentRaw) || 0;
+                    const updatedValue = Math.max(currentValue - useQuantity, 0);
+                    const unitForElement = quantityElement.getAttribute('data-unit-label') || quantityElement.dataset.unitLabel || '';
+                    const appendUnit = quantityElement.getAttribute('data-append-unit') === '1';
+
+                    const formattedValue = updatedValue.toLocaleString('ar-EG', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+
+                    quantityElement.setAttribute('data-value', updatedValue.toFixed(4));
+                    quantityElement.dataset.value = updatedValue.toFixed(4);
+
+                    if (appendUnit && unitForElement) {
+                        quantityElement.textContent = `${formattedValue} ${unitForElement}`;
+                    } else {
+                        quantityElement.textContent = formattedValue;
+                    }
+                }
+            }
+
+            if (payload.message) {
+                alert(payload.message);
+            }
+        } else {
+            const errorMessage = payload?.message || 'تعذّر إتمام عملية الاستخدام.';
+            alert(errorMessage);
+        }
+    } catch (error) {
+        console.error('Use packaging material error:', error);
+        alert('حدث خطأ أثناء تنفيذ العملية: ' + (error?.message || 'خطأ غير معروف'));
+    } finally {
+        if (!shouldReload) {
+            trigger.disabled = originalDisabledState;
+            trigger.innerHTML = originalHtml;
+        }
+    }
+}
 
 function openAddQuantityModal(trigger) {
     const modalElement = document.getElementById('addQuantityModal');
@@ -2348,15 +2796,15 @@ document.addEventListener('DOMContentLoaded', function () {
             }
 
             try {
-                const response = await fetch(window.location.href, {
+                const response = await fetch(aliasApiUrl, {
                     method: 'POST',
                     credentials: 'same-origin',
                     headers: {
                         'Accept': 'application/json',
+                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: new URLSearchParams({
-                        action: 'update_packaging_alias',
                         material_id: materialId,
                         alias: aliasValue
                     })

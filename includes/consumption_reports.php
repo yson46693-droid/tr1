@@ -254,6 +254,74 @@ function getConsumptionSummary($dateFrom, $dateTo)
             $summary['raw']['sub_totals'][$subKey]['total_in'] += $item['total_in'];
         }
     }
+    $packagingIndex = [];
+    foreach ($summary['packaging']['items'] as $idx => $item) {
+        $key = mb_strtolower($item['name'] ?? '');
+        if ($key !== '') {
+            $packagingIndex[$key] = $idx;
+        }
+    }
+    try {
+        $usageTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_usage_logs'");
+        if (!empty($usageTableCheck)) {
+            $usageLogs = $db->query(
+                "SELECT material_id,
+                        source_table,
+                        COALESCE(material_name, CONCAT('أداة #', material_id)) AS usage_name,
+                        SUM(quantity_used) AS total_used,
+                        COUNT(*) AS usage_count,
+                        MAX(created_at) AS last_used_at,
+                        unit
+                 FROM packaging_usage_logs
+                 WHERE DATE(created_at) BETWEEN ? AND ?
+                 GROUP BY material_id, source_table, material_name, unit",
+                [$from, $to]
+            );
+
+            foreach ($usageLogs as $log) {
+                $sourceTable = $log['source_table'] ?? 'packaging_materials';
+                if ($sourceTable !== 'packaging_materials') {
+                    continue;
+                }
+                $usageName = trim((string)($log['usage_name'] ?? ''));
+                if ($usageName === '') {
+                    $usageName = 'أداة #' . intval($log['material_id'] ?? 0);
+                }
+                $manualTotal = consumptionFormatNumber($log['total_used'] ?? 0);
+                if ($manualTotal <= 0) {
+                    continue;
+                }
+
+                $key = mb_strtolower($usageName);
+                $usageCount = (int)($log['usage_count'] ?? 0);
+                $unitLabel = $log['unit'] ?? 'وحدة';
+
+                if (isset($packagingIndex[$key])) {
+                    $targetIdx = $packagingIndex[$key];
+                    $summary['packaging']['items'][$targetIdx]['total_out'] += $manualTotal;
+                    $summary['packaging']['items'][$targetIdx]['net'] = consumptionFormatNumber(
+                        $summary['packaging']['items'][$targetIdx]['total_out'] - $summary['packaging']['items'][$targetIdx]['total_in']
+                    );
+                    $summary['packaging']['items'][$targetIdx]['movements'] += $usageCount;
+                } else {
+                    $summary['packaging']['items'][] = [
+                        'name' => $usageName,
+                        'sub_category' => 'استخدام مباشر',
+                        'total_out' => $manualTotal,
+                        'total_in' => 0.0,
+                        'net' => $manualTotal,
+                        'movements' => $usageCount,
+                        'unit' => $unitLabel
+                    ];
+                    $packagingIndex[$key] = count($summary['packaging']['items']) - 1;
+                }
+
+                $summary['packaging']['total_out'] += $manualTotal;
+            }
+        }
+    } catch (Exception $manualUsageError) {
+        error_log('Consumption packaging usage logs error: ' . $manualUsageError->getMessage());
+    }
     usort($summary['packaging']['items'], function ($a, $b) {
         return $b['total_out'] <=> $a['total_out'];
     });
