@@ -1905,9 +1905,6 @@ $lang = isset($translations) ? $translations : [];
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-box-seam me-2"></i><?php echo isset($lang['production']) ? $lang['production'] : 'الإنتاج'; ?></h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProductionModal">
-        <i class="bi bi-plus-circle me-2"></i><?php echo isset($lang['add_production']) ? $lang['add_production'] : 'إضافة إنتاج'; ?>
-    </button>
 </div>
 
 <?php if ($error): ?>
