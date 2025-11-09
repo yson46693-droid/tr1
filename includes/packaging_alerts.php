@@ -168,11 +168,23 @@ function processDailyPackagingAlert(): void {
 
     if (!empty($jobState['last_sent_at'])) {
         $lastSentDate = substr((string)$jobState['last_sent_at'], 0, 10);
-        if ($lastSentDate === $today && $existingReportPath !== null && !empty($existingData)) {
-            $alreadyData = $existingData;
+        if ($lastSentDate === $today) {
+            $alreadyData = !empty($existingData) ? $existingData : [
+                'date' => $today,
+                'status' => 'already_sent',
+            ];
             $alreadyData['status'] = 'already_sent';
             $alreadyData['checked_at'] = date('Y-m-d H:i:s');
             $alreadyData['last_sent_at'] = $jobState['last_sent_at'];
+            if ($existingReportRelative !== null) {
+                $alreadyData['report_path'] = $existingReportRelative;
+            }
+            if ($existingViewerPath !== null) {
+                $alreadyData['viewer_path'] = $existingViewerPath;
+            }
+            if ($existingAccessToken !== null) {
+                $alreadyData['access_token'] = $existingAccessToken;
+            }
             packagingAlertSaveStatus($alreadyData);
             return;
         }

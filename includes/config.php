@@ -404,8 +404,6 @@ function getSuccessMessage() {
     return null;
 }
 
-// ملاحظة: تم نقل كود الإصلاح التلقائي إلى نهاية ملف db.php
-// Note: Auto-fix code moved to end of db.php file
 
 if (!defined('ENABLE_DAILY_LOW_STOCK_REPORT')) {
     define('ENABLE_DAILY_LOW_STOCK_REPORT', true);
@@ -420,24 +418,94 @@ if (!defined('ENABLE_DAILY_BACKUP_DELIVERY')) {
     define('ENABLE_DAILY_BACKUP_DELIVERY', true);
 }
 
+# وظيفة مساعده لجدولة المهام اليومية بفاصل زمني
+if (!function_exists('scheduleDailyJob')) {
+    /**
+     * جدولة مهمة يومية بفاصل لتقليل التحميل المفاجئ.
+     *
+     * @param string   $jobKey
+     * @param callable $callback
+     * @param int      $delaySeconds
+     */
+    function scheduleDailyJob(string $jobKey, callable $callback, int $delaySeconds = 30): void
+    {
+        static $initialized = false;
+        static $db;
+
+        try {
+            if (!$initialized) {
+                require_once __DIR__ . '/db.php';
+                $db = db();
+                $db->execute("CREATE TABLE IF NOT EXISTS system_scheduled_jobs (
+                    job_key VARCHAR(120) PRIMARY KEY,
+                    scheduled_at DATETIME NOT NULL,
+                    executed_at DATETIME DEFAULT NULL,
+                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                $initialized = true;
+            }
+
+            $today = date('Y-m-d');
+            $scheduled = $db->queryOne(
+                "SELECT scheduled_at, executed_at FROM system_scheduled_jobs WHERE job_key = ? LIMIT 1",
+                [$jobKey]
+            );
+
+            $shouldSchedule = false;
+            if (!$scheduled) {
+                $shouldSchedule = true;
+            } else {
+                $scheduledDate = substr((string)($scheduled['scheduled_at'] ?? ''), 0, 10);
+                $executedDate = substr((string)($scheduled['executed_at'] ?? ''), 0, 10);
+                if ($scheduledDate !== $today || $executedDate !== $today) {
+                    $shouldSchedule = true;
+                }
+            }
+
+            if ($shouldSchedule) {
+                $scheduledTime = date('Y-m-d H:i:s', time() + $delaySeconds);
+                $db->execute(
+                    "INSERT INTO system_scheduled_jobs (job_key, scheduled_at, executed_at)
+                     VALUES (?, ?, NULL)
+                     ON DUPLICATE KEY UPDATE scheduled_at = VALUES(scheduled_at), executed_at = NULL",
+                    [$jobKey, $scheduledTime]
+                );
+            } else {
+                $scheduledTime = $scheduled['scheduled_at'];
+            }
+
+            if (!empty($scheduledTime) && strtotime($scheduledTime) <= time()) {
+                $callback();
+                $db->execute(
+                    "UPDATE system_scheduled_jobs SET executed_at = NOW() WHERE job_key = ?",
+                    [$jobKey]
+                );
+            }
+        } catch (Throwable $scheduleError) {
+            error_log('Daily schedule error (' . $jobKey . '): ' . $scheduleError->getMessage());
+            $callback();
+        }
+    }
+}
+
 if (ENABLE_DAILY_LOW_STOCK_REPORT) {
     require_once __DIR__ . '/daily_low_stock_report.php';
-    triggerDailyLowStockReport();
+    scheduleDailyJob('daily_low_stock_report', 'triggerDailyLowStockReport', 5);
 }
 
 if (ENABLE_DAILY_PACKAGING_ALERT) {
     require_once __DIR__ . '/packaging_alerts.php';
-    processDailyPackagingAlert();
+    scheduleDailyJob('daily_packaging_alert', 'processDailyPackagingAlert', 20);
 }
 
 if (ENABLE_DAILY_CONSUMPTION_REPORT) {
     require_once __DIR__ . '/daily_consumption_sender.php';
-    triggerDailyConsumptionReport();
+    scheduleDailyJob('daily_consumption_report', 'triggerDailyConsumptionReport', 40);
 }
 
 if (ENABLE_DAILY_BACKUP_DELIVERY) {
     require_once __DIR__ . '/daily_backup_sender.php';
-    triggerDailyBackupDelivery();
+    scheduleDailyJob('daily_backup_delivery', 'triggerDailyBackupDelivery', 90);
 }
 
 
