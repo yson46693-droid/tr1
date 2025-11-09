@@ -4102,7 +4102,10 @@ function openCreateFromTemplateModal(element) {
     document.getElementById('template_type').value = templateType;
     
     // Ø¥Ø¹Ø§Ø¯Ø© ØªØ¹ÙŠÙŠÙ† Ø§Ù„Ù‚ÙŠÙ… Ø§Ù„ØªÙ„Ù‚Ø§Ø¦ÙŠØ©
-    document.querySelector('textarea[name="batch_notes"]').value = '';
+    const batchNotesField = document.querySelector('textarea[name="batch_notes"]');
+    if (batchNotesField) {
+        batchNotesField.value = '';
+    }
 
     const wrapper = document.getElementById('templateSuppliersWrapper');
     const container = document.getElementById('templateSuppliersContainer');
@@ -4137,7 +4140,13 @@ function openCreateFromTemplateModal(element) {
     const templateCacheKey = templateId + '::' + templateType;
     window.templateDetailsCache = window.templateDetailsCache || {};
 
-    const modal = new bootstrap.Modal(document.getElementById('createFromTemplateModal'));
+    const modalElement = document.getElementById('createFromTemplateModal');
+    if (!modalElement) {
+        console.error('createFromTemplateModal element not found in DOM.');
+        return;
+    }
+    const modal = new bootstrap.Modal(modalElement);
+    modal.show();
 
     const handleTemplateResponse = (data) => {
         if (data && data.success) {
@@ -4154,7 +4163,6 @@ function openCreateFromTemplateModal(element) {
                 `;
             }
         }
-        modal.show();
     };
 
     if (window.templateDetailsCache[templateCacheKey]) {
@@ -4178,7 +4186,11 @@ function openCreateFromTemplateModal(element) {
     fetch(requestUrl, { cache: 'no-store' })
         .then(response => response.ok ? response.json() : Promise.reject(new Error('Network error')))
         .then(data => {
-            window.templateDetailsCache[templateCacheKey] = data;
+            if (data && data.success) {
+                const cacheKey = data.cache_key || templateCacheKey;
+                window.templateDetailsCache[cacheKey] = data;
+                window.templateDetailsCache[templateCacheKey] = data;
+            }
             handleTemplateResponse(data);
         })
         .catch(error => {

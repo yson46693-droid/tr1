@@ -197,16 +197,49 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
     $link = getAttendanceReminderLink($role);
 
     $existing = $db->queryOne(
-        "SELECT id FROM notifications WHERE user_id = ? AND type = ? AND DATE(created_at) = CURDATE()",
+        "SELECT id, `read`, created_at FROM notifications WHERE user_id = ? AND type = ? AND DATE(created_at) = CURDATE() ORDER BY created_at DESC LIMIT 1",
         [$userId, $type]
     );
 
     if ($existing) {
+        $notificationId = (int) ($existing['id'] ?? 0);
+        $isUnread = isset($existing['read']) ? ((int) $existing['read'] === 0) : true;
+        $shouldReactivate = false;
+
+        if (!$isUnread) {
+            $cooldownMinutes = 120;
+            $lastCreatedAt = null;
+
+            if (!empty($existing['created_at'])) {
+                $lastCreatedAt = DateTime::createFromFormat('Y-m-d H:i:s', $existing['created_at']);
+            }
+
+            if ($lastCreatedAt instanceof DateTime) {
+                $minutesSince = floor((time() - $lastCreatedAt->getTimestamp()) / 60);
+                if ($minutesSince >= $cooldownMinutes) {
+                    $shouldReactivate = true;
+                }
+            } else {
+                $shouldReactivate = true;
+            }
+        }
+
+        $setParts = ['title = ?', 'message = ?', 'link = ?'];
+        $params = [$title, $message, $link];
+
+        if ($shouldReactivate) {
+            $setParts[] = "`read` = 0";
+            $setParts[] = "created_at = NOW()";
+        }
+
+        $params[] = $notificationId;
+
         $db->execute(
-            "UPDATE notifications SET title = ?, message = ?, link = ?, `read` = 0, created_at = NOW() WHERE id = ?",
-            [$title, $message, $link, $existing['id']]
+            "UPDATE notifications SET " . implode(', ', $setParts) . " WHERE id = ?",
+            $params
         );
-        return $existing['id'];
+
+        return $notificationId;
     }
 
     return createNotification($userId, $title, $message, $type, $link, false);

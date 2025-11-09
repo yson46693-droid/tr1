@@ -314,7 +314,7 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
 
                                 const parentItem = this.closest('.production-dashboard-notification');
                                 const listGroup = parentItem ? parentItem.parentElement : null;
-                                markNotificationAsRead(notificationId).then(function() {
+                                deleteNotification(notificationId).then(function() {
                                     if (parentItem) {
                                         parentItem.remove();
                                     }
