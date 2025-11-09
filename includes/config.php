@@ -97,6 +97,31 @@ if (!defined('PRIVATE_STORAGE_PATH')) {
 if (!defined('REPORTS_PRIVATE_PATH')) {
     define('REPORTS_PRIVATE_PATH', PRIVATE_STORAGE_PATH . '/reports');
 }
+
+/**
+ * ضمان وجود مجلد خاص للتخزين وإنشائه تلقائياً إذا لم يكن موجوداً.
+ *
+ * @param string $directory
+ * @return void
+ */
+function ensurePrivateDirectory(string $directory): void
+{
+    if (is_dir($directory)) {
+        return;
+    }
+
+    $parent = dirname($directory);
+    if (!is_dir($parent) && $parent !== $directory) {
+        ensurePrivateDirectory($parent);
+    }
+
+    if (!@mkdir($directory, 0755, true) && !is_dir($directory)) {
+        error_log('Failed to create directory: ' . $directory);
+    }
+}
+
+ensurePrivateDirectory(PRIVATE_STORAGE_PATH);
+ensurePrivateDirectory(REPORTS_PRIVATE_PATH);
 define('ASSETS_PATH', dirname(__DIR__) . '/assets/');
 
 // إعدادات تكامل aPDF.io - يمكن تخزين المفتاح في متغير بيئة APDF_IO_API_KEY لأمان أفضل
