@@ -100,17 +100,40 @@ function dailyLowStockGeneratePdf(array $sections, array $counts): ?string
         . '<meta name="viewport" content="width=device-width, initial-scale=1">' . $fontHint
         . '<style>' . $styles . '</style></head><body>' . $body . '</body></html>';
 
-    try {
-        apdfSavePdfToPath($document, $filePath, [
-            'landscape' => false,
-            'preferCSSPageSize' => true,
-        ]);
-    } catch (Throwable $e) {
-        error_log('Low Stock Report: aPDF.io error - ' . $e->getMessage());
-        return null;
+    // حفظ نسخة HTML يمكن استخدامها يدوياً إذا فشل توليد PDF
+    $htmlFallbackPath = $reportsDir . DIRECTORY_SEPARATOR . sprintf('low-stock-report-%s.html', date('Ymd-His'));
+    file_put_contents($htmlFallbackPath, $document);
+
+    $apiResult = apdfGeneratePdf($document, [
+        'landscape' => false,
+        'preferCSSPageSize' => true,
+    ]);
+
+    if ($apiResult['success']) {
+        if (@file_put_contents($filePath, $apiResult['data']) === false) {
+            error_log('Low Stock Report: unable to save PDF to path ' . $filePath);
+            return null;
+        }
+        // حذف نسخة HTML اذا كان الحفظ التلقائي مفعّل ولا نحتاجها
+        if (defined('REPORTS_AUTO_DELETE') && REPORTS_AUTO_DELETE) {
+            @unlink($htmlFallbackPath);
+        }
+        return $filePath;
     }
 
-    return $filePath;
+    // سجل السبب المفصل لمساعدة التشخيص
+    $errorDetails = sprintf(
+        'status=%s; preview=%s',
+        $apiResult['status'] ?? 'unknown',
+        $apiResult['preview'] ?? 'no-preview'
+    );
+    error_log('Low Stock Report: aPDF.io failure - ' . $errorDetails);
+
+    if (!empty($apiResult['status']) && (int)$apiResult['status'] === 0) {
+        error_log('Low Stock Report: curl error - ' . ($apiResult['preview'] ?? 'no message'));
+    }
+
+    return null;
 }
 
 function formatLowStockCountLabel(string $key): string

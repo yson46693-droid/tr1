@@ -25,7 +25,7 @@ if (!defined('APDF_IO_API_KEY') || APDF_IO_API_KEY === '') {
  *
  * @return string محتوى PDF ثنائي
  */
-function apdfGeneratePdf(string $html, array $options = []): string
+function apdfGeneratePdf(string $html, array $options = []): array
 {
     $endpoint = defined('APDF_IO_ENDPOINT') ? APDF_IO_ENDPOINT : 'https://api.apdf.io/v1/pdf/html';
 
@@ -66,7 +66,11 @@ function apdfGeneratePdf(string $html, array $options = []): string
     if ($response === false) {
         $error = curl_error($curl);
         curl_close($curl);
-        throw new RuntimeException('خطأ في الاتصال بخدمة aPDF.io: ' . $error);
+        return [
+            'success' => false,
+            'status' => 0,
+            'preview' => $error ?: 'Unknown cURL error',
+        ];
     }
 
     $statusCode = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
@@ -78,15 +82,18 @@ function apdfGeneratePdf(string $html, array $options = []): string
             ? mb_substr($response, 0, 400, 'UTF-8')
             : substr($response, 0, 400);
 
-        throw new RuntimeException(
-            'فشل إنشاء ملف PDF عبر aPDF.io. رمز الاستجابة: '
-            . $statusCode
-            . '. معاينة الاستجابة: '
-            . $preview
-        );
+        return [
+            'success' => false,
+            'status' => $statusCode,
+            'preview' => $preview,
+        ];
     }
 
-    return $response;
+    return [
+        'success' => true,
+        'status' => $statusCode,
+        'data' => $response,
+    ];
 }
 
 /**
