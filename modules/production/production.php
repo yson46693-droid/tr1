@@ -2339,6 +2339,14 @@ $lang = isset($translations) ? $translations : [];
                         </div>
                     </div>
                     
+                    <!-- ملخص مكونات القالب -->
+                    <div class="mb-3 section-block d-none" id="templateComponentsSummary">
+                        <h6 class="text-primary section-heading">
+                            <i class="bi bi-activity me-2"></i>ملخص المكونات
+                        </h6>
+                        <div class="template-summary-grid" id="templateComponentsSummaryGrid"></div>
+                    </div>
+                    
                     <!-- الموردون الديناميكيون -->
                     <div class="mb-3 section-block d-none" id="templateSuppliersWrapper">
                         <h6 class="text-primary section-heading">
@@ -2672,6 +2680,163 @@ $lang = isset($translations) ? $translations : [];
 .production-template-body .alert {
     margin-bottom: 0.75rem;
     padding: 0.75rem 0.9rem;
+}
+
+.template-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+}
+
+.template-summary-item {
+    background: rgba(248, 250, 252, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    padding: 0.75rem 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
+.template-summary-icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.16), rgba(37, 99, 235, 0.28));
+    color: #1d4ed8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.15rem;
+}
+
+.template-summary-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.template-summary-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.template-summary-label {
+    font-size: 0.8rem;
+    color: #475569;
+    font-weight: 500;
+}
+
+.component-card {
+    --component-accent: #2563eb;
+    background: #ffffff;
+    border-radius: 14px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    padding: 0.95rem 1rem;
+    box-shadow: 0 16px 34px rgba(15, 23, 42, 0.12);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.component-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border-left: 4px solid var(--component-accent);
+    opacity: 0.9;
+    pointer-events: none;
+}
+
+.component-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.component-card-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.component-card-badge {
+    background: var(--component-accent);
+    color: #ffffff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25);
+}
+
+.component-card-meta {
+    display: flex;
+    align-items: center;
+    font-size: 0.85rem;
+    color: #475569;
+    gap: 0.45rem;
+}
+
+.component-card-meta i {
+    color: var(--component-accent);
+}
+
+.component-card-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.component-card-chip {
+    background: rgba(37, 99, 235, 0.08);
+    border-radius: 999px;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #1d4ed8;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.component-card .form-label {
+    font-size: 0.85rem;
+    color: #475569;
+}
+
+.component-card .form-select,
+.component-card .form-control {
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    padding: 0.45rem 0.65rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.component-card .form-select:focus,
+.component-card .form-control:focus {
+    border-color: var(--component-accent);
+    box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.12);
+}
+
+.component-card .text-muted {
+    font-size: 0.75rem;
+}
+
+.template-card.selected-template {
+    transform: translateY(-6px);
+    box-shadow: 0 24px 42px rgba(37, 99, 235, 0.20) !important;
+}
+
+.template-card.selected-template .badge {
+    box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25);
 }
 
 .production-template-body .row.g-3 > [class*="col-"] {
@@ -3238,6 +3403,8 @@ function renderTemplateSuppliers(details) {
     const container = document.getElementById('templateSuppliersContainer');
     const modeInput = document.getElementById('template_mode');
     const hintText = document.getElementById('templateSuppliersHint');
+    const summaryWrapper = document.getElementById('templateComponentsSummary');
+    const summaryGrid = document.getElementById('templateComponentsSummaryGrid');
 
     if (!container || !wrapper || !modeInput) {
         return;
@@ -3246,6 +3413,12 @@ function renderTemplateSuppliers(details) {
     const components = Array.isArray(details?.components) ? details.components : [];
 
     container.innerHTML = '';
+    if (summaryGrid) {
+        summaryGrid.innerHTML = '';
+    }
+    if (summaryWrapper) {
+        summaryWrapper.classList.add('d-none');
+    }
 
     if (components.length === 0) {
         wrapper.classList.remove('d-none');
@@ -3265,21 +3438,180 @@ function renderTemplateSuppliers(details) {
         return;
     }
 
-    details.components.forEach(function(component) {
+    const determineComponentType = (component) => {
+        if (!component) {
+            return 'generic';
+        }
+        const type = (component.type || '').toString().toLowerCase();
+        if (type) {
+            return type;
+        }
+        const key = (component.key || '').toString().toLowerCase();
+        if (key.startsWith('pack_')) return 'packaging';
+        if (key.startsWith('honey_')) return 'honey_raw';
+        if (key.startsWith('raw_')) return 'raw_general';
+        if (key.startsWith('olive')) return 'olive_oil';
+        if (key.startsWith('beeswax')) return 'beeswax';
+        if (key.startsWith('derivative')) return 'derivatives';
+        if (key.startsWith('nuts')) return 'nuts';
+        return 'generic';
+    };
+
+    const accentColors = {
+        packaging: '#0dcaf0',
+        honey_raw: '#f59e0b',
+        honey_filtered: '#fb923c',
+        honey_main: '#facc15',
+        olive_oil: '#22c55e',
+        beeswax: '#a855f7',
+        derivatives: '#6366f1',
+        nuts: '#d97706',
+        raw_general: '#3b82f6',
+        generic: '#2563eb',
+        default: '#2563eb'
+    };
+
+    const typeLabelsMap = {
+        packaging: 'أداة تعبئة',
+        honey_raw: 'عسل خام',
+        honey_filtered: 'عسل مصفى',
+        honey_main: 'عسل',
+        olive_oil: 'زيت زيتون',
+        beeswax: 'شمع عسل',
+        derivatives: 'مشتقات',
+        nuts: 'مكسرات',
+        raw_general: 'مادة خام',
+        generic: 'مكون'
+    };
+
+    const componentIcons = {
+        packaging: 'bi-box-seam',
+        honey_raw: 'bi-droplet-half',
+        honey_filtered: 'bi-droplet',
+        honey_main: 'bi-bezier',
+        olive_oil: 'bi-bezier2',
+        beeswax: 'bi-hexagon',
+        derivatives: 'bi-intersect',
+        nuts: 'bi-record-circle',
+        raw_general: 'bi-diagram-3',
+        generic: 'bi-diagram-2'
+    };
+
+    const stats = {
+        total: components.length,
+        packaging: 0,
+        honey: 0,
+        raw: 0,
+        special: 0
+    };
+
+    components.forEach(component => {
+        const canonicalType = determineComponentType(component);
+        if (canonicalType === 'packaging') {
+            stats.packaging += 1;
+            return;
+        }
+        if (isHoneyComponent(component) || canonicalType === 'honey_raw' || canonicalType === 'honey_filtered' || canonicalType === 'honey_main') {
+            stats.honey += 1;
+            stats.raw += 1;
+            return;
+        }
+        if (['olive_oil', 'beeswax', 'derivatives', 'nuts', 'raw_general'].includes(canonicalType) || canonicalType.startsWith('raw_')) {
+            stats.raw += 1;
+            return;
+        }
+        stats.special += 1;
+    });
+
+    stats.special = Math.max(0, stats.total - stats.raw - stats.packaging);
+
+    if (summaryWrapper && summaryGrid) {
+        const summaryItems = [
+            { key: 'total', label: 'إجمالي المكونات', value: stats.total, icon: 'bi-collection' },
+            { key: 'raw', label: 'مواد خام / أساسية', value: stats.raw, icon: 'bi-droplet-half' },
+            { key: 'packaging', label: 'أدوات التعبئة', value: stats.packaging, icon: 'bi-box' },
+            { key: 'honey', label: 'تتطلب نوع عسل', value: stats.honey, icon: 'bi-stars' },
+            { key: 'special', label: 'مكونات إضافية', value: stats.special, icon: 'bi-puzzle' }
+        ].filter(item => item.value > 0 || item.key === 'total');
+
+        summaryGrid.innerHTML = summaryItems.map(item => `
+            <div class="template-summary-item">
+                <span class="template-summary-icon">
+                    <i class="bi ${item.icon}"></i>
+                </span>
+                <div class="template-summary-content">
+                    <span class="template-summary-value">${item.value}</span>
+                    <span class="template-summary-label">${item.label}</span>
+                </div>
+            </div>
+        `).join('');
+
+        summaryWrapper.classList.remove('d-none');
+    }
+
+    const createChip = (iconClass, text) => {
+        const chip = document.createElement('span');
+        chip.className = 'component-card-chip';
+        chip.innerHTML = `<i class="bi ${iconClass} me-1"></i>${text}`;
+        return chip;
+    };
+
+    components.forEach(function(component) {
+        const canonicalType = determineComponentType(component);
+        const safeTypeClass = canonicalType.replace(/[^a-z0-9_-]/g, '') || 'generic';
+        const componentKey = (component.key || component.name || ('component_' + Math.random().toString(36).slice(2)));
+
         const col = document.createElement('div');
-        col.className = 'col-md-6';
+        col.className = 'col-12 col-lg-6';
 
-        const label = document.createElement('label');
-        label.className = 'form-label fw-bold';
-        label.textContent = component.label || component.name || 'مادة';
+        const card = document.createElement('div');
+        card.className = `component-card component-type-${safeTypeClass}`;
+        card.style.setProperty('--component-accent', accentColors[canonicalType] || accentColors.default);
 
-        const helper = document.createElement('small');
-        helper.className = 'text-muted d-block mb-2';
-        helper.textContent = component.description || '';
+        const header = document.createElement('div');
+        header.className = 'component-card-header';
+
+        const title = document.createElement('span');
+        title.className = 'component-card-title';
+        title.textContent = component.name || component.label || 'مكون';
+
+        const badge = document.createElement('span');
+        badge.className = 'component-card-badge';
+        badge.textContent = typeLabelsMap[canonicalType] || typeLabelsMap.generic;
+
+        header.appendChild(title);
+        header.appendChild(badge);
+        card.appendChild(header);
+
+        const meta = document.createElement('div');
+        meta.className = 'component-card-meta';
+        const metaIcon = document.createElement('i');
+        metaIcon.className = `bi ${componentIcons[canonicalType] || componentIcons.generic} me-2`;
+        meta.appendChild(metaIcon);
+        const metaText = document.createElement('span');
+        metaText.textContent = component.description || 'لا توجد تفاصيل إضافية.';
+        meta.appendChild(metaText);
+        card.appendChild(meta);
+
+        const chipsWrapper = document.createElement('div');
+        chipsWrapper.className = 'component-card-chips';
+        if (component.requires_variety || isHoneyComponent(component)) {
+            chipsWrapper.appendChild(createChip('bi-stars', 'يتطلب تحديد نوع العسل'));
+        }
+        if (component.default_supplier) {
+            chipsWrapper.appendChild(createChip('bi-person-check', 'مورد مقترح'));
+        }
+        if (chipsWrapper.children.length > 0) {
+            card.appendChild(chipsWrapper);
+        }
+
+        const controlLabel = document.createElement('label');
+        controlLabel.className = 'form-label fw-semibold small text-muted mb-1';
+        controlLabel.textContent = 'اختر المورد المناسب';
+        card.appendChild(controlLabel);
 
         const select = document.createElement('select');
-        select.className = 'form-select';
-        const componentKey = (component.key || component.name || ('component_' + Math.random().toString(36).slice(2)));
+        select.className = 'form-select form-select-sm component-supplier-select';
         select.name = 'material_suppliers[' + componentKey + ']';
         select.dataset.role = 'component-supplier';
         select.required = component.required !== false;
@@ -3302,6 +3634,7 @@ function renderTemplateSuppliers(details) {
             }
             select.appendChild(option);
         });
+
         if (suppliersList.length === 0) {
             const noSupplierOption = document.createElement('option');
             noSupplierOption.value = '';
@@ -3310,23 +3643,19 @@ function renderTemplateSuppliers(details) {
             select.appendChild(noSupplierOption);
         }
 
-        col.appendChild(label);
-        if (helper.textContent.trim() !== '') {
-            col.appendChild(helper);
-        }
-        col.appendChild(select);
+        card.appendChild(select);
 
         if (isHoneyComponent(component)) {
             const honeyWrapper = document.createElement('div');
             honeyWrapper.className = 'mt-2';
 
             const honeyLabel = document.createElement('label');
-            honeyLabel.className = 'form-label fw-bold';
+            honeyLabel.className = 'form-label fw-bold mb-1';
             honeyLabel.textContent = 'نوع العسل للمورد المختار';
 
             const honeyInput = document.createElement('input');
             honeyInput.type = 'text';
-            honeyInput.className = 'form-control';
+            honeyInput.className = 'form-control form-control-sm';
             honeyInput.name = 'material_honey_varieties[' + componentKey + ']';
             honeyInput.required = true;
             honeyInput.dataset.role = 'honey-variety-input';
@@ -3354,19 +3683,19 @@ function renderTemplateSuppliers(details) {
                 populateHoneyVarietyOptions(honeyInput, datalist, this.value, component);
             });
 
-            col.appendChild(honeyWrapper);
+            card.appendChild(honeyWrapper);
 
-            // Populate initial options if default supplier preselected
             populateHoneyVarietyOptions(honeyInput, datalist, select.value, component);
         }
 
+        col.appendChild(card);
         container.appendChild(col);
     });
 
     wrapper.classList.remove('d-none');
 
     if (hintText) {
-    hintText.textContent = details.hint || 'يرجى اختيار المورد المناسب لكل مادة وتحديد نوع العسل عند الحاجة.';
+        hintText.textContent = details.hint || 'يرجى اختيار المورد المناسب لكل مادة وتحديد نوع العسل عند الحاجة.';
     }
 
     currentTemplateMode = 'advanced';
@@ -3435,6 +3764,21 @@ function openCreateFromTemplateModal(element) {
     const templateName = element.getAttribute('data-template-name');
     const templateType = element.getAttribute('data-template-type') || 'legacy';
     
+    try {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (scrollError) {
+        window.scrollTo(0, 0);
+    }
+    
+    document.querySelectorAll('.template-card.selected-template').forEach(card => {
+        card.classList.remove('selected-template');
+        card.style.borderLeftColor = '#0dcaf0';
+    });
+    if (element) {
+        element.classList.add('selected-template');
+        element.style.borderLeftColor = '#1d4ed8';
+    }
+    
     document.getElementById('template_id').value = templateId;
     document.getElementById('template_product_name').value = templateName;
     document.getElementById('template_type').value = templateType;
@@ -3445,6 +3789,8 @@ function openCreateFromTemplateModal(element) {
     const wrapper = document.getElementById('templateSuppliersWrapper');
     const container = document.getElementById('templateSuppliersContainer');
     const modeInput = document.getElementById('template_mode');
+    const summaryWrapper = document.getElementById('templateComponentsSummary');
+    const summaryGrid = document.getElementById('templateComponentsSummaryGrid');
 
     if (container) {
         container.innerHTML = `
@@ -3458,6 +3804,12 @@ function openCreateFromTemplateModal(element) {
     }
     if (wrapper) {
         wrapper.classList.add('d-none');
+    }
+    if (summaryGrid) {
+        summaryGrid.innerHTML = '';
+    }
+    if (summaryWrapper) {
+        summaryWrapper.classList.add('d-none');
     }
     currentTemplateMode = 'advanced';
     if (modeInput) {

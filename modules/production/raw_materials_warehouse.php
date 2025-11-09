@@ -513,12 +513,147 @@ $allSuppliers = $db->query(
      ORDER BY type, name"
 );
 
+$templateSuppliersByType = [
+    'all' => []
+];
+
+if (is_array($allSuppliers)) {
+    foreach ($allSuppliers as $supplier) {
+        $supplierEntry = [
+            'id' => (int)($supplier['id'] ?? 0),
+            'name' => (string)($supplier['name'] ?? ''),
+            'type' => (string)($supplier['type'] ?? '')
+        ];
+
+        $templateSuppliersByType['all'][] = $supplierEntry;
+
+        $typeKey = strtolower($supplierEntry['type']);
+        switch ($typeKey) {
+            case 'honey':
+                foreach (['honey_raw', 'honey_filtered', 'honey_general', 'honey_main'] as $honeyTypeKey) {
+                    if (!isset($templateSuppliersByType[$honeyTypeKey])) {
+                        $templateSuppliersByType[$honeyTypeKey] = [];
+                    }
+                    $templateSuppliersByType[$honeyTypeKey][] = $supplierEntry;
+                }
+                break;
+            case 'olive_oil':
+                $keys = ['olive_oil', 'olive_main'];
+                foreach ($keys as $key) {
+                    if (!isset($templateSuppliersByType[$key])) {
+                        $templateSuppliersByType[$key] = [];
+                    }
+                    $templateSuppliersByType[$key][] = $supplierEntry;
+                }
+                break;
+            case 'beeswax':
+                if (!isset($templateSuppliersByType['beeswax'])) {
+                    $templateSuppliersByType['beeswax'] = [];
+                }
+                $templateSuppliersByType['beeswax'][] = $supplierEntry;
+                break;
+            case 'derivatives':
+                if (!isset($templateSuppliersByType['derivatives'])) {
+                    $templateSuppliersByType['derivatives'] = [];
+                }
+                $templateSuppliersByType['derivatives'][] = $supplierEntry;
+                break;
+            case 'nuts':
+                if (!isset($templateSuppliersByType['nuts'])) {
+                    $templateSuppliersByType['nuts'] = [];
+                }
+                $templateSuppliersByType['nuts'][] = $supplierEntry;
+                break;
+            case 'packaging':
+                if (!isset($templateSuppliersByType['packaging'])) {
+                    $templateSuppliersByType['packaging'] = [];
+                }
+                $templateSuppliersByType['packaging'][] = $supplierEntry;
+                break;
+            default:
+                if (!isset($templateSuppliersByType[$typeKey]) && $typeKey !== '') {
+                    $templateSuppliersByType[$typeKey] = [];
+                }
+                if ($typeKey !== '') {
+                    $templateSuppliersByType[$typeKey][] = $supplierEntry;
+                }
+                break;
+        }
+    }
+}
+
+if (!isset($templateSuppliersByType['other'])) {
+    $templateSuppliersByType['other'] = $templateSuppliersByType['all'];
+}
+
 // الحصول على أدوات التعبئة
 $packagingMaterials = $db->query(
     "SELECT id, name, type, quantity, unit FROM packaging_materials 
      WHERE status = 'active' 
      ORDER BY name"
 );
+
+// المواد المتاحة للاستخدام في القوالب (حاليًا المكسرات فقط مع استبعاد الخلطات الجاهزة)
+$availableNutsForTemplates = [];
+try {
+    $availableNutsForTemplates = $db->query(
+        "SELECT ns.nut_type, ns.quantity, s.name AS supplier_name
+         FROM nuts_stock ns
+         INNER JOIN suppliers s ON ns.supplier_id = s.id
+         WHERE ns.quantity > 0
+         ORDER BY ns.nut_type, s.name"
+    );
+} catch (Exception $e) {
+    error_log('Failed to load nuts stock for templates: ' . $e->getMessage());
+    $availableNutsForTemplates = [];
+}
+
+$nutMaterialAggregates = [];
+foreach ($availableNutsForTemplates as $nutRow) {
+    $nutType = trim((string)($nutRow['nut_type'] ?? ''));
+    if ($nutType === '') {
+        continue;
+    }
+
+    // استبعاد أي عناصر تحمل تسمية "مشكلة" لأنها خلطة جاهزة وليست مادة خام
+    if (mb_stripos($nutType, 'مشكلة') !== false) {
+        continue;
+    }
+
+    if (!isset($nutMaterialAggregates[$nutType])) {
+        $nutMaterialAggregates[$nutType] = [
+            'value' => $nutType,
+            'quantity' => 0.0,
+            'suppliers' => [],
+        ];
+    }
+
+    $nutMaterialAggregates[$nutType]['quantity'] += (float)($nutRow['quantity'] ?? 0);
+
+    $supplierName = trim((string)($nutRow['supplier_name'] ?? ''));
+    if ($supplierName !== '' && !in_array($supplierName, $nutMaterialAggregates[$nutType]['suppliers'], true)) {
+        $nutMaterialAggregates[$nutType]['suppliers'][] = $supplierName;
+    }
+}
+
+$nutMaterialOptions = array_map(static function ($type, $data) {
+    $quantityLabel = number_format($data['quantity'], 3);
+    $suppliersLabel = '';
+    if (!empty($data['suppliers'])) {
+        $firstSupplier = $data['suppliers'][0];
+        $additionalSuppliers = count($data['suppliers']) - 1;
+        if ($additionalSuppliers > 0) {
+            $suppliersLabel = sprintf(' - مورد: %s (+%d)', $firstSupplier, $additionalSuppliers);
+        } else {
+            $suppliersLabel = sprintf(' - المورد: %s', $firstSupplier);
+        }
+    }
+
+    return [
+        'value' => $type,
+        'label' => sprintf('%s - متاح: %s كجم%s', $type, $quantityLabel, $suppliersLabel),
+    ];
+}, array_keys($nutMaterialAggregates), $nutMaterialAggregates);
 
 $rawWarehouseReport = [
     'generated_at' => date('Y-m-d H:i'),
@@ -1840,6 +1975,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             // المواد الخام
             $rawMaterials = [];
+            $missingSuppliers = false;
             if (isset($_POST['materials']) && is_array($_POST['materials'])) {
                 foreach ($_POST['materials'] as $material) {
                     $materialType = trim($material['type'] ?? '');
@@ -1851,6 +1987,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     if ($materialType && $quantity > 0) {
                         $isHoneyMaterial = $materialType === 'honey_raw' || $materialType === 'honey_filtered';
+                        $requiresSupplier = $materialType !== 'other';
+                        if ($requiresSupplier && $supplierId <= 0) {
+                            $missingSuppliers = true;
+                            continue;
+                        }
                         if ($isHoneyMaterial && !in_array($honeyVariety, $validHoneyVarieties, true)) {
                             $honeyVariety = null;
                         }
@@ -1884,6 +2025,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             if (empty($productName)) {
                 $error = 'يجب إدخال اسم المنتج';
+            } elseif ($missingSuppliers) {
+                $error = 'يرجى اختيار المورد لكل مادة خام قبل إنشاء القالب.';
             } elseif (empty($rawMaterials)) {
                 $error = 'يجب إضافة مادة خام واحدة على الأقل';
             } elseif (empty($packagingItems)) {
@@ -1921,8 +2064,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     logAudit($currentUser['id'], 'create_unified_template', 'unified_product_templates', $templateId, null, ['product' => $productName]);
                     
-                    $success = 'تم إنشاء قالب المنتج بنجاح';
-                    echo '<script>window.location.href = "' . $dashboardUrl . '?page=raw_materials_warehouse";</script>';
+                    preventDuplicateSubmission(
+                        'تم إنشاء قالب المنتج بنجاح',
+                        ['page' => 'raw_materials_warehouse'],
+                        null,
+                        $dashboardSlug
+                    );
                     
                 } catch (Exception $e) {
                     $db->rollBack();
@@ -3904,6 +4051,11 @@ foreach ($honeyVarietiesCatalog as $catalogVariety => $meta) {
     $labelWithCode = sprintf('%s - %s', $meta['label'], $meta['code']);
     $honeyVarietyOptionsMarkup .= '<option value="' . htmlspecialchars($catalogVariety, ENT_QUOTES, 'UTF-8') . '" data-code="' . htmlspecialchars($meta['code'], ENT_QUOTES, 'UTF-8') . '">' . htmlspecialchars($labelWithCode, ENT_QUOTES, 'UTF-8') . '</option>';
 }
+
+$templateSuppliersJson = json_encode($templateSuppliersByType, JSON_UNESCAPED_UNICODE);
+if ($templateSuppliersJson === false) {
+    $templateSuppliersJson = '{}';
+}
 ?>
 
 <script>
@@ -3973,6 +4125,33 @@ document.addEventListener('DOMContentLoaded', function () {
 // دالة لإضافة صف مادة خام جديدة
 let materialRowCount = 0;
 const honeyVarietyOptionsMarkup = <?php echo json_encode($honeyVarietyOptionsMarkup, JSON_UNESCAPED_UNICODE); ?>;
+const materialOptions = <?php echo json_encode([
+    'nuts' => $nutMaterialOptions,
+], JSON_UNESCAPED_UNICODE); ?>;
+const templateSuppliersMap = <?php echo $templateSuppliersJson; ?>;
+
+function getTemplateSuppliersByType(materialType) {
+    const map = templateSuppliersMap || {};
+    const normalized = (materialType || '').toString();
+
+    if (!normalized || normalized === 'other') {
+        return map.all || [];
+    }
+
+    if (map[normalized] && Array.isArray(map[normalized]) && map[normalized].length) {
+        return map[normalized];
+    }
+
+    if (normalized.startsWith('honey') && Array.isArray(map.honey_raw)) {
+        return map.honey_raw;
+    }
+
+    if (normalized.startsWith('pack') && Array.isArray(map.packaging)) {
+        return map.packaging;
+    }
+
+    return map.all || [];
+}
 function addMaterialRow() {
     materialRowCount++;
     const container = document.getElementById('materialsContainer');
@@ -3980,7 +4159,7 @@ function addMaterialRow() {
     const rowHtml = `
         <div class="card mb-3 material-row" id="material_${materialRowCount}">
             <div class="card-body">
-                <div class="row align-items-end">
+                <div class="row align-items-end g-3">
                     <div class="col-md-3">
                         <label class="form-label small">نوع المادة <span class="text-danger">*</span></label>
                         <select class="form-select" name="materials[${materialRowCount}][type]" 
@@ -3994,14 +4173,25 @@ function addMaterialRow() {
                             <option value="nuts">مكسرات</option>
                             <option value="other">أخرى</option>
                         </select>
+                        <div class="mt-3" id="material_name_wrapper_${materialRowCount}" style="display: none;">
+                            <label class="form-label small mb-1">اختر النوع المتاح</label>
+                            <select class="form-select form-select-sm material-name-select" 
+                                    name="materials[${materialRowCount}][name]" 
+                                    id="material_name_${materialRowCount}">
+                                <option value="">اختر المادة</option>
+                            </select>
+                            <small class="text-muted" id="material_name_hint_${materialRowCount}">اختر نوع المادة لعرض الخيارات المتاحة</small>
+                        </div>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label small mb-1">المورد</label>
-                        <div class="alert alert-info py-1 px-2 mb-0" role="alert" style="font-size: 0.75rem;">
-                            سيتم اختيار المورد عند إنشاء التشغيلة من هذا القالب.
-                        </div>
-                        <input type="hidden" name="materials[${materialRowCount}][supplier_id]" 
-                               id="supplier_${materialRowCount}" value="">
+                        <label class="form-label small">المورد <span class="text-danger">*</span></label>
+                        <select class="form-select" name="materials[${materialRowCount}][supplier_id]" 
+                                id="supplier_${materialRowCount}" required disabled>
+                            <option value="">اختر نوع المادة أولاً</option>
+                        </select>
+                        <small class="text-muted d-block mt-1" id="supplier_helper_${materialRowCount}">
+                            اختر نوع المادة لعرض الموردين المناسبين.
+                        </small>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">نوع العسل</label>
@@ -4037,6 +4227,7 @@ function addMaterialRow() {
     `;
     
     container.insertAdjacentHTML('beforeend', rowHtml);
+    updateSuppliersForMaterial(materialRowCount, '');
 }
 
 // دالة لحذف صف مادة خام
@@ -4047,13 +4238,85 @@ function removeMaterialRow(rowId) {
     }
 }
 
-// دالة لتحديث قائمة الموردين حسب نوع المادة
+function populateMaterialNameOptions(rowId, materialType) {
+    const wrapper = document.getElementById('material_name_wrapper_' + rowId);
+    const select = document.getElementById('material_name_' + rowId);
+    const hint = document.getElementById('material_name_hint_' + rowId);
+
+    if (!wrapper || !select) {
+        return;
+    }
+
+    const options = materialOptions[materialType] || [];
+    select.innerHTML = '<option value="">اختر المادة</option>';
+
+    if (materialType === 'nuts') {
+        wrapper.style.display = 'block';
+        select.required = true;
+
+        if (options.length > 0) {
+            options.forEach(function(option) {
+                const opt = document.createElement('option');
+                opt.value = option.value;
+                opt.textContent = option.label;
+                select.appendChild(opt);
+            });
+            hint.textContent = 'حدد نوع المكسرات المستخدمة في القالب';
+        } else {
+            hint.textContent = 'لا توجد مكسرات متاحة حالياً في المخزون';
+        }
+    } else {
+        wrapper.style.display = 'none';
+        select.required = false;
+        hint.textContent = 'اختر نوع المادة لعرض الخيارات المتاحة';
+    }
+}
+
+// دالة لتحديث الإعدادات عند تغيير نوع المادة
 function updateSuppliersForMaterial(rowId, materialType) {
-    const supplierInput = document.getElementById('supplier_' + rowId);
+    const supplierSelect = document.getElementById('supplier_' + rowId);
+    const supplierHelper = document.getElementById('supplier_helper_' + rowId);
     const honeyVarietySelect = document.getElementById('honey_variety_' + rowId);
     const honeyVarietyPlaceholder = document.getElementById('honey_variety_placeholder_' + rowId);
     
-    if (!supplierInput) return;
+    if (!supplierSelect) return;
+    
+    const normalizedType = (materialType || '').toString();
+    const suppliers = getTemplateSuppliersByType(normalizedType);
+    
+    supplierSelect.innerHTML = '';
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.textContent = normalizedType ? 'اختر المورد' : 'اختر نوع المادة أولاً';
+    supplierSelect.appendChild(placeholderOption);
+    
+    const requiresSupplier = normalizedType !== '' && normalizedType !== 'other';
+    supplierSelect.required = requiresSupplier;
+    
+    if (!normalizedType) {
+        supplierSelect.disabled = true;
+        if (supplierHelper) {
+            supplierHelper.textContent = 'اختر نوع المادة لعرض الموردين المناسبين.';
+        }
+    } else if (suppliers.length === 0) {
+        supplierSelect.disabled = true;
+        if (supplierHelper) {
+            supplierHelper.textContent = 'لا يوجد مورد مسجّل لهذا النوع، يرجى إضافة المورد من إدارة الموردين.';
+        }
+    } else {
+        suppliers.forEach(function(supplier) {
+            const option = document.createElement('option');
+            option.value = supplier.id;
+            option.textContent = supplier.name;
+            supplierSelect.appendChild(option);
+        });
+        supplierSelect.disabled = false;
+        if (supplierHelper) {
+            supplierHelper.textContent = 'اختر المورد المناسب لهذه المادة.';
+        }
+    }
+    
+    supplierSelect.value = '';
     
     // إظهار/إخفاء حقل نوع العسل
     const isHoneyType = materialType === 'honey_raw' || materialType === 'honey_filtered';
@@ -4066,8 +4329,8 @@ function updateSuppliersForMaterial(rowId, materialType) {
             honeyVarietyPlaceholder.style.display = 'block';
         }
     }
-    // إعادة تعيين قيمة المورد (سيتم تحديده لاحقاً أثناء إنشاء التشغيلة)
-    supplierInput.value = '';
+
+    populateMaterialNameOptions(rowId, normalizedType);
 }
 
 // إضافة صف واحد عند فتح Modal
