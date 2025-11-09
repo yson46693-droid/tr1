@@ -297,6 +297,41 @@ if (!function_exists('triggerDailyLowStockReport')) {
 
         lowStockReportEnsureJobTable();
 
+        $reportsBaseDir = rtrim(
+            defined('REPORTS_PRIVATE_PATH') ? REPORTS_PRIVATE_PATH : (defined('REPORTS_PATH') ? REPORTS_PATH : BASE_PATH . '/reports'),
+            '/\\'
+        );
+
+        $statusSnapshot = [];
+        $existingReportPath = null;
+        $existingViewerPath = null;
+        $existingAccessToken = null;
+        try {
+            $rawStatus = $db->queryOne(
+                "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
+                [LOW_STOCK_REPORT_STATUS_SETTING_KEY]
+            );
+            if ($rawStatus && isset($rawStatus['value'])) {
+                $decoded = json_decode((string)$rawStatus['value'], true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $statusSnapshot = $decoded;
+                    if (
+                        ($decoded['date'] ?? null) === $todayDate &&
+                        !empty($decoded['report_path'])
+                    ) {
+                        $candidate = $reportsBaseDir . '/' . ltrim((string)$decoded['report_path'], '/\\');
+                        if (is_file($candidate)) {
+                            $existingReportPath = $candidate;
+                            $existingViewerPath = (string)($decoded['viewer_path'] ?? '');
+                            $existingAccessToken = (string)($decoded['access_token'] ?? '');
+                        }
+                    }
+                }
+            }
+        } catch (Throwable $statusError) {
+            error_log('Low Stock Report: status fetch error - ' . $statusError->getMessage());
+        }
+
         $jobState = null;
         try {
             $jobState = $db->queryOne(
@@ -309,15 +344,16 @@ if (!function_exists('triggerDailyLowStockReport')) {
 
         if (!empty($jobState['last_sent_at'])) {
             $lastSentDate = substr((string)$jobState['last_sent_at'], 0, 10);
-            if ($lastSentDate === $todayDate) {
-                lowStockReportNotifyManager('تم إرسال تقرير المخازن إلى شات Telegram خلال هذا اليوم بالفعل.');
-                lowStockReportSaveStatus([
-                    'date' => $todayDate,
-                    'status' => 'already_sent',
-                    'checked_at' => date('Y-m-d H:i:s'),
-                    'last_sent_at' => $jobState['last_sent_at'],
-                    'file_path' => $jobState['last_file_path'] ?? null,
-                ]);
+            if (
+                $lastSentDate === $todayDate &&
+                !empty($statusSnapshot) &&
+                in_array($statusSnapshot['status'] ?? null, ['completed', 'completed_no_issues'], true) &&
+                $existingReportPath !== null
+            ) {
+                $statusSnapshot['status'] = 'already_sent';
+                $statusSnapshot['checked_at'] = date('Y-m-d H:i:s');
+                $statusSnapshot['last_sent_at'] = $jobState['last_sent_at'];
+                lowStockReportSaveStatus($statusSnapshot);
                 return;
             }
         }
@@ -331,17 +367,28 @@ if (!function_exists('triggerDailyLowStockReport')) {
             );
 
             $existingData = [];
+            $existingDataReportPath = null;
             if ($existing && isset($existing['value'])) {
                 $decoded = json_decode((string)$existing['value'], true);
                 if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                     $existingData = $decoded;
+                    if (
+                        ($decoded['date'] ?? null) === $todayDate &&
+                        !empty($decoded['report_path'])
+                    ) {
+                        $candidate = $reportsBaseDir . '/' . ltrim((string)$decoded['report_path'], '/\\');
+                        if (is_file($candidate)) {
+                            $existingDataReportPath = $candidate;
+                        }
+                    }
                 }
             }
 
             if (
                 !empty($existingData) &&
                 ($existingData['date'] ?? null) === $todayDate &&
-                in_array($existingData['status'] ?? null, ['completed', 'completed_no_issues'], true)
+                in_array($existingData['status'] ?? null, ['completed', 'completed_no_issues'], true) &&
+                $existingDataReportPath !== null
             ) {
                 $db->commit();
                 return;
@@ -524,7 +571,7 @@ if (!function_exists('triggerDailyLowStockReport')) {
         if (!empty($existingData) && ($existingData['date'] ?? null) === $todayDate) {
             $storedPath = $existingData['report_path'] ?? null;
             if (!empty($storedPath)) {
-                $reportsBase = rtrim(defined('REPORTS_PRIVATE_PATH') ? REPORTS_PRIVATE_PATH : REPORTS_PATH, '/\\');
+                $reportsBase = $reportsBaseDir;
                 $candidate = $reportsBase . '/' . ltrim($storedPath, '/\\');
                 if (file_exists($candidate)) {
                     $existingReportPath = $candidate;
@@ -547,9 +594,8 @@ if (!function_exists('triggerDailyLowStockReport')) {
             } else {
                 $reportFilePath = dailyLowStockGeneratePdf($sections, $counts);
                 if ($reportFilePath !== null) {
-                    $reportsBase = rtrim(defined('REPORTS_PRIVATE_PATH') ? REPORTS_PRIVATE_PATH : REPORTS_PATH, '/\\');
-                    if (strpos($reportFilePath, $reportsBase) === 0) {
-                        $relativePath = ltrim(substr($reportFilePath, strlen($reportsBase)), '/\\');
+                    if (strpos($reportFilePath, $reportsBaseDir) === 0) {
+                        $relativePath = ltrim(substr($reportFilePath, strlen($reportsBaseDir)), '/\\');
                     } else {
                         $relativePath = basename($reportFilePath);
                     }
@@ -680,13 +726,13 @@ if (!function_exists('triggerDailyLowStockReport')) {
                 try {
                     if ($jobState) {
                         $db->execute(
-                            "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = NULL, updated_at = NOW() WHERE job_key = ?",
-                            [LOW_STOCK_REPORT_JOB_KEY]
+                            "UPDATE system_daily_jobs SET last_sent_at = NOW(), last_file_path = ?, updated_at = NOW() WHERE job_key = ?",
+                            [$relativePath, LOW_STOCK_REPORT_JOB_KEY]
                         );
                     } else {
                         $db->execute(
-                            "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), NULL)",
-                            [LOW_STOCK_REPORT_JOB_KEY]
+                            "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path) VALUES (?, NOW(), ?)",
+                            [LOW_STOCK_REPORT_JOB_KEY, $relativePath]
                         );
                     }
                 } catch (Throwable $jobUpdateError) {
