@@ -21,6 +21,64 @@ if (!function_exists('dailyBackupFileMatchesDate')) {
     }
 }
 
+if (!function_exists('dailyBackupResolveStoredPath')) {
+    /**
+     * يحوّل المسار المخزن (نسبي أو مطلق) إلى مسار فعلي يمكن التحقق منه.
+     */
+    function dailyBackupResolveStoredPath(string $baseDir, ?string $storedPath): ?string
+    {
+        if ($storedPath === null) {
+            return null;
+        }
+
+        $storedPath = trim($storedPath);
+        if ($storedPath === '') {
+            return null;
+        }
+
+        $normalizedBase = str_replace('\\', '/', rtrim($baseDir, '/\\'));
+        $normalizedStored = str_replace('\\', '/', $storedPath);
+
+        // في حال كان المسار مطلقاً (لينكس أو ويندوز)
+        if (preg_match('#^[a-zA-Z]:/#', $normalizedStored) || substr($normalizedStored, 0, 1) === '/') {
+            $candidate = str_replace('/', DIRECTORY_SEPARATOR, $normalizedStored);
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+            if (is_file($storedPath)) {
+                return $storedPath;
+            }
+        }
+
+        // محاولة تجميع المسار النسبي مع المجلد الأساسي
+        $candidate = $normalizedBase . '/' . ltrim($normalizedStored, '/');
+        $candidate = str_replace('/', DIRECTORY_SEPARATOR, $candidate);
+        if (is_file($candidate)) {
+            return $candidate;
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('dailyBackupGetRelativePath')) {
+    /**
+     * استخراج مسار نسبي من المسار الكامل إذا كان ضمن المجلد المحدد.
+     */
+    function dailyBackupGetRelativePath(string $baseDir, string $fullPath): string
+    {
+        $normalizedBase = str_replace('\\', '/', rtrim($baseDir, '/\\')) . '/';
+        $normalizedFull = str_replace('\\', '/', $fullPath);
+
+        if (strpos($normalizedFull, $normalizedBase) === 0) {
+            $relative = substr($normalizedFull, strlen($normalizedBase));
+            return ltrim($relative, '/');
+        }
+
+        return $normalizedFull;
+    }
+}
+
 if (!function_exists('dailyBackupEnsureJobTable')) {
     /**
      * التأكد من وجود جدول تتبع المهام اليومية.
@@ -148,18 +206,19 @@ if (!function_exists('triggerDailyBackupDelivery')) {
 
         $jobState = null;
         try {
-            $jobState = $db->queryOne(
-                "SELECT last_sent_at, last_file_path FROM system_daily_jobs WHERE job_key = ? LIMIT 1",
-                [DAILY_BACKUP_JOB_KEY]
-            );
+        $jobState = $db->queryOne(
+            "SELECT last_sent_at, last_file_path FROM system_daily_jobs WHERE job_key = ? LIMIT 1",
+            [DAILY_BACKUP_JOB_KEY]
+        );
         } catch (Throwable $stateError) {
             error_log('Daily Backup: failed loading job state - ' . $stateError->getMessage());
         }
 
-        $jobRelativePath = (string)($jobState['last_file_path'] ?? '');
-        $jobFilePath = $jobRelativePath !== ''
-            ? $backupsBaseDir . '/' . ltrim($jobRelativePath, '/\\')
-            : null;
+        $jobStoredPath = isset($jobState['last_file_path']) ? (string)$jobState['last_file_path'] : '';
+        $jobFilePath = dailyBackupResolveStoredPath($backupsBaseDir, $jobStoredPath);
+        $jobStoredRelative = $jobFilePath !== null
+            ? dailyBackupGetRelativePath($backupsBaseDir, $jobFilePath)
+            : $jobStoredPath;
         $jobFileValid = $jobFilePath !== null && dailyBackupFileMatchesDate($jobFilePath, $todayDate);
 
         if (!empty($jobState['last_sent_at']) && $jobFileValid) {
@@ -167,7 +226,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             if ($lastSentDate === $todayDate) {
                 $statusData['status'] = 'already_sent';
                 $statusData['last_sent_at'] = $jobState['last_sent_at'];
-                $statusData['file_path'] = $jobState['last_file_path'] ?? null;
+                $statusData['file_path'] = $jobStoredRelative ?: null;
                 $statusData['note'] = 'Backup already delivered to Telegram today';
                 dailyBackupSaveStatus($statusData);
                 dailyBackupNotifyManager('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.');
@@ -191,22 +250,24 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                 }
             }
 
-        $existingDataHasFile = false;
+            $existingDataHasFile = false;
+            $existingStoredPath = isset($existingData['file_path']) ? (string)$existingData['file_path'] : '';
             if (
-                !empty($existingData['file_path']) &&
+                $existingStoredPath !== '' &&
                 ($existingData['date'] ?? null) === $todayDate
             ) {
-            $candidateExisting = $backupsBaseDir . '/' . ltrim((string)$existingData['file_path'], '/\\');
-            if (dailyBackupFileMatchesDate($candidateExisting, $todayDate)) {
-                $existingDataHasFile = true;
-            }
+                $existingResolvedPath = dailyBackupResolveStoredPath($backupsBaseDir, $existingStoredPath);
+                if ($existingResolvedPath !== null && dailyBackupFileMatchesDate($existingResolvedPath, $todayDate)) {
+                    $existingDataHasFile = true;
+                    $existingData['file_path'] = dailyBackupGetRelativePath($backupsBaseDir, $existingResolvedPath);
+                }
             }
 
             if (
                 !empty($existingData) &&
                 ($existingData['date'] ?? null) === $todayDate &&
-            in_array($existingData['status'] ?? null, ['completed', 'sent'], true) &&
-            $existingDataHasFile
+                in_array($existingData['status'] ?? null, ['completed', 'sent'], true) &&
+                $existingDataHasFile
             ) {
                 $db->commit();
                 dailyBackupNotifyManager('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.');
@@ -344,6 +405,10 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             }
         }
 
+        $backupRelativePath = $backupFilePath !== null
+            ? dailyBackupGetRelativePath($backupsBaseDir, $backupFilePath)
+            : null;
+
         $captionLines = [
             '🗃️ النسخة الاحتياطية اليومية للبيانات',
             'التاريخ: ' . date('Y-m-d H:i:s'),
@@ -363,13 +428,13 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             dailyBackupSaveStatus(array_merge($statusData, [
                 'status' => 'failed',
                 'error' => $errorMessage,
-                'file_path' => $backupFilePath,
+                'file_path' => $backupRelativePath ?? $backupFilePath,
             ]));
             dailyBackupNotifyManager($errorMessage, 'danger');
             return;
         }
 
-        $fileLogValue = $backupFilePath;
+        $fileLogValue = $backupRelativePath ?? $backupFilePath;
         if (strlen($fileLogValue) > 510) {
             $fileLogValue = substr($fileLogValue, -510);
         }
@@ -397,7 +462,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             'date' => $todayDate,
             'status' => 'completed',
             'completed_at' => date('Y-m-d H:i:s'),
-            'file_path' => $backupFilePath,
+            'file_path' => $backupRelativePath ?? $backupFilePath,
             'backup_id' => $backupId,
         ];
 

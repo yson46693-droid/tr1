@@ -14,6 +14,412 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 
+if (!function_exists('buildPackagingReportHtmlDocument')) {
+    /**
+     * إنشاء مستند HTML لتقرير مخزن أدوات التعبئة.
+     *
+     * @param array<string, mixed> $report
+     */
+    function buildPackagingReportHtmlDocument(array $report): string
+    {
+        $generatedAt = htmlspecialchars((string)($report['generated_at'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $generatedBy = htmlspecialchars((string)($report['generated_by'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $typesCount = isset($report['types_count']) ? (int)$report['types_count'] : 0;
+        $totalMaterials = isset($report['total_materials']) ? (float)$report['total_materials'] : 0.0;
+        $totalQuantity = isset($report['total_quantity']) ? (float)$report['total_quantity'] : 0.0;
+        $zeroQuantity = isset($report['zero_quantity']) ? (int)$report['zero_quantity'] : 0;
+        $totalProductions = isset($report['total_productions']) ? (int)$report['total_productions'] : 0;
+        $totalUsed = isset($report['total_used']) ? (float)$report['total_used'] : 0.0;
+        $lastUpdated = htmlspecialchars((string)($report['last_updated'] ?? 'غير متاح'), ENT_QUOTES, 'UTF-8');
+
+        $typeBreakdown = $report['type_breakdown'] ?? [];
+        if (!is_array($typeBreakdown)) {
+            $typeBreakdown = [];
+        }
+
+        $topItems = $report['top_items'] ?? [];
+        if (!is_array($topItems)) {
+            $topItems = [];
+        }
+
+        ob_start();
+        ?>
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <title>تقرير مخزن أدوات التعبئة</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, sans-serif;
+            background: #f8fafc;
+            margin: 0;
+            padding: 32px;
+            color: #0f172a;
+        }
+        .report-wrapper {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
+            padding: 32px;
+        }
+        header {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 20px;
+            margin-bottom: 28px;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+            color: #1d4ed8;
+        }
+        header .meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            color: #475569;
+            font-size: 14px;
+        }
+        header .meta span {
+            background: #e2e8f0;
+            padding: 6px 14px;
+            border-radius: 999px;
+        }
+        .summary {
+            margin-bottom: 32px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+            color: #ffffff;
+            border-radius: 18px;
+            padding: 18px 20px;
+            box-shadow: 0 18px 38px rgba(37, 99, 235, 0.18);
+        }
+        .summary-card .label {
+            font-size: 13px;
+            opacity: 0.85;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .summary-card .value {
+            font-size: 22px;
+            font-weight: 700;
+        }
+        .table-section {
+            margin-bottom: 32px;
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 24px;
+        }
+        .table-section h2 {
+            margin: 0 0 16px;
+            font-size: 20px;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+        }
+        thead {
+            background: #e2e8f0;
+        }
+        th, td {
+            padding: 14px 16px;
+            text-align: right;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 14px;
+        }
+        th {
+            font-weight: 600;
+            color: #1f2937;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: #dbeafe;
+            color: #1d4ed8;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .empty-state {
+            text-align: center;
+            font-size: 15px;
+            color: #64748b;
+            padding: 22px 0;
+        }
+        .notes {
+            background: #ecfeff;
+            border: 1px solid #bae6fd;
+            border-radius: 16px;
+            padding: 20px 24px;
+            color: #0c4a6e;
+        }
+        .notes h3 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            font-size: 18px;
+            color: #0369a1;
+        }
+        .notes ul {
+            margin: 0;
+            padding-right: 20px;
+            line-height: 1.7;
+        }
+        @media (max-width: 768px) {
+            body {
+                padding: 18px;
+            }
+            .report-wrapper {
+                padding: 24px;
+            }
+            header h1 {
+                font-size: 24px;
+            }
+            table {
+                font-size: 13px;
+            }
+            th, td {
+                padding: 10px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="report-wrapper">
+    <header>
+        <h1>تقرير مخزن أدوات التعبئة</h1>
+        <div class="meta">
+            <span>تاريخ التوليد: <?php echo $generatedAt; ?></span>
+            <span>أُعد بواسطة: <?php echo $generatedBy; ?></span>
+            <span>آخر تحديث للسجلات: <?php echo $lastUpdated; ?></span>
+            <span>فئات الأدوات: <?php echo number_format($typesCount); ?></span>
+        </div>
+    </header>
+
+    <section class="summary">
+        <div class="summary-card">
+            <span class="label">إجمالي الأدوات</span>
+            <span class="value"><?php echo number_format($totalMaterials); ?></span>
+        </div>
+        <div class="summary-card">
+            <span class="label">إجمالي المخزون الحالي</span>
+            <span class="value"><?php echo number_format($totalQuantity, 2); ?></span>
+        </div>
+        <div class="summary-card">
+            <span class="label">أدوات بدون مخزون</span>
+            <span class="value"><?php echo number_format($zeroQuantity); ?></span>
+        </div>
+        <div class="summary-card">
+            <span class="label">عمليات الإنتاج المرتبطة</span>
+            <span class="value"><?php echo number_format($totalProductions); ?></span>
+        </div>
+    </section>
+
+    <section class="table-section">
+        <h2>التوزيع حسب النوع</h2>
+        <?php if (empty($typeBreakdown)): ?>
+            <div class="empty-state">لا توجد بيانات كافية لعرض التوزيع حسب النوع.</div>
+        <?php else: ?>
+            <table>
+                <thead>
+                <tr>
+                    <th>الفئة</th>
+                    <th>عدد الأصناف</th>
+                    <th>إجمالي الكمية</th>
+                    <th>تفاصيل الوحدات</th>
+                    <th>متوسط الكمية</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($typeBreakdown as $typeLabel => $info): ?>
+                    <?php
+                    $count = isset($info['count']) ? (int)$info['count'] : 0;
+                    $total = isset($info['total_quantity']) ? (float)$info['total_quantity'] : 0.0;
+                    $average = isset($info['average_quantity']) ? (float)$info['average_quantity'] : 0.0;
+                    $units = isset($info['units']) && is_array($info['units']) ? $info['units'] : [];
+                    $unitBreakdown = [];
+                    foreach ($units as $unitName => $unitQuantity) {
+                        $unitBreakdown[] = number_format((float)$unitQuantity, 2) . ' ' . htmlspecialchars((string)$unitName, ENT_QUOTES, 'UTF-8');
+                    }
+                    $typeLabelSafe = htmlspecialchars((string)$typeLabel, ENT_QUOTES, 'UTF-8');
+                    ?>
+                    <tr>
+                        <td class="fw-semibold"><?php echo $typeLabelSafe; ?></td>
+                        <td><?php echo number_format($count); ?></td>
+                        <td><?php echo number_format($total, 2); ?></td>
+                        <td><?php echo $unitBreakdown ? implode(' • ', $unitBreakdown) : '-'; ?></td>
+                        <td><?php echo number_format($average, 2); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </section>
+
+    <section class="table-section">
+        <h2>أعلى الأدوات من حيث الكمية</h2>
+        <?php if (empty($topItems)): ?>
+            <div class="empty-state">لا توجد بيانات لعرض أفضل الأدوات حالياً.</div>
+        <?php else: ?>
+            <table>
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>اسم الأداة</th>
+                    <th>الكود/المعرّف</th>
+                    <th>الفئة</th>
+                    <th>الكمية المتاحة</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($topItems as $index => $item): ?>
+                    <?php
+                    $name = htmlspecialchars((string)($item['name'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                    $alias = htmlspecialchars((string)($item['alias'] ?? ''), ENT_QUOTES, 'UTF-8');
+                    $code = htmlspecialchars((string)($item['code'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                    $type = htmlspecialchars((string)($item['type'] ?? '-'), ENT_QUOTES, 'UTF-8');
+                    $quantity = isset($item['quantity']) ? (float)$item['quantity'] : 0.0;
+                    $unit = htmlspecialchars((string)($item['unit'] ?? ''), ENT_QUOTES, 'UTF-8');
+                    ?>
+                    <tr>
+                        <td><?php echo (int)$index + 1; ?></td>
+                        <td>
+                            <div><?php echo $name; ?></div>
+                            <?php if ($alias !== ''): ?>
+                                <div style="font-size:12px; color:#0ea5e9; margin-top:4px;"><?php echo $alias; ?></div>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php echo $code !== '' ? $code : '-'; ?></td>
+                        <td><?php echo $type; ?></td>
+                        <td>
+                            <span class="badge">
+                                <?php echo number_format($quantity, 2) . ' ' . $unit; ?>
+                            </span>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </section>
+
+    <section class="notes">
+        <h3>ملاحظات سريعة</h3>
+        <ul>
+            <li>عدد الأدوات بدون مخزون حالياً: <strong><?php echo number_format($zeroQuantity); ?></strong>. يُنصح بمراجعة إجراءات إعادة التوريد.</li>
+            <li>إجمالي الاستخدام: <strong><?php echo number_format($totalUsed, 2); ?></strong> وحدة عبر <strong><?php echo number_format($totalProductions); ?></strong> عملية إنتاج.</li>
+        </ul>
+    </section>
+</div>
+</body>
+</html>
+        <?php
+        return (string)ob_get_clean();
+    }
+}
+
+if (!function_exists('storePackagingReportDocument')) {
+    /**
+     * حفظ تقرير مخزن أدوات التعبئة في مجلد خاص وإرجاع مسارات العرض.
+     *
+     * @param array<string, mixed> $report
+     * @return array<string, string>|null
+     */
+    function storePackagingReportDocument(array $report): ?array
+    {
+        try {
+            if (!function_exists('ensurePrivateDirectory')) {
+                return null;
+            }
+
+            $basePath = defined('REPORTS_PRIVATE_PATH')
+                ? REPORTS_PRIVATE_PATH
+                : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__, 2) . '/reports'));
+
+            $basePath = rtrim((string)$basePath, '/\\');
+            if ($basePath === '') {
+                return null;
+            }
+
+            ensurePrivateDirectory($basePath);
+
+            $exportsDir = $basePath . DIRECTORY_SEPARATOR . 'exports';
+            $reportDir = $exportsDir . DIRECTORY_SEPARATOR . 'packaging';
+
+            ensurePrivateDirectory($exportsDir);
+            ensurePrivateDirectory($reportDir);
+
+            if (!is_dir($reportDir) || !is_writable($reportDir)) {
+                error_log('Packaging report directory not writable: ' . $reportDir);
+                return null;
+            }
+
+            $document = buildPackagingReportHtmlDocument($report);
+
+            $pattern = $reportDir . DIRECTORY_SEPARATOR . 'packaging-report-*.html';
+            foreach (glob($pattern) ?: [] as $file) {
+                if (is_string($file)) {
+                    @unlink($file);
+                }
+            }
+
+            $token = bin2hex(random_bytes(8));
+            $filename = sprintf('packaging-report-%s-%s.html', date('Ymd-His'), $token);
+            $fullPath = $reportDir . DIRECTORY_SEPARATOR . $filename;
+
+            if (@file_put_contents($fullPath, $document) === false) {
+                return null;
+            }
+
+            $relativePath = 'exports/packaging/' . $filename;
+            $viewerPath = '/reports/view.php?type=export&file=' . rawurlencode($relativePath) . '&token=' . $token;
+            $printPath = $viewerPath . '&print=1';
+
+            $absoluteViewer = function_exists('getAbsoluteUrl')
+                ? getAbsoluteUrl(ltrim($viewerPath, '/'))
+                : $viewerPath;
+            $absolutePrint = function_exists('getAbsoluteUrl')
+                ? getAbsoluteUrl(ltrim($printPath, '/'))
+                : $printPath;
+
+            return [
+                'relative_path' => $relativePath,
+                'viewer_path' => $viewerPath,
+                'print_path' => $printPath,
+                'absolute_viewer_url' => $absoluteViewer,
+                'absolute_print_url' => $absolutePrint,
+                'token' => $token,
+            ];
+        } catch (Throwable $error) {
+            error_log('Packaging report storage failed: ' . $error->getMessage());
+            return null;
+        }
+    }
+}
+
 requireAnyRole(['production', 'accountant', 'manager']);
 
 $currentUser = getCurrentUser();
@@ -944,11 +1350,26 @@ $packagingReport['top_items'] = array_slice($packagingReport['top_items'], 0, 8)
 $packagingReport['last_updated'] = $lastUpdatedTimestamp
     ? date('Y-m-d H:i', $lastUpdatedTimestamp)
     : null;
+
+$packagingReportMeta = storePackagingReportDocument($packagingReport);
+$packagingReportViewUrl = $packagingReportMeta['viewer_path'] ?? '';
+$packagingReportPrintUrl = $packagingReportMeta['print_path'] ?? '';
+$packagingReportAbsoluteView = $packagingReportMeta['absolute_viewer_url'] ?? '';
+$packagingReportAbsolutePrint = $packagingReportMeta['absolute_print_url'] ?? '';
+$packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:i');
 ?>
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
     <h2 class="mb-0"><i class="bi bi-box-seam me-2"></i>مخزن أدوات التعبئة</h2>
     <div class="d-flex flex-wrap gap-2">
-        <button type="button" class="btn btn-outline-secondary" id="generatePackagingReportBtn">
+        <button
+            type="button"
+            class="btn btn-outline-secondary"
+            id="generatePackagingReportBtn"
+            data-viewer-url="<?php echo htmlspecialchars((string)$packagingReportAbsoluteView, ENT_QUOTES, 'UTF-8'); ?>"
+            data-print-url="<?php echo htmlspecialchars((string)$packagingReportAbsolutePrint, ENT_QUOTES, 'UTF-8'); ?>"
+            data-report-ready="<?php echo $packagingReportViewUrl !== '' ? '1' : '0'; ?>"
+            data-generated-at="<?php echo htmlspecialchars((string)$packagingReportGeneratedAt, ENT_QUOTES, 'UTF-8'); ?>"
+        >
             <i class="bi bi-file-bar-graph me-1"></i>
             توليد تقرير المخزن
         </button>
@@ -1334,168 +1755,43 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
     </div>
 </div>
 
-<!-- Modal إضافة كمية جديدة -->
 <div class="modal fade" id="packagingReportModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-dialog-centered modal-md">
         <div class="modal-content">
             <div class="modal-header bg-dark text-white">
-                <h5 class="modal-title"><i class="bi bi-clipboard-data me-2"></i>تقرير احترافي لمخزون أدوات التعبئة</h5>
+                <h5 class="modal-title"><i class="bi bi-clipboard-data me-2"></i>خيارات تقرير مخزن أدوات التعبئة</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
             </div>
             <div class="modal-body">
-                <div id="packagingReportContent" class="packaging-report-content">
-                    <div class="report-header d-flex flex-column flex-lg-row justify-content-between align-items-start gap-3 mb-4">
-                        <div>
-                            <h3 class="fw-semibold mb-1">تقرير مخزن أدوات التعبئة</h3>
-                            <div class="text-muted small">تاريخ التوليد: <?php echo htmlspecialchars($packagingReport['generated_at']); ?></div>
-                            <div class="text-muted small">أُعد بواسطة: <?php echo htmlspecialchars($packagingReport['generated_by']); ?></div>
-                        </div>
-                        <div class="text-lg-end">
-                            <div class="d-flex flex-wrap gap-2 justify-content-start justify-content-lg-end">
-                                <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2">
-                                    إجمالي الأدوات: <?php echo number_format($packagingReport['total_materials']); ?>
-                                </span>
-                                <span class="badge bg-success-subtle text-success fw-semibold px-3 py-2">
-                                    إجمالي الكمية: <?php echo number_format($packagingReport['total_quantity'], 2); ?>
-                                </span>
-                                <span class="badge bg-info-subtle text-info fw-semibold px-3 py-2">
-                                    فئات الأدوات: <?php echo number_format($packagingReport['types_count']); ?>
-                                </span>
-                            </div>
-                            <div class="text-muted small mt-2">
-                                آخر تحديث للسجلات: <?php echo $packagingReport['last_updated'] ? htmlspecialchars($packagingReport['last_updated']) : 'غير متاح'; ?>
-                            </div>
-                        </div>
+                <?php if ($packagingReportViewUrl): ?>
+                    <p class="mb-3 text-muted">
+                        تم حفظ نسخة من التقرير في مساحة التخزين الآمنة بتاريخ
+                        <span class="fw-semibold"><?php echo htmlspecialchars($packagingReportGeneratedAt, ENT_QUOTES, 'UTF-8'); ?></span>.
+                        اختر الإجراء المطلوب أدناه.
+                    </p>
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary" id="packagingReportViewBtn">
+                            <i class="bi bi-display me-2"></i>
+                            عرض التقرير داخل المتصفح
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" id="packagingReportPrintBtn">
+                            <i class="bi bi-printer me-2"></i>
+                            طباعة / حفظ التقرير كـ PDF
+                        </button>
                     </div>
-
-                    <div class="row g-3 mb-4">
-                        <div class="col-sm-6 col-lg-3">
-                            <div class="border rounded-4 p-3 h-100 bg-light">
-                                <div class="text-muted small mb-1">إجمالي الأدوات</div>
-                                <div class="fs-5 fw-semibold text-primary"><?php echo number_format($packagingReport['total_materials']); ?></div>
-                                <div class="text-muted small mt-1">الأدوات النشطة في المخزن</div>
-                            </div>
-                        </div>
-                        <div class="col-sm-6 col-lg-3">
-                            <div class="border rounded-4 p-3 h-100 bg-light">
-                                <div class="text-muted small mb-1">إجمالي المخزون الحالي</div>
-                                <div class="fs-5 fw-semibold text-success"><?php echo number_format($packagingReport['total_quantity'], 2); ?></div>
-                                <div class="text-muted small mt-1">جميع الوحدات المتاحة</div>
-                            </div>
-                        </div>
-                        <div class="col-sm-6 col-lg-3">
-                            <div class="border rounded-4 p-3 h-100 bg-light">
-                                <div class="text-muted small mb-1">أدوات بدون مخزون</div>
-                                <div class="fs-5 fw-semibold text-danger"><?php echo number_format($packagingReport['zero_quantity']); ?></div>
-                                <div class="text-muted small mt-1">أدوات تحتاج إعادة توريد</div>
-                            </div>
-                        </div>
-                        <div class="col-sm-6 col-lg-3">
-                            <div class="border rounded-4 p-3 h-100 bg-light">
-                                <div class="text-muted small mb-1">عمليات الإنتاج المرتبطة</div>
-                                <div class="fs-5 fw-semibold text-info"><?php echo number_format($packagingReport['total_productions']); ?></div>
-                                <div class="text-muted small mt-1">إجمالي العمليات التي استُخدمت فيها الأدوات</div>
-                            </div>
-                        </div>
+                    <div class="alert alert-light border mt-3 mb-0 small text-muted">
+                        <i class="bi bi-shield-lock me-1"></i>
+                        يتم فتح التقرير عبر `view.php` لضمان الحماية ومنع خطأ Forbidden.
                     </div>
-
-                    <h5 class="fw-semibold mb-3"><i class="bi bi-diagram-3 me-2"></i>التوزيع حسب النوع</h5>
-                    <div class="table-responsive mb-4">
-                        <table class="table table-sm table-bordered align-middle">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>الفئة</th>
-                                    <th>عدد الأصناف</th>
-                                    <th>إجمالي الكمية</th>
-                                    <th>تفاصيل الوحدات</th>
-                                    <th>متوسط الكمية</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (empty($packagingReport['type_breakdown'])): ?>
-                                    <tr>
-                                        <td colspan="5" class="text-center text-muted py-3">لا توجد بيانات كافية لعرض التوزيع حسب النوع.</td>
-                                    </tr>
-                                <?php else: ?>
-                                    <?php foreach ($packagingReport['type_breakdown'] as $typeLabel => $info): ?>
-                                        <?php
-                                        $unitBreakdown = [];
-                                        foreach ($info['units'] as $unitName => $unitQuantity) {
-                                            $unitBreakdown[] = number_format($unitQuantity, 2) . ' ' . htmlspecialchars($unitName);
-                                        }
-                                        ?>
-                                        <tr>
-                                            <td class="fw-semibold"><?php echo htmlspecialchars($typeLabel); ?></td>
-                                            <td><?php echo number_format($info['count']); ?></td>
-                                            <td><?php echo number_format($info['total_quantity'], 2); ?></td>
-                                            <td><?php echo $unitBreakdown ? implode(' • ', $unitBreakdown) : '-'; ?></td>
-                                            <td><?php echo number_format($info['average_quantity'], 2); ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                <?php else: ?>
+                    <div class="alert alert-warning mb-0">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        تعذّر حفظ التقرير تلقائياً. يرجى التأكد من صلاحيات الكتابة على مجلد التخزين ثم تحديث الصفحة.
                     </div>
-
-                    <h5 class="fw-semibold mb-3"><i class="bi bi-bar-chart-steps me-2"></i>أعلى الأدوات من حيث الكمية</h5>
-                    <div class="table-responsive mb-3">
-                        <table class="table table-sm table-striped align-middle">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>#</th>
-                                    <th>اسم الأداة</th>
-                                    <th>الكود/المعرف</th>
-                                    <th>الفئة</th>
-                                    <th>الكمية المتاحة</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (empty($packagingReport['top_items'])): ?>
-                                    <tr>
-                                        <td colspan="5" class="text-center text-muted py-3">لا توجد بيانات لعرض أفضل الأدوات.</td>
-                                    </tr>
-                                <?php else: ?>
-                                    <?php foreach ($packagingReport['top_items'] as $index => $item): ?>
-                                        <tr>
-                                            <td><?php echo $index + 1; ?></td>
-                                            <td class="fw-semibold">
-                                                <?php echo htmlspecialchars($item['name']); ?>
-                                                <?php if (!empty($item['alias'])): ?>
-                                                    <div class="small text-info mt-1"><?php echo htmlspecialchars($item['alias']); ?></div>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td><?php echo $item['code'] ? htmlspecialchars((string)$item['code']) : '-'; ?></td>
-                                            <td><?php echo htmlspecialchars($item['type']); ?></td>
-                                            <td>
-                                                <span class="badge bg-primary-subtle text-primary fw-semibold">
-                                                    <?php echo number_format($item['quantity'], 2) . ' ' . htmlspecialchars($item['unit']); ?>
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <div class="alert alert-info d-flex align-items-center gap-2">
-                        <i class="bi bi-info-circle-fill fs-4"></i>
-                        <div>
-                            <div class="fw-semibold">ملاحظات تحليلية</div>
-                            <ul class="mb-0 small ps-3">
-                                <li>عدد الأدوات بدون مخزون حالياً: <strong><?php echo number_format($packagingReport['zero_quantity']); ?></strong>. يُنصح بمراجعة إجراءات إعادة التوريد.</li>
-                                <li>إجمالي الاستخدام من خلال عمليات الإنتاج: <strong><?php echo number_format($packagingReport['total_used'], 2); ?></strong> وحدة عبر <strong><?php echo number_format($packagingReport['total_productions']); ?></strong> عملية معتمدة.</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
+                <?php endif; ?>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">إغلاق</button>
-                <button type="button" class="btn btn-primary" id="printPackagingReportBtn">
-                    <i class="bi bi-printer me-1"></i>
-                    طباعة التقرير
-                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
             </div>
         </div>
     </div>
@@ -1709,85 +2005,61 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
 document.addEventListener('DOMContentLoaded', function () {
     const reportButton = document.getElementById('generatePackagingReportBtn');
     const reportModalElement = document.getElementById('packagingReportModal');
-    const printButton = document.getElementById('printPackagingReportBtn');
+    const viewButton = document.getElementById('packagingReportViewBtn');
+    const printButton = document.getElementById('packagingReportPrintBtn');
 
-    function getReportModalInstance() {
-        if (!reportModalElement) {
-            return null;
+    const openInNewTab = (url) => {
+        if (!url) {
+            alert('تعذّر فتح التقرير الآن. يرجى تحديث الصفحة وإعادة المحاولة.');
+            return;
         }
-        if (typeof bootstrap === 'undefined') {
-            console.warn('Bootstrap.js غير محمل بعد، تعذّر تهيئة نافذة التقرير.');
-            return null;
+        window.open(url, '_blank', 'noopener');
+    };
+
+    const hideModal = () => {
+        if (!reportModalElement || typeof bootstrap === 'undefined') {
+            return;
         }
-        return bootstrap.Modal.getOrCreateInstance(reportModalElement);
-    }
+        const instance = bootstrap.Modal.getInstance(reportModalElement);
+        if (instance) {
+            instance.hide();
+        }
+    };
 
     if (reportButton) {
-        reportButton.addEventListener('click', () => {
-            const modalInstance = getReportModalInstance();
-            if (modalInstance) {
-                modalInstance.show();
+        const viewUrl = reportButton.getAttribute('data-viewer-url') || '';
+        const printUrlAttr = reportButton.getAttribute('data-print-url') || '';
+        const isReady = reportButton.getAttribute('data-report-ready') === '1';
+        const resolvedPrintUrl = printUrlAttr || (viewUrl ? (viewUrl.includes('?') ? `${viewUrl}&print=1` : `${viewUrl}?print=1`) : '');
+
+        if (!isReady) {
+            reportButton.addEventListener('click', () => {
+                alert('لا يمكن توليد التقرير حالياً. يرجى تحديث الصفحة أو التأكد من صلاحيات مجلد التخزين.');
+            });
+        } else {
+            reportButton.addEventListener('click', () => {
+                if (!reportModalElement || typeof bootstrap === 'undefined') {
+                    openInNewTab(viewUrl);
+                    return;
+                }
+                const instance = bootstrap.Modal.getOrCreateInstance(reportModalElement);
+                instance.show();
+            });
+
+            if (viewButton) {
+                viewButton.addEventListener('click', () => {
+                    openInNewTab(viewUrl);
+                    hideModal();
+                });
             }
-        });
-    }
 
-    if (printButton) {
-        printButton.addEventListener('click', () => {
-            const reportContent = document.getElementById('packagingReportContent');
-            if (!reportContent) {
-                return;
+            if (printButton) {
+                printButton.addEventListener('click', () => {
+                    openInNewTab(resolvedPrintUrl);
+                    hideModal();
+                });
             }
-
-            const printWindow = window.open('', '_blank', 'width=1024,height=768');
-            const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-                .map((element) => element.outerHTML)
-                .join('\n');
-
-            printWindow.document.write(`<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<title>تقرير مخزن أدوات التعبئة</title>
-${stylesheets}
-<style>
-body { font-family: 'Tajawal', 'Cairo', sans-serif; padding: 32px; background: #f8fafc; color: #0f172a; }
-.report-header { border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.summary-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
-.summary-card .label { color: #64748b; font-size: 13px; margin-bottom: 6px; }
-.summary-card .value { font-size: 20px; font-weight: 600; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 28px; background: #fff; border-radius: 16px; overflow: hidden; }
-table thead { background: #f1f5f9; }
-table th, table td { padding: 14px 16px; border: 1px solid #e2e8f0; text-align: right; }
-table th { font-weight: 600; color: #1e293b; background: #f8fafc; }
-.badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #e0f2fe; color: #0369a1; font-size: 12px; font-weight: 600; }
-.notes { border-left: 4px solid #38bdf8; background: #ecfeff; padding: 16px 20px; border-radius: 12px; }
-@media print {
-    body { padding: 0; background: #fff; }
-    .badge { background: #bfdbfe; color: #1d4ed8; }
-}
-</style>
-</head>
-<body>
-<div class="report-header">
-    <div>
-        <h2 style="margin:0 0 8px; font-weight:700;">تقرير مخزن أدوات التعبئة</h2>
-        <div style="color:#64748b; font-size:13px;">تاريخ التوليد: <?php echo htmlspecialchars($packagingReport['generated_at']); ?></div>
-        <div style="color:#64748b; font-size:13px;">أُعد بواسطة: <?php echo htmlspecialchars($packagingReport['generated_by']); ?></div>
-    </div>
-    <div style="text-align:left;">
-        <div class="badge">إجمالي الأدوات: <?php echo number_format($packagingReport['total_materials']); ?></div>
-        <div class="badge" style="margin-right:8px;">إجمالي الكمية: <?php echo number_format($packagingReport['total_quantity'], 2); ?></div>
-        <div style="color:#64748b; font-size:12px; margin-top:8px;">آخر تحديث للسجلات: <?php echo $packagingReport['last_updated'] ? htmlspecialchars($packagingReport['last_updated']) : 'غير متاح'; ?></div>
-    </div>
-</div>
-${reportContent.outerHTML}
-</body>
-</html>`);
-            printWindow.document.close();
-            printWindow.focus();
-            printWindow.print();
-        });
+        }
     }
 });
 
@@ -2212,22 +2484,6 @@ document.addEventListener('DOMContentLoaded', function () {
 .table-sm .btn-group {
     display: flex;
     gap: 2px;
-}
-
-.packaging-report-content .badge {
-    font-size: 0.75rem;
-}
-
-.packaging-report-content .table {
-    font-size: 0.85rem;
-}
-
-.packaging-report-content .border.rounded-4 {
-    background-color: #f8fafc;
-}
-
-.packaging-report-content h5 {
-    color: #1f2937;
 }
 
 @media (max-width: 991px) {

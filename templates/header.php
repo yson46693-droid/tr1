@@ -118,11 +118,7 @@ if (function_exists('processDailyPackagingAlert')) {
     <link rel="apple-touch-icon" href="<?php echo ASSETS_URL; ?>icons/icon-192x192.png">
     
     <!-- Manifest -->
-    <?php
-    // استخدام manifest.php للتأكد من Content-Type الصحيح
-    $manifestPath = getRelativeUrl('manifest.php');
-    ?>
-<link rel="manifest" href="<?php echo $manifestPath; ?>">
+    <link rel="manifest" href="<?php echo getRelativeUrl('manifest.json'); ?>">
     
     <!-- 🎬 Page Loading Animation CSS -->
     <style>

@@ -357,8 +357,6 @@ if (!function_exists('storeRawMaterialsReportDocument')) {
                 return null;
             }
 
-            ensurePrivateDirectory();
-
             $basePath = defined('REPORTS_PRIVATE_PATH')
                 ? REPORTS_PRIVATE_PATH
                 : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__, 2) . '/reports'));
@@ -368,13 +366,16 @@ if (!function_exists('storeRawMaterialsReportDocument')) {
                 return null;
             }
 
+            ensurePrivateDirectory($basePath);
+
             $exportsDir = $basePath . DIRECTORY_SEPARATOR . 'exports';
             $reportDir = $exportsDir . DIRECTORY_SEPARATOR . 'raw_materials';
 
-            if (!is_dir($exportsDir) && !@mkdir($exportsDir, 0755, true)) {
-                return null;
-            }
-            if (!is_dir($reportDir) && !@mkdir($reportDir, 0755, true)) {
+            ensurePrivateDirectory($exportsDir);
+            ensurePrivateDirectory($reportDir);
+
+            if (!is_dir($reportDir) || !is_writable($reportDir)) {
+                error_log('Raw materials report directory not writable: ' . $reportDir);
                 return null;
             }
 
