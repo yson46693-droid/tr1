@@ -780,7 +780,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'quantity' => $packagingQuantityPerUnit * $quantity,
                                     'name' => $packagingName,
                                     'unit' => $packagingUnit,
-                                    'product_id' => $packagingProductId
+                                    'product_id' => $packagingProductId,
+                                    'supplier_id' => $selectedSupplierId
                                 ];
                             }
                         }
@@ -982,7 +983,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'quantity' => (float)($legacyPkg['quantity_per_unit'] ?? 1.0) * $quantity,
                                 'name' => $legacyPackagingName,
                                 'unit' => $legacyPackagingUnit,
-                                'product_id' => $legacyPackagingProductId
+                                'product_id' => $legacyPackagingProductId,
+                                'supplier_id' => $selectedSupplierId
                             ];
                         }
                     }
@@ -2302,7 +2304,7 @@ $lang = isset($translations) ? $translations : [];
 
 <!-- Modal إنشاء إنتاج من قالب -->
 <div class="modal fade" id="createFromTemplateModal" tabindex="-1">
-    <div class="modal-dialog modal-xl production-template-dialog">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable production-template-dialog">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title"><i class="bi bi-file-earmark-text me-2"></i>إنشاء تشغيلة إنتاج</h5>

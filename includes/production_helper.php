@@ -14,10 +14,13 @@ require_once __DIR__ . '/inventory_movements.php';
 /**
  * التحقق من وجود عمود في جدول مع التخزين المؤقت للنتائج.
  */
-function productionColumnExists($table, $column) {
+function productionColumnExists($table, $column, $forceRefresh = false) {
     static $cache = [];
 
     $cacheKey = $table . '.' . $column;
+    if ($forceRefresh) {
+        unset($cache[$cacheKey]);
+    }
     if (array_key_exists($cacheKey, $cache)) {
         return $cache[$cacheKey];
     }
@@ -65,6 +68,39 @@ function getColumnSelectExpression($table, $column, $alias = null, $tableAlias =
 }
 
 /**
+ * التأكد من وجود عمود supplier_id في جدول production_materials
+ */
+function ensureProductionMaterialsSupplierColumn(): bool
+{
+    static $ensured = false;
+
+    if ($ensured && productionColumnExists('production_materials', 'supplier_id')) {
+        return true;
+    }
+
+    $db = db();
+
+    try {
+        $exists = productionColumnExists('production_materials', 'supplier_id');
+        if (!$exists) {
+            $db->execute("
+                ALTER TABLE production_materials
+                ADD COLUMN `supplier_id` int(11) NULL,
+                ADD KEY `supplier_id` (`supplier_id`),
+                ADD CONSTRAINT `production_materials_ibfk_3` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE SET NULL
+            ");
+            $exists = productionColumnExists('production_materials', 'supplier_id', true);
+        }
+        $ensured = true;
+        return $exists;
+    } catch (Exception $e) {
+        error_log('Production Helper: unable to ensure supplier_id column on production_materials: ' . $e->getMessage());
+        $ensured = productionColumnExists('production_materials', 'supplier_id');
+        return $ensured;
+    }
+}
+
+/**
  * ربط مواد التغليف بعملية إنتاج
  */
 function linkPackagingToProduction($productionId, $materials) {
@@ -83,7 +119,8 @@ function linkPackagingToProduction($productionId, $materials) {
             error_log("Link Packaging Error: No material_id or product_id column found in production_materials");
             return false;
         }
-        
+        $supplierColumnExists = ensureProductionMaterialsSupplierColumn();
+
         // حذف المواد السابقة
         $db->execute("DELETE FROM production_materials WHERE production_id = ?", [$productionId]);
         
@@ -91,12 +128,22 @@ function linkPackagingToProduction($productionId, $materials) {
         foreach ($materials as $material) {
             $materialId = intval($material['material_id'] ?? $material['product_id'] ?? 0);
             $quantity = floatval($material['quantity'] ?? $material['quantity_used'] ?? 0);
+            $supplierId = isset($material['supplier_id']) ? intval($material['supplier_id']) : null;
             
             if ($materialId > 0 && $quantity > 0) {
+                $columnsSql = "production_id, {$materialColumn}, quantity_used";
+                $valuesSql = "?, ?, ?";
+                $params = [$productionId, $materialId, $quantity];
+
+                if ($supplierColumnExists) {
+                    $columnsSql = "production_id, {$materialColumn}, supplier_id, quantity_used";
+                    $valuesSql = "?, ?, ?, ?";
+                    $params = [$productionId, $materialId, $supplierId ?: null, $quantity];
+                }
+
                 $db->execute(
-                    "INSERT INTO production_materials (production_id, {$materialColumn}, quantity_used) 
-                     VALUES (?, ?, ?)",
-                    [$productionId, $materialId, $quantity]
+                    "INSERT INTO production_materials ({$columnsSql}) VALUES ({$valuesSql})",
+                    $params
                 );
                 
                 // تسجيل حركة خروج للمواد
@@ -177,17 +224,25 @@ function storeProductionMaterialsUsage($productionId, $rawMaterials = [], $packa
         $materialIdColumnCheck = $db->queryOne("SHOW COLUMNS FROM production_materials LIKE 'material_id'");
         $columnName = !empty($materialIdColumnCheck) ? 'material_id' : 'product_id';
 
+        $supplierColumnExists = ensureProductionMaterialsSupplierColumn();
+
         $materialsMap = [];
-        $addMaterial = function($productId, $quantity) use (&$materialsMap) {
+        $addMaterial = function($productId, $quantity, $supplierId = null) use (&$materialsMap) {
             $productId = intval($productId);
             $quantity = (float)$quantity;
+            $supplierKey = $supplierId ? intval($supplierId) : 0;
             if ($productId <= 0 || $quantity <= 0) {
                 return;
             }
-            if (!isset($materialsMap[$productId])) {
-                $materialsMap[$productId] = 0.0;
+            $mapKey = $productId . ':' . $supplierKey;
+            if (!isset($materialsMap[$mapKey])) {
+                $materialsMap[$mapKey] = [
+                    'product_id' => $productId,
+                    'quantity' => 0.0,
+                    'supplier_id' => $supplierKey > 0 ? $supplierKey : null
+                ];
             }
-            $materialsMap[$productId] += $quantity;
+            $materialsMap[$mapKey]['quantity'] += $quantity;
         };
 
         static $packagingTableExists = null;
@@ -228,7 +283,9 @@ function storeProductionMaterialsUsage($productionId, $rawMaterials = [], $packa
                 $productId = ensureProductionMaterialProductId($nameForProduct, 'packaging', $packagingUnit);
             }
 
-            $addMaterial($productId, $quantity);
+            $supplierId = isset($packItem['supplier_id']) ? (int)$packItem['supplier_id'] : null;
+
+            $addMaterial($productId, $quantity, $supplierId);
         }
 
         foreach ($rawMaterials as $rawItem) {
@@ -248,15 +305,31 @@ function storeProductionMaterialsUsage($productionId, $rawMaterials = [], $packa
                 $productId = ensureProductionMaterialProductId($materialName, 'raw_material', $materialUnit);
             }
 
-            $addMaterial($productId, $quantity);
+            $supplierId = isset($rawItem['supplier_id']) ? (int)$rawItem['supplier_id'] : null;
+
+            $addMaterial($productId, $quantity, $supplierId);
         }
 
         $db->execute("DELETE FROM production_materials WHERE production_id = ?", [$productionId]);
 
-        foreach ($materialsMap as $productId => $totalQuantity) {
+        foreach ($materialsMap as $mapItem) {
+            $productId = $mapItem['product_id'];
+            $totalQuantity = $mapItem['quantity'];
+            $supplierId = $mapItem['supplier_id'] ?? null;
+
+            $columnsSql = "production_id, {$columnName}, quantity_used";
+            $valuesSql = "?, ?, ?";
+            $params = [$productionId, $productId, $totalQuantity];
+
+            if ($supplierColumnExists) {
+                $columnsSql = "production_id, {$columnName}, supplier_id, quantity_used";
+                $valuesSql = "?, ?, ?, ?";
+                $params = [$productionId, $productId, $supplierId ?: null, $totalQuantity];
+            }
+
             $db->execute(
-                "INSERT INTO production_materials (production_id, {$columnName}, quantity_used) VALUES (?, ?, ?)",
-                [$productionId, $productId, $totalQuantity]
+                "INSERT INTO production_materials ({$columnsSql}) VALUES ({$valuesSql})",
+                $params
             );
         }
     } catch (Exception $e) {

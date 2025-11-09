@@ -193,8 +193,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
+        $normalizedProductName = function_exists('mb_strtolower')
+            ? mb_strtolower($productName, 'UTF-8')
+            : strtolower($productName);
+        $existingTemplate = null;
+        if ($normalizedProductName !== '') {
+            try {
+                $existingTemplate = $db->queryOne(
+                    "SELECT id FROM product_templates WHERE LOWER(product_name) = ? LIMIT 1",
+                    [$normalizedProductName]
+                );
+            } catch (Exception $e) {
+                error_log('Duplicate legacy template check failed: ' . $e->getMessage());
+            }
+        }
+
         if (empty($productName)) {
             $error = 'يجب إدخال اسم المنتج';
+        } elseif ($existingTemplate) {
+            $error = 'اسم المنتج مستخدم بالفعل. يرجى اختيار اسم مختلف.';
         } elseif ($honeyQuantity <= 0) {
             $error = 'يجب إدخال كمية العسل (بالجرام)';
         } elseif (empty($packagingIds)) {

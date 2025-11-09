@@ -247,13 +247,16 @@ CREATE TABLE IF NOT EXISTS `production_materials` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `production_id` int(11) NOT NULL,
   `material_id` int(11) NOT NULL,
+  `supplier_id` int(11) DEFAULT NULL,
   `quantity_used` decimal(10,2) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   KEY `production_id` (`production_id`),
   KEY `material_id` (`material_id`),
+  KEY `supplier_id` (`supplier_id`),
   CONSTRAINT `production_materials_ibfk_1` FOREIGN KEY (`production_id`) REFERENCES `production` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `production_materials_ibfk_2` FOREIGN KEY (`material_id`) REFERENCES `products` (`id`) ON DELETE CASCADE
+  CONSTRAINT `production_materials_ibfk_2` FOREIGN KEY (`material_id`) REFERENCES `products` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `production_materials_ibfk_3` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- جدول الموافقات

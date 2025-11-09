@@ -2026,8 +2026,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
+            $normalizedProductName = function_exists('mb_strtolower')
+                ? mb_strtolower($productName, 'UTF-8')
+                : strtolower($productName);
+            $existingTemplate = null;
+            if ($normalizedProductName !== '') {
+                try {
+                    $existingTemplate = $db->queryOne(
+                        "SELECT id FROM unified_product_templates WHERE LOWER(product_name) = ? LIMIT 1",
+                        [$normalizedProductName]
+                    );
+                } catch (Exception $e) {
+                    error_log('Duplicate template check failed: ' . $e->getMessage());
+                }
+            }
+
             if (empty($productName)) {
                 $error = 'يجب إدخال اسم المنتج';
+            } elseif ($existingTemplate) {
+                $error = 'اسم المنتج مستخدم بالفعل في قالب آخر. يرجى اختيار اسم مختلف.';
             } elseif (empty($rawMaterials)) {
                 $error = 'يجب إضافة مادة خام واحدة على الأقل';
             } elseif (empty($packagingItems)) {
@@ -2613,7 +2630,7 @@ if ($section === 'honey') {
     
     <!-- Modal إضافة عسل -->
     <div class="modal fade" id="addHoneyModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">إضافة عسل</h5>
@@ -2665,7 +2682,7 @@ if ($section === 'honey') {
     
     <!-- Modal تصفية عسل -->
     <div class="modal fade" id="filterHoneyModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">تصفية العسل</h5>
@@ -2715,7 +2732,7 @@ if ($section === 'honey') {
     
 <!-- Modal تسجيل تالف للعسل -->
 <div class="modal fade" id="damageHoneyModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>تسجيل تالف للعسل</h5>
@@ -2938,7 +2955,7 @@ if ($section === 'honey') {
     
     <!-- Modal إضافة زيت زيتون -->
     <div class="modal fade" id="addOliveOilModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">إضافة زيت زيتون</h5>
@@ -2973,7 +2990,7 @@ if ($section === 'honey') {
     
 <!-- Modal تسجيل تالف زيت الزيتون -->
 <div class="modal fade" id="damageOliveOilModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="bi bi-exclamation-octagon me-2"></i>تسجيل تالف زيت الزيتون</h5>
@@ -3136,7 +3153,7 @@ if ($section === 'honey') {
     
     <!-- Modal إضافة شمع عسل -->
     <div class="modal fade" id="addBeeswaxModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">إضافة شمع عسل</h5>
@@ -3171,7 +3188,7 @@ if ($section === 'honey') {
     
 <!-- Modal تسجيل تالف شمع العسل -->
 <div class="modal fade" id="damageBeeswaxModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="bi bi-exclamation-square me-2"></i>تسجيل تالف شمع العسل</h5>
@@ -3352,7 +3369,7 @@ if ($section === 'honey') {
     
     <!-- Modal إضافة مشتق -->
     <div class="modal fade" id="addDerivativeModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">إضافة مشتق</h5>
@@ -3391,7 +3408,7 @@ if ($section === 'honey') {
     
 <!-- Modal تسجيل تالف للمشتقات -->
 <div class="modal fade" id="damageDerivativeModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="bi bi-exclamation-diamond me-2"></i>تسجيل تالف للمشتقات</h5>
@@ -3581,7 +3598,7 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
         
 <!-- Modal تسجيل تالف للمكسرات المنفردة -->
 <div class="modal fade" id="damageNutsModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title"><i class="bi bi-exclamation-diamond me-2"></i>تسجيل تالف للمكسرات</h5>
@@ -3954,7 +3971,7 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
 
 <!-- Modal إنشاء قالب منتج موحد متقدم -->
 <div class="modal fade" id="createUnifiedTemplateModal" tabindex="-1">
-    <div class="modal-dialog modal-xl">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-success text-white">
                 <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إنشاء قالب منتج متقدم</h5>
