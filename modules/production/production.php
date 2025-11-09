@@ -3234,6 +3234,245 @@ h2, h3, h4, h5 {
 .card, .alert, .btn {
     animation: fadeIn 0.3s ease-in-out;
 }
+
+.production-template-body .section-block {
+     background: #f9fafb;
+     border: 1px solid rgba(148, 163, 184, 0.25);
+     border-radius: 12px;
+     padding: 0.85rem 1rem;
+     margin-bottom: 0.75rem;
+ }
+ 
++.template-grid {
++    display: grid;
++    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
++    gap: 1.25rem;
++}
++
++.template-card-modern {
++    position: relative;
++    background: linear-gradient(160deg, #ffffff 0%, #f8fafc 100%);
++    border-radius: 18px;
++    border: 1px solid rgba(148, 163, 184, 0.18);
++    box-shadow: 0 18px 30px rgba(15, 23, 42, 0.12);
++    padding: 1.1rem 1.25rem;
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++    cursor: pointer;
++    transition: transform 0.25s ease, box-shadow 0.25s ease;
++}
++
++.template-card-modern::before {
++    content: '';
++    position: absolute;
++    inset: 0;
++    border-radius: inherit;
++    background: linear-gradient(120deg, var(--template-accent-light, rgba(14, 165, 233, 0.15)) 0%, transparent 60%);
++    opacity: 0.9;
++    transition: opacity 0.25s ease;
++    pointer-events: none;
++}
++
++.template-card-modern:hover {
++    transform: translateY(-6px);
++    box-shadow: 0 22px 40px rgba(15, 23, 42, 0.18);
++}
++
++.template-card-modern:hover::before {
++    opacity: 1;
++}
++
++.template-card-header {
++    display: flex;
++    justify-content: space-between;
++    align-items: flex-start;
++}
++
++.template-type-pill {
++    display: inline-flex;
++    align-items: center;
++    gap: 0.35rem;
++    background: var(--template-accent-light, rgba(14, 165, 233, 0.15));
++    color: var(--template-accent, #0ea5e9);
++    border-radius: 999px;
++    padding: 0.18rem 0.7rem;
++    font-size: 0.75rem;
++    font-weight: 600;
++}
++
++.template-title {
++    font-size: 1rem;
++    font-weight: 700;
++    margin-top: 0.45rem;
++    color: #0f172a;
++}
++
++.template-products-count {
++    background: rgba(15, 118, 110, 0.08);
++    color: #0f766e;
++    border-radius: 12px;
++    padding: 0.4rem 0.7rem;
++    font-size: 0.75rem;
++    font-weight: 600;
++    display: inline-flex;
++    align-items: center;
++    gap: 0.35rem;
++}
++
++.template-products-count span {
++    font-weight: 500;
++    color: #134e4a;
++}
++
++.template-metrics {
++    display: grid;
++    grid-template-columns: repeat(3, 1fr);
++    align-items: center;
++    gap: 0.6rem;
++    background: rgba(15, 23, 42, 0.03);
++    border-radius: 14px;
++    padding: 0.6rem 0.7rem;
++}
++
++.metric-item {
++    display: flex;
++    flex-direction: column;
++    text-align: center;
++}
++
++.metric-label {
++    font-size: 0.7rem;
++    color: #64748b;
++    font-weight: 600;
++    text-transform: uppercase;
++    letter-spacing: 0.04em;
++}
++
++.metric-value {
++    font-size: 0.92rem;
++    font-weight: 700;
++    color: var(--template-accent, #0ea5e9);
++}
++
++.metric-separator {
++    width: 1px;
++    height: 32px;
++    background: rgba(148, 163, 184, 0.35);
++}
++
++.template-materials {
++    background: rgba(15, 23, 42, 0.04);
++    border-radius: 14px;
++    padding: 0.75rem 0.85rem;
++    display: flex;
++    flex-direction: column;
++    gap: 0.65rem;
++}
++
++.material-row {
++    display: flex;
++    align-items: center;
++    gap: 0.75rem;
++}
++
++.material-icon {
++    width: 2rem;
++    height: 2rem;
++    border-radius: 12px;
++    background: var(--template-accent-light, rgba(14, 165, 233, 0.15));
++    color: var(--template-accent, #0ea5e9);
++    display: grid;
++    place-items: center;
++    font-size: 0.9rem;
++}
++
++.material-info {
++    flex: 1;
++}
++
++.material-name {
++    font-size: 0.82rem;
++    color: #1f2937;
++    font-weight: 600;
++}
++
++.material-quantity {
++    font-size: 0.78rem;
++    color: #475569;
++}
++
++.material-quantity span {
++    margin-right: 0.25rem;
++    color: #94a3b8;
++}
++
++.material-tag {
++    background: rgba(253, 224, 71, 0.25);
++    color: #854d0e;
++    padding: 0.15rem 0.55rem;
++    border-radius: 999px;
++    font-size: 0.7rem;
++    font-weight: 600;
++}
++
++.materials-more {
++    font-size: 0.75rem;
++    color: #475569;
++    font-weight: 600;
++}
++
++.template-actions {
++    display: flex;
++    justify-content: center;
++    align-items: center;
++}
++
++.template-action-badge {
++    display: inline-flex;
++    align-items: center;
++    gap: 0.6rem;
++    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
++    color: #ffffff;
++    padding: 0.55rem 1.4rem;
++    border-radius: 999px;
++    font-weight: 700;
++    font-size: 0.8rem;
++    letter-spacing: 0.02em;
++    box-shadow: 0 10px 25px rgba(5, 150, 105, 0.25);
++}
++
++.template-card-modern:hover .template-action-badge {
++    box-shadow: 0 16px 30px rgba(5, 150, 105, 0.35);
++}
++
++@media (max-width: 991.98px) {
++    .template-grid {
++        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
++    }
++}
++
++@media (max-width: 575.98px) {
++    .template-card-modern {
++        padding: 1rem;
++    }
++
++    .template-metrics {
++        grid-template-columns: repeat(3, minmax(0, 1fr));
++        gap: 0.4rem;
++        padding: 0.5rem;
++    }
++
++    .metric-label {
++        font-size: 0.65rem;
++    }
++
++    .metric-value {
++        font-size: 0.85rem;
++    }
++}
++
+
 </style>
 
 <?php
@@ -3449,6 +3688,14 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function renderTemplateSuppliers(details) {
+    const cacheKey = details?.cache_key;
+    if (!details || !details.success) {
+        return;
+    }
+    if (cacheKey) {
+        window.templateDetailsCache = window.templateDetailsCache || {};
+        window.templateDetailsCache[cacheKey] = details;
+    }
     const wrapper = document.getElementById('templateSuppliersWrapper');
     const container = document.getElementById('templateSuppliersContainer');
     const modeInput = document.getElementById('template_mode');
@@ -3820,13 +4067,17 @@ function openCreateFromTemplateModal(element) {
         window.scrollTo(0, 0);
     }
     
-    document.querySelectorAll('.template-card.selected-template').forEach(card => {
+    document.querySelectorAll('.template-card-modern.selected-template').forEach(card => {
         card.classList.remove('selected-template');
-        card.style.borderLeftColor = '#0dcaf0';
+        card.style.setProperty('--template-accent', card.dataset.originalAccent || '#0ea5e9');
+        card.style.setProperty('--template-accent-light', card.dataset.originalAccentLight || 'rgba(14, 165, 233, 0.15)');
     });
     if (element) {
         element.classList.add('selected-template');
-        element.style.borderLeftColor = '#1d4ed8';
+        element.dataset.originalAccent = getComputedStyle(element).getPropertyValue('--template-accent');
+        element.dataset.originalAccentLight = getComputedStyle(element).getPropertyValue('--template-accent-light');
+        element.style.setProperty('--template-accent', '#1d4ed8');
+        element.style.setProperty('--template-accent-light', '#1d4ed822');
     }
     
     document.getElementById('template_id').value = templateId;
@@ -3866,24 +4117,52 @@ function openCreateFromTemplateModal(element) {
         modeInput.value = 'advanced';
     }
 
-    const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
-    fetch(baseUrl + '/dashboard/production.php?page=production&ajax=template_details&template_id=' + templateId + '&template_type=' + encodeURIComponent(templateType))
+    const templateCacheKey = templateId + '::' + templateType;
+    window.templateDetailsCache = window.templateDetailsCache || {};
+
+    const modal = new bootstrap.Modal(document.getElementById('createFromTemplateModal'));
+
+    const handleTemplateResponse = (data) => {
+        if (data && data.success) {
+            renderTemplateSuppliers(data);
+        } else {
+            if (container) {
+                container.innerHTML = `
+                    <div class="col-12">
+                        <div class="alert alert-warning mb-0">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            لم يتم العثور على مواد لهذا القالب. يرجى مراجعة إعدادات القالب.
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        modal.show();
+    };
+
+    if (window.templateDetailsCache[templateCacheKey]) {
+        handleTemplateResponse(window.templateDetailsCache[templateCacheKey]);
+        return;
+    }
+
+    const createModalUrl = (relativePath) => {
+        if (/^https?:\/\//i.test(relativePath)) {
+            return relativePath;
+        }
+        try {
+            return new URL(relativePath, window.location.origin).toString();
+        } catch (error) {
+            return window.location.origin + relativePath;
+        }
+    };
+
+    const requestUrl = createModalUrl('/dashboard/production.php?page=production&ajax=template_details&template_id=' + templateId + '&template_type=' + encodeURIComponent(templateType));
+
+    fetch(requestUrl, { cache: 'no-store' })
         .then(response => response.ok ? response.json() : Promise.reject(new Error('Network error')))
         .then(data => {
-            if (data && data.success) {
-                renderTemplateSuppliers(data);
-            } else {
-                if (container) {
-                    container.innerHTML = `
-                        <div class="col-12">
-                            <div class="alert alert-warning mb-0">
-                                <i class="bi bi-exclamation-triangle me-2"></i>
-                                لم يتم العثور على مواد لهذا القالب. يرجى مراجعة إعدادات القالب.
-                            </div>
-                        </div>
-                    `;
-                }
-            }
+            window.templateDetailsCache[templateCacheKey] = data;
+            handleTemplateResponse(data);
         })
         .catch(error => {
             console.error('Error loading template details:', error);
@@ -3897,10 +4176,6 @@ function openCreateFromTemplateModal(element) {
                     </div>
                 `;
             }
-        })
-        .finally(() => {
-            const modal = new bootstrap.Modal(document.getElementById('createFromTemplateModal'));
-            modal.show();
         });
 }
 
@@ -4099,12 +4374,6 @@ if (isset($_GET['show_barcode_modal']) && isset($_SESSION['created_batch_numbers
     min-height: 180px;
 }
 
-.template-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
-    border-left-width: 5px !important;
-}
-
 @media (max-width: 768px) {
     .template-card {
         margin-bottom: 0.75rem;
@@ -4117,6 +4386,7 @@ if (isset($_GET['show_barcode_modal']) && isset($_SESSION['created_batch_numbers
         min-height: 200px;
     }
 }
+ 
 </style>
 
 <?php

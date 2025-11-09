@@ -465,11 +465,13 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                     header('Content-Type: application/json; charset=utf-8');
                     $templateId = intval($_GET['template_id']);
                     $templateType = $_GET['template_type'] ?? '';
+                    $templateTypeKey = 'legacy';
                     $response = [
                         'success' => false,
                         'mode' => 'advanced',
                         'components' => [],
-                        'hint' => 'يرجى اختيار المورد لكل مادة مستخدمة في التشغيلة.'
+                        'hint' => 'يرجى اختيار المورد لكل مادة مستخدمة في التشغيلة.',
+                        'cache_key' => null
                     ];
 
                     try {
@@ -681,6 +683,7 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
 
                         $response['components'] = $components;
                         $response['success'] = true;
+                        $response['cache_key'] = $templateId . '::' . $templateTypeKey;
                     } catch (Exception $e) {
                         $response['success'] = false;
                         $response['message'] = $e->getMessage();
