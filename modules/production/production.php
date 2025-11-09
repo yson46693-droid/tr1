@@ -1955,75 +1955,105 @@ $lang = isset($translations) ? $translations : [];
         </a>
     </div>
     <?php if (!empty($templates)): ?>
-    <div class="card-body">
-        <div class="row g-3">
-            <?php foreach ($templates as $template): ?>
-                <div class="col-lg-3 col-md-4 col-sm-6">
-                    <div class="card shadow-sm h-100 template-card" style="border-left: 4px solid #0dcaf0; transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;"
-                         data-template-id="<?php echo $template['id']; ?>"
-                         data-template-name="<?php echo htmlspecialchars($template['product_name']); ?>"
-                         data-template-type="<?php echo htmlspecialchars($template['template_type'] ?? 'legacy'); ?>"
-                         onclick="openCreateFromTemplateModal(this)">
-                        <div class="card-body p-3">
-                            <?php 
-                            $templateTypeLabels = [
-                                'unified' => 'متعدد المواد',
-                                'honey' => 'عسل',
-                                'olive_oil' => 'زيت زيتون',
-                                'beeswax' => 'شمع عسل',
-                                'derivatives' => 'مشتقات'
-                            ];
-                            $typeLabel = $templateTypeLabels[$template['template_type']] ?? 'غير محدد';
-                            $typeColors = [
-                                'unified' => 'dark',
-                                'honey' => 'warning',
-                                'olive_oil' => 'success',
-                                'beeswax' => 'primary',
-                                'derivatives' => 'secondary'
-                            ];
-                            $typeColor = $typeColors[$template['template_type']] ?? 'secondary';
-                            ?>
-                            
-                            <!-- Header مدمج -->
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h6 class="mb-0 text-info fw-bold" style="font-size: 0.95rem;">
-                                    <i class="bi bi-box-seam me-2"></i>
-                                    <?php echo htmlspecialchars($template['product_name']); ?>
-                                </h6>
-                            </div>
-                            
-                            <!-- Badge نوع المادة -->
-                            <div class="mb-3">
-                                <span class="badge bg-<?php echo $typeColor; ?> text-white" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
-                                    <?php echo $typeLabel; ?>
-                                </span>
-                            </div>
-                            
-                            <!-- المكونات -->
-                            <?php if (!empty($template['material_details'])): ?>
-                                <?php foreach ($template['material_details'] as $material): ?>
-                                    <div class="d-flex align-items-center mb-2 p-2 bg-light rounded">
-                                        <i class="bi bi-droplet-fill text-<?php echo $typeColor; ?> me-2" style="font-size: 0.9rem;"></i>
-                                        <small class="text-muted me-2" style="font-size: 0.8rem;"><?php echo htmlspecialchars($material['type']); ?>:</small>
-                                        <small class="fw-bold text-<?php echo $typeColor; ?>" style="font-size: 0.85rem;">
-                                            <?php echo number_format($material['quantity'], 2); ?> <?php echo htmlspecialchars($material['unit']); ?>
-                                        </small>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                            
-                            <!-- Footer -->
-                            <div class="text-center mt-3 pt-3 border-top">
-                                <span class="badge bg-success" style="font-size: 0.8rem; padding: 0.5rem 1rem;">
-                                    <i class="bi bi-arrow-right-circle me-2"></i>
-                                    اضغط للإنتاج
-                                </span>
-                            </div>
-                        </div>
+    <div class="card-body template-grid">
+        <?php foreach ($templates as $template): ?>
+            <?php 
+            $templateTypeLabels = [
+                'unified' => 'متعدد المواد',
+                'honey' => 'عسل',
+                'olive_oil' => 'زيت زيتون',
+                'beeswax' => 'شمع عسل',
+                'derivatives' => 'مشتقات'
+            ];
+            $typeLabel = $templateTypeLabels[$template['template_type']] ?? 'غير محدد';
+            $typeAccents = [
+                'unified' => ['#0f172a', '#0f172a22'],
+                'honey' => ['#f59e0b', '#f59e0b22'],
+                'olive_oil' => ['#16a34a', '#16a34a22'],
+                'beeswax' => ['#2563eb', '#2563eb22'],
+                'derivatives' => ['#7c3aed', '#7c3aed22']
+            ];
+            $accentPair = $typeAccents[$template['template_type']] ?? ['#334155', '#33415522'];
+            $materialDetails = $template['material_details'] ?? [];
+            $materialsPreview = array_slice($materialDetails, 0, 3);
+            $hasMoreMaterials = count($materialDetails) > 3;
+            $packagingCount = (int)($template['packaging_count'] ?? 0);
+            $rawCount = count($materialDetails);
+            $productsCount = (int)($template['products_count'] ?? 1);
+            ?>
+            <div class="template-card-modern"
+                 style="--template-accent: <?php echo $accentPair[0]; ?>; --template-accent-light: <?php echo $accentPair[1]; ?>;"
+                 data-template-id="<?php echo $template['id']; ?>"
+                 data-template-name="<?php echo htmlspecialchars($template['product_name']); ?>"
+                 data-template-type="<?php echo htmlspecialchars($template['template_type'] ?? 'legacy'); ?>"
+                 onclick="openCreateFromTemplateModal(this)">
+
+                <div class="template-card-header">
+                    <div>
+                        <span class="template-type-pill">
+                            <i class="bi bi-droplet-half me-1"></i><?php echo $typeLabel; ?>
+                        </span>
+                        <h6 class="template-title mt-2"><?php echo htmlspecialchars($template['product_name']); ?></h6>
+                    </div>
+                    <div class="template-products-count">
+                        <i class="bi bi-box me-1"></i>
+                        <?php echo $productsCount; ?>
+                        <span>منتج</span>
                     </div>
                 </div>
-            <?php endforeach; ?>
-        </div>
+
+                <div class="template-metrics">
+                    <div class="metric-item">
+                        <span class="metric-label">أدوات التعبئة</span>
+                        <span class="metric-value"><?php echo $packagingCount; ?></span>
+                    </div>
+                    <div class="metric-separator"></div>
+                    <div class="metric-item">
+                        <span class="metric-label">مواد خام</span>
+                        <span class="metric-value"><?php echo $rawCount; ?></span>
+                    </div>
+                    <div class="metric-separator"></div>
+                    <div class="metric-item">
+                        <span class="metric-label">آخر تعديل</span>
+                        <span class="metric-value">
+                            <?php echo htmlspecialchars(date('Y/m/d', strtotime($template['updated_at'] ?? $template['created_at'] ?? 'now'))); ?>
+                        </span>
+                    </div>
+                </div>
+
+                <?php if (!empty($materialsPreview)): ?>
+                <div class="template-materials">
+                    <?php foreach ($materialsPreview as $material): ?>
+                        <div class="material-row">
+                            <div class="material-icon">
+                                <i class="bi bi-drop"></i>
+                            </div>
+                            <div class="material-info">
+                                <div class="material-name"><?php echo htmlspecialchars($material['type']); ?></div>
+                                <div class="material-quantity">
+                                    <?php echo number_format($material['quantity'], 2); ?>
+                                    <span><?php echo htmlspecialchars($material['unit']); ?></span>
+                                </div>
+                            </div>
+                            <?php if (!empty($material['honey_variety'])): ?>
+                                <span class="material-tag"><?php echo htmlspecialchars($material['honey_variety']); ?></span>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                    <?php if ($hasMoreMaterials): ?>
+                        <div class="materials-more">+ <?php echo $rawCount - count($materialsPreview); ?> مواد إضافية</div>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
+
+                <div class="template-actions">
+                    <span class="template-action-badge">
+                        <i class="bi bi-lightning-charge me-2"></i>ابدأ الإنتاج الآن
+                    </span>
+                </div>
+            </div>
+        <?php endforeach; ?>
+    </div>
     <?php else: ?>
         <div class="card-body text-center py-5">
             <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
@@ -2630,6 +2660,27 @@ $lang = isset($translations) ? $translations : [];
 .production-template-dialog .modal-footer {
     padding: 0.75rem 1.25rem;
     flex-shrink: 0;
+}
+
+.production-template-dialog .modal-header {
+    background: linear-gradient(135deg, #1f4db8, #4a7dfb);
+    color: #fff;
+    border-bottom: 0;
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.production-template-dialog .modal-header .modal-title,
+.production-template-dialog .modal-header .btn-close {
+    color: #fff;
+}
+
+.production-template-dialog .modal-header .btn-close {
+    opacity: 0.85;
+    filter: invert(1) grayscale(100%) brightness(120%);
+}
+
+.production-template-dialog .modal-header .btn-close:hover {
+    opacity: 1;
 }
 
 .production-template-body {
