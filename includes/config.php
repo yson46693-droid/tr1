@@ -407,20 +407,37 @@ function getSuccessMessage() {
 // ملاحظة: تم نقل كود الإصلاح التلقائي إلى نهاية ملف db.php
 // Note: Auto-fix code moved to end of db.php file
 
-// تشغيل فحص الكميات المنخفضة اليومي عند أول استخدام في اليوم
-require_once __DIR__ . '/daily_low_stock_report.php';
-triggerDailyLowStockReport();
+if (!defined('ENABLE_DAILY_LOW_STOCK_REPORT')) {
+    define('ENABLE_DAILY_LOW_STOCK_REPORT', true);
+}
+if (!defined('ENABLE_DAILY_PACKAGING_ALERT')) {
+    define('ENABLE_DAILY_PACKAGING_ALERT', true);
+}
+if (!defined('ENABLE_DAILY_CONSUMPTION_REPORT')) {
+    define('ENABLE_DAILY_CONSUMPTION_REPORT', true);
+}
+if (!defined('ENABLE_DAILY_BACKUP_DELIVERY')) {
+    define('ENABLE_DAILY_BACKUP_DELIVERY', true);
+}
 
-// تشغيل تقرير أدوات التعبئة منخفضة الكمية يوميًا
-require_once __DIR__ . '/packaging_alerts.php';
-processDailyPackagingAlert();
+if (ENABLE_DAILY_LOW_STOCK_REPORT) {
+    require_once __DIR__ . '/daily_low_stock_report.php';
+    triggerDailyLowStockReport();
+}
 
-// تشغيل تقرير الاستهلاك اليومي وإرساله إلى Telegram عند أول استخدام في اليوم
-require_once __DIR__ . '/daily_consumption_sender.php';
-triggerDailyConsumptionReport();
+if (ENABLE_DAILY_PACKAGING_ALERT) {
+    require_once __DIR__ . '/packaging_alerts.php';
+    processDailyPackagingAlert();
+}
 
-// تشغيل النسخة الاحتياطية اليومية وإرسالها إلى Telegram عند أول استخدام في اليوم
-require_once __DIR__ . '/daily_backup_sender.php';
-triggerDailyBackupDelivery();
+if (ENABLE_DAILY_CONSUMPTION_REPORT) {
+    require_once __DIR__ . '/daily_consumption_sender.php';
+    triggerDailyConsumptionReport();
+}
+
+if (ENABLE_DAILY_BACKUP_DELIVERY) {
+    require_once __DIR__ . '/daily_backup_sender.php';
+    triggerDailyBackupDelivery();
+}
 
 
