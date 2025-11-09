@@ -45,7 +45,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
         $requiredQuantity = floatval($packaging['quantity_per_unit']) * $productionQuantity;
         
         if ($packagingId) {
-            // البحث في جدول المنتجات أولاً
+            // البحث في جدول products أولاً
             $product = $db->queryOne(
                 "SELECT id, name, quantity FROM products WHERE id = ? AND status = 'active'",
                 [$packagingId]
@@ -62,7 +62,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
                     ];
                 }
             } else {
-                // البحث في جدول مواد التعبئة إذا كان موجوداً
+                // البحث في جدول packaging_materials إذا كان موجوداً
                 $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
                 if ($packagingTableCheck) {
                     $packagingMaterial = $db->queryOne(
@@ -107,7 +107,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
         $materialName = $raw['material_name'];
         $requiredQuantity = floatval($raw['quantity_per_unit']) * $productionQuantity;
         
-        // البحث عن المادة في جدول المنتجات
+        // البحث عن المادة في جدول products
         $product = $db->queryOne(
             "SELECT id, name, quantity FROM products WHERE name = ? AND status = 'active' LIMIT 1",
             [$materialName]
@@ -139,7 +139,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
     if ($honeyQuantity > 0) {
         $requiredHoney = $honeyQuantity * $productionQuantity;
         
-        // البحث عن العسل في جدول honey_stock (العسل المصفى فقط)
+        // البحث عن العسل في جدول honey_stock (المصفى فقط)
         $honeyStockTableCheck = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
         if ($honeyStockTableCheck) {
             $honeyStock = $db->query(
@@ -171,7 +171,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
                 ];
             }
         } else {
-            // البحث في جدول المنتجات كبديل
+            // البحث في جدول products كبديل
             $honeyProducts = $db->query(
                 "SELECT id, name, quantity FROM products 
                  WHERE (name LIKE '%عسل%' OR category = 'honey' OR category = 'raw_material') 
@@ -238,8 +238,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
     ];
 }
 
-// إنشاء جدول batch_numbers إذا لم يكن موجودًا مسبقًا
-$hasBatchNumbersTable = false;
+// إنشاء جدول batch_numbers إذا لم يكن موجوداً
 try {
     $batchTableCheck = $db->queryOne("SHOW TABLES LIKE 'batch_numbers'");
     if (empty($batchTableCheck)) {
@@ -272,7 +271,7 @@ try {
         ");
     }
     
-    // إضافة العمود all_suppliers إذا لم يكن موجودًا مسبقًا
+    // إضافة حقل all_suppliers إذا لم يكن موجوداً
     $allSuppliersColumnCheck = $db->queryOne("SHOW COLUMNS FROM batch_numbers LIKE 'all_suppliers'");
     if (empty($allSuppliersColumnCheck)) {
         try {
@@ -286,26 +285,24 @@ try {
         }
     }
     
-    // إضافة العمود honey_variety إذا لم يكن موجودًا مسبقًا
+    // إضافة حقل honey_variety إذا لم يكن موجوداً
     $honeyVarietyColumnCheck = $db->queryOne("SHOW COLUMNS FROM batch_numbers LIKE 'honey_variety'");
     if (empty($honeyVarietyColumnCheck)) {
         try {
             $db->execute("
                 ALTER TABLE `batch_numbers` 
-                ADD COLUMN `honey_variety` VARCHAR(50) DEFAULT NULL COMMENT 'Honey variety used' 
+                ADD COLUMN `honey_variety` VARCHAR(50) DEFAULT NULL COMMENT 'نوع العسل المستخدم' 
                 AFTER `honey_supplier_id`
             ");
         } catch (Exception $e) {
             error_log("Error adding honey_variety column: " . $e->getMessage());
         }
     }
-    $hasBatchNumbersTable = true;
 } catch (Exception $e) {
     error_log("Batch numbers table creation error: " . $e->getMessage());
-    $hasBatchNumbersTable = false;
 }
 
-// استرجاع رسالة النجاح من الجلسة (بعد إعادة التوجيه)
+// الحصول على رسالة النجاح من session (بعد redirect)
 $sessionSuccess = getSuccessMessage();
 if ($sessionSuccess) {
     $success = $sessionSuccess;
@@ -325,34 +322,34 @@ $hasUserIdColumn = !empty($userIdColumnCheck);
 $hasWorkerIdColumn = !empty($workerIdColumnCheck);
 $userIdColumn = $hasUserIdColumn ? 'user_id' : ($hasWorkerIdColumn ? 'worker_id' : null);
 
-// معالجة الطلبات
+// معالجة العمليات
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     
-    // منع تكرار الإرسال باستخدام رمز CSRF
+    // منع تكرار الإرسال باستخدام CSRF Token
     $submitToken = $_POST['submit_token'] ?? '';
     $sessionToken = $_SESSION['last_submit_token'] ?? '';
     
     if ($submitToken && $submitToken === $sessionToken) {
-        // تم إرسال هذا النموذج بالفعل - تجاهل التكرار
+        // تم إرسال هذا النموذج من قبل - تجاهله
         $error = 'تم معالجة هذا الطلب من قبل. يرجى عدم إعادة تحميل الصفحة بعد الإرسال.';
         error_log("Duplicate form submission detected: token={$submitToken}, action={$action}");
     } elseif ($action === 'add_production') {
-        // حفظ الرمز لمنع الإرسال المتكرر
+        // حفظ التوكن لمنع التكرار
         $_SESSION['last_submit_token'] = $submitToken;
         $productId = intval($_POST['product_id'] ?? 0);
         $quantity = floatval($_POST['quantity'] ?? 0);
-        $unit = $_POST['unit'] ?? 'kg'; // كيلوغرام أو غرام
+        $unit = $_POST['unit'] ?? 'kg'; // كجم أو جرام
         $productionDate = $_POST['production_date'] ?? date('Y-m-d');
         $notes = trim($_POST['notes'] ?? '');
         $materialsUsed = trim($_POST['materials_used'] ?? '');
         
-        // تحويل الجرام إلى كيلوغرام إذا لزم الأمر
+        // تحويل الجرام إلى كيلوجرام إذا لزم الأمر
         if ($unit === 'g' || $unit === 'gram') {
-            $quantity = $quantity / 1000; // تحويل من جرام إلى كيلوجرام
+            $quantity = $quantity / 1000; // تحويل من جرام إلى كجم
         }
         
-        // تحديد معرف المستخدم المسؤول عن الإنتاج وفقًا للدور
+        // تحديد user_id - إذا كان المستخدم عامل إنتاج، استخدم id الخاص به، وإلا استخدم المحدد
         $selectedUserId = intval($_POST['user_id'] ?? 0);
         if ($currentUser['role'] === 'production' && $selectedUserId <= 0) {
             $selectedUserId = $currentUser['id'];
@@ -367,7 +364,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($selectedUserId <= 0) {
             $error = 'يجب اختيار العامل';
         } else {
-            // بناء الاستعلام ديناميكيًا بحسب الأعمدة المتاحة
+            // بناء الاستعلام بشكل ديناميكي
             $columns = ['product_id', 'quantity'];
             $values = [$productId, $quantity];
             $placeholders = ['?', '?'];
@@ -377,14 +374,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $values[] = $productionDate;
             $placeholders[] = '?';
             
-            // إضافة عمود المستخدم أو العامل إن وجد
+            // إضافة عمود user_id/worker_id
             if ($userIdColumn) {
                 $columns[] = $userIdColumn;
                 $values[] = $selectedUserId;
                 $placeholders[] = '?';
             }
             
-            // إضافة بيانات المواد المستخدمة إن وُجدت
+            // إضافة مواد الإنتاج إن وجدت
             if ($materialsUsed) {
                 $columns[] = 'materials_used';
                 $values[] = $materialsUsed;
@@ -398,7 +395,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $placeholders[] = '?';
             }
             
-            // إضافة الحالة (افتراضيًا pending)
+            // إضافة الحالة (افتراضياً pending)
             $columns[] = 'status';
             $values[] = 'pending';
             $placeholders[] = '?';
@@ -413,7 +410,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'quantity' => $quantity
                 ]);
                 
-                // منع التكرار باستخدام إعادة التوجيه
+                // منع التكرار باستخدام redirect
                 $successMessage = 'تم إضافة سجل الإنتاج بنجاح';
                 $redirectParams = ['page' => 'production'];
                 preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
@@ -426,15 +423,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $productionId = intval($_POST['production_id'] ?? 0);
         $productId = intval($_POST['product_id'] ?? 0);
         $quantity = floatval($_POST['quantity'] ?? 0);
-        $unit = $_POST['unit'] ?? 'kg'; // كيلوغرام أو غرام
+        $unit = $_POST['unit'] ?? 'kg'; // كجم أو جرام
         $productionDate = $_POST['production_date'] ?? date('Y-m-d');
         $notes = trim($_POST['notes'] ?? '');
         $materialsUsed = trim($_POST['materials_used'] ?? '');
         $status = $_POST['status'] ?? 'pending';
         
-        // تحويل الجرام إلى كيلوغرام إذا لزم الأمر
+        // تحويل الجرام إلى كيلوجرام إذا لزم الأمر
         if ($unit === 'g' || $unit === 'gram') {
-            $quantity = $quantity / 1000; // تحويل الجرام إلى كيلوغرام
+            $quantity = $quantity / 1000; // تحويل من جرام إلى كجم
         }
         
         if ($productionId <= 0) {
@@ -444,7 +441,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($quantity <= 0) {
             $error = 'يجب إدخال كمية صحيحة';
         } else {
-            // بناء الاستعلام ديناميكيًا بحسب الأعمدة المتاحة
+            // بناء الاستعلام بشكل ديناميكي
             $setParts = ['product_id = ?', 'quantity = ?'];
             $values = [$productId, $quantity];
             
@@ -452,7 +449,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $setParts[] = "$dateColumn = ?";
             $values[] = $productionDate;
             
-            // تحديث بيانات المواد المستخدمة إذا توفرت
+            // تحديث مواد الإنتاج
             if ($materialsUsed !== '') {
                 $setParts[] = 'materials_used = ?';
                 $values[] = $materialsUsed;
@@ -481,7 +478,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'status' => $status
                 ]);
                 
-                // منع التكرار باستخدام إعادة التوجيه
+                // منع التكرار باستخدام redirect
                 $successMessage = 'تم تحديث سجل الإنتاج بنجاح';
                 $redirectParams = ['page' => 'production'];
                 preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
@@ -497,7 +494,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'معرف الإنتاج غير صحيح';
         } else {
             try {
-                // حذف بيانات الإنتاج المرتبطة أولًا
+                // حذف مواد الإنتاج المرتبطة أولاً
                 $db->execute("DELETE FROM production_materials WHERE production_id = ?", [$productionId]);
                 
                 // حذف سجل الإنتاج
@@ -505,7 +502,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 logAudit($currentUser['id'], 'delete_production', 'production', $productionId, null, null);
                 
-                // منع التكرار عن طريق إعادة التوجيه
+                // منع التكرار باستخدام redirect
                 $successMessage = 'تم حذف سجل الإنتاج بنجاح';
                 $redirectParams = ['page' => 'production'];
                 preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
@@ -548,7 +545,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if (empty($materialSuppliers)) {
-                    throw new Exception('يرجى اختيار المورد المحاسب لهذه المادة قبل إنشاء التشغيلة.');
+                    throw new Exception('يرجى اختيار المورد المناسب لكل مادة قبل إنشاء التشغيلة.');
                 }
 
                 $templateMode = $_POST['template_mode'] ?? 'advanced';
@@ -557,7 +554,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $templateType = trim($_POST['template_type'] ?? 'legacy');
 
-                // محاولة استرجاع القالب الموحد إن وُجد
+                // محاولة الحصول على القالب الموحد أولاً
                 $unifiedTemplate = $db->queryOne(
                     "SELECT * FROM unified_product_templates WHERE id = ? AND status = 'active'",
                     [$templateId]
@@ -566,17 +563,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $isUnifiedTemplate = !empty($unifiedTemplate);
                 
                 if ($isUnifiedTemplate) {
-                    // القالب الموحد
+                    // قالب موحد جديد
                     $template = $unifiedTemplate;
                     
-                    // التحقق من توافر المواد الخام
+                    // التحقق من توفر المواد الخام
                     $rawMaterials = $db->query(
                         "SELECT * FROM template_raw_materials WHERE template_id = ?",
                         [$templateId]
                     );
                     
                     if (empty($rawMaterials)) {
-                        throw new Exception('القالب لا يحتوي على مواد خام.');
+                        throw new Exception('القالب لا يحتوي على مواد خام');
                     }
                     
                     $insufficientMaterials = [];
@@ -585,7 +582,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $requiredQty = floatval($quantityColumnValue) * $quantity;
                         $supplierIdForCheck = $material['supplier_id'] ?? null;
                         
-                        // التحقق من توافر المادة حسب نوعها
+                        // التحقق من توفر المادة حسب نوعها
                         switch ($material['material_type']) {
                             case 'honey_raw':
                             case 'honey_filtered':
@@ -638,7 +635,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 }
                                 break;
                             default:
-                                $available = ['total' => PHP_FLOAT_MAX]; // مواد أخرى نعتبرها متاحة
+                                $available = ['total' => PHP_FLOAT_MAX]; // للمواد الأخرى لا نتحقق
                         }
                         
                         $availableQty = floatval($available['total'] ?? 0);
@@ -661,7 +658,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception($errorMsg . implode(', ', $errors));
                     }
                     
-                    // التحقق من توافر أدوات التعبئة
+                    // التحقق من أدوات التعبئة
                     $packagingItems = $db->query(
                         "SELECT * FROM template_packaging WHERE template_id = ?",
                         [$templateId]
@@ -682,7 +679,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     
                 } else {
-                    // القالب التقليدي
+                    // قالب قديم
                     $template = $db->queryOne(
                         "SELECT pt.*, pr.id as product_id, pr.name as product_name
                          FROM product_templates pt
@@ -695,14 +692,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception('القالب غير موجود');
                     }
                     
-                    // التحقق من توافر المكونات اللازمة للإنتاج
+                    // التحقق من توفر المكونات قبل الإنتاج
                     $materialsCheck = checkMaterialsAvailability($db, $templateId, $quantity);
                     if (!$materialsCheck['available']) {
                         throw new Exception('المكونات غير متوفرة: ' . $materialsCheck['message']);
                     }
                 }
                 
-                // إنشاء المنتج إذا لم يكن موجودًا
+                // إنشاء المنتج إذا لم يكن موجوداً
                 $productId = $template['product_id'] ?? 0;
                 if ($productId <= 0) {
                     // البحث عن منتج بنفس الاسم
@@ -719,16 +716,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-                // تجميع أدوات التعبئة والموردين المرتبطين بالقالب
+                // الحصول على أدوات التعبئة والموردين من القالب
                 $packagingIds = [];
-                $allSuppliers = []; // جميع الموردين المستخدمين في هذه التشغيلة
+                $allSuppliers = []; // جميع الموردين المستخدمين في المنتج
                 $materialsConsumption = [
                     'raw' => [],
                     'packaging' => []
                 ];
                 
                 if ($isUnifiedTemplate) {
-                    // القالب الموحد - استرجاع أدوات التعبئة
+                    // قالب موحد - الحصول على أدوات التعبئة
                     $packagingNameExpression = getColumnSelectExpression('template_packaging', 'packaging_name', 'packaging_name', 'tp');
                     $packagingItems = $db->query(
                         "SELECT tp.id, tp.packaging_material_id, {$packagingNameExpression}, tp.quantity_per_unit,
@@ -746,12 +743,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $usingSubmittedSuppliers = !empty($materialSuppliers);
                     
                     if ($usingSubmittedSuppliers) {
-                        // الموردون المحددون داخل القالب المتقدم
+                        // الموردون المحددون من النموذج المتقدم
                         foreach ($packagingItems as $pkg) {
                             $pkgKey = 'pack_' . ($pkg['packaging_material_id'] ?? $pkg['id']);
                             $selectedSupplierId = $materialSuppliers[$pkgKey] ?? 0;
                             if (empty($selectedSupplierId)) {
-                                throw new Exception('يرجى اختيار المورد المناسب لأداة التعبئة قبل إنشاء التشغيلة.');
+                                throw new Exception('يرجى اختيار مورد لكل أداة تعبئة قبل إنشاء التشغيلة.');
                             }
                             
                             $supplierInfo = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$selectedSupplierId]);
@@ -780,8 +777,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     'quantity' => $packagingQuantityPerUnit * $quantity,
                                     'name' => $packagingName,
                                     'unit' => $packagingUnit,
-                                    'product_id' => $packagingProductId,
-                                    'supplier_id' => $selectedSupplierId
+                                    'product_id' => $packagingProductId
                                 ];
                             }
                         }
@@ -795,18 +791,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $rawKey = 'raw_' . $materialRow['id'];
                             $selectedSupplierId = $materialSuppliers[$rawKey] ?? 0;
                             if (empty($selectedSupplierId)) {
-                                throw new Exception('يرجى اختيار المورد المناسب لهذه المادة الخام قبل إنشاء التشغيلة.');
+                                throw new Exception('يرجى اختيار مورد لكل مادة خام قبل إنشاء التشغيلة.');
                             }
                             
                             $supplierInfo = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$selectedSupplierId]);
                             if (!$supplierInfo) {
-                                throw new Exception('مورد غير صالح لهذه المادة الخام: ' . ($materialRow['material_name'] ?? 'غير معروف'));
+                                throw new Exception('مورد غير صالح للمادة الخام: ' . ($materialRow['material_name'] ?? 'غير معروف'));
                             }
                             
                             $materialType = $materialRow['material_type'] ?? '';
                             $selectedHoneyVariety = $materialHoneyVarieties[$rawKey] ?? '';
                             if (in_array($materialType, ['honey_raw', 'honey_filtered'], true) && $selectedHoneyVariety === '') {
-                                throw new Exception('يرجى تحديد نوع العسل لهذه المادة الخام: ' . ($materialRow['material_name'] ?? 'عسل'));
+                                throw new Exception('يرجى تحديد نوع العسل للمادة الخام: ' . ($materialRow['material_name'] ?? 'عسل'));
                             }
 
                             $detectedHoneyVariety = $selectedHoneyVariety !== '' ? $selectedHoneyVariety : ($materialRow['honey_variety'] ?? null);
@@ -854,7 +850,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                     } else {
-                        // وضعFallback للقوالب القديمة حيث تُخزن بيانات الموردين داخل القالب
+                        // fallback إلى النظام القديم (معلومات الموردين من القالب نفسه)
                         $hasHoneyVarietyColumn = false;
                         $templateRawMaterialsTableCheck = $db->queryOne("SHOW TABLES LIKE 'template_raw_materials'");
                         if (!empty($templateRawMaterialsTableCheck)) {
@@ -937,7 +933,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 } else {
-                    // القالب القديم لأصناف المنتجات البسيطة (عسل، زيت، شمع، مشتقات)
+                    // قالب قديم وأنواع القوالب المبسطة (عسل، زيت، شمع، مشتقات)
                     $packagingMaterials = $db->query(
                         "SELECT ptp.id, ptp.packaging_material_id, ptp.packaging_name, ptp.quantity_per_unit,
                                 pm.name as packaging_db_name, pm.unit as packaging_unit, pm.product_id as packaging_product_id
@@ -954,7 +950,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $pkgKey = 'pack_' . ($legacyPkg['packaging_material_id'] ?? $legacyPkg['id']);
                         $selectedSupplierId = $materialSuppliers[$pkgKey] ?? 0;
                         if (empty($selectedSupplierId)) {
-                        throw new Exception('يرجى اختيار المورد المناسب لأداة التعبئة المستخدمة في القالب.');
+                            throw new Exception('يرجى اختيار مورد لكل أداة تعبئة مستخدمة في القالب.');
                         }
 
                         $supplierInfo = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$selectedSupplierId]);
@@ -983,8 +979,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'quantity' => (float)($legacyPkg['quantity_per_unit'] ?? 1.0) * $quantity,
                                 'name' => $legacyPackagingName,
                                 'unit' => $legacyPackagingUnit,
-                                'product_id' => $legacyPackagingProductId,
-                                'supplier_id' => $selectedSupplierId
+                                'product_id' => $legacyPackagingProductId
                             ];
                         }
                     }
@@ -1028,11 +1023,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         case 'derivatives':
                             $derivativeSupplierId = $materialSuppliers['derivative_main'] ?? 0;
                             if (empty($derivativeSupplierId)) {
-                                throw new Exception('يرجى اختيار مورد المشتقات.');
+                                throw new Exception('يرجى اختيار مورد المشتق.');
                             }
                             $derivativeSupplier = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$derivativeSupplierId]);
                             if (!$derivativeSupplier) {
-                                throw new Exception('مورد المشتقات غير صالح.');
+                                throw new Exception('مورد المشتق غير صالح.');
                             }
                             $allSuppliers[] = [
                                 'id' => $derivativeSupplier['id'],
@@ -1094,12 +1089,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $rawKey = 'raw_' . $legacyRaw['id'];
                         $selectedSupplierId = $materialSuppliers[$rawKey] ?? 0;
                         if (empty($selectedSupplierId)) {
-                            throw new Exception('يرجى اختيار المورد لهذه المادة الخام: ' . ($legacyRaw['material_name'] ?? 'مادة خام'));
+                            throw new Exception('يرجى اختيار مورد للمادة الخام: ' . ($legacyRaw['material_name'] ?? 'مادة خام'));
                         }
 
                         $supplierInfo = $db->queryOne("SELECT id, name, type FROM suppliers WHERE id = ?", [$selectedSupplierId]);
                         if (!$supplierInfo) {
-                            throw new Exception('مورد غير صالح لهذه المادة الخام: ' . ($legacyRaw['material_name'] ?? 'غير معروف'));
+                            throw new Exception('مورد غير صالح للمادة الخام: ' . ($legacyRaw['material_name'] ?? 'غير معروف'));
                         }
 
                         $allSuppliers[] = [
@@ -1111,7 +1106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-                // التحقق من توافر نوع العسل لدى المورد المحدد
+                // التحقق من توفر نوع العسل لدى المورد المحدد
                 $honeyStockTableCheck = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
                 foreach ($materialsConsumption['raw'] as $rawItem) {
                     $materialType = $rawItem['material_type'] ?? '';
@@ -1142,14 +1137,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         
                         if (!$supplierHoney) {
                             $varietyLabel = $rawItem['honey_variety'] ?: ($rawItem['material_name'] ?: 'العسل المطلوب');
-                            throw new Exception('المورد المحدد لا تتوفر لديه كمية كافية من نوع العسل: ' . $varietyLabel);
+                            throw new Exception('المورد المحدد لا يمتلك مخزوناً من نوع العسل: ' . $varietyLabel);
                         }
                         
                         $availableHoney = (float)($supplierHoney['available_quantity'] ?? 0);
                         if ($availableHoney < $requiredHoneyQuantity) {
                             $varietyLabel = $supplierHoney['honey_variety'] ?? $rawItem['honey_variety'] ?? ($rawItem['material_name'] ?: 'العسل المطلوب');
                             throw new Exception(sprintf(
-                                'الكمية المتاحة لدى المورد %s غير كافية. مطلوب %.2f كجم، متوفر %.2f كجم.',
+                                'الكمية المتاحة من %s لدى المورد المختار غير كافية. مطلوب %.2f كجم، متوفر %.2f كجم.',
                                 $varietyLabel,
                                 $requiredHoneyQuantity,
                                 $availableHoney
@@ -1158,14 +1153,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-                // تحديد معرف المستخدم
+                // تحديد user_id
                 $selectedUserId = $currentUser['role'] === 'production' ? $currentUser['id'] : intval($_POST['user_id'] ?? $currentUser['id']);
                 
-                // 3. جمع عمال الإنتاج الحاضرين داخل الموقع
+                // 3. الحصول على عمال الإنتاج الحاضرين خلال اليوم
                 $workersList = [];
                 $attendanceTableCheck = $db->queryOne("SHOW TABLES LIKE 'attendance_records'");
                 if (!empty($attendanceTableCheck)) {
-                    // استرجاع عمال الإنتاج الذين سجلوا الحضور اليوم
+                    // الحصول على عمال الإنتاج الذين سجلوا حضور اليوم
                     $presentWorkers = $db->query(
                         "SELECT DISTINCT user_id 
                          FROM attendance_records 
@@ -1181,15 +1176,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-                // إذا لم يوجد عمال حاضرين، استخدم المستخدم الحالي فقط
+                // إذا لم يوجد عمال حاضرين، إضافة المستخدم الحالي فقط
                 if (empty($workersList)) {
                     $workersList = [$selectedUserId];
                 }
                 
-                // 4. الملاحظات: توليد ملاحظات تلقائية تذكر الموردين
+                // 4. الملاحظات: إنشاء ملاحظات تلقائية تشمل جميع الموردين
                 $batchNotes = trim($_POST['batch_notes'] ?? '');
                 if (empty($batchNotes)) {
-                    $notesParts = ['تم إنشاؤه من قالب: ' . $template['product_name']];
+                    $notesParts = ['تم إنشاءه من قالب: ' . $template['product_name']];
                     
                     // إضافة جميع الموردين إلى الملاحظات
                     if (!empty($allSuppliers)) {
@@ -1197,7 +1192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         foreach ($allSuppliers as $supplier) {
                             $supplierNames[] = $supplier['name'] . ' (' . $supplier['material'] . ')';
                         }
-                        $notesParts[] = 'الموردون: ' . implode(', ', $supplierNames);
+                        $notesParts[] = 'الموردين: ' . implode(', ', $supplierNames);
                     }
                     
                     $batchNotes = implode(' | ', $notesParts);
@@ -1205,7 +1200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // إنشاء سجل إنتاج واحد للتشغيلة
                 $columns = ['product_id', 'quantity'];
-                $values = [$productId, $quantity]; // الكمية النهائية
+                $values = [$productId, $quantity]; // الكمية الكاملة
                 $placeholders = ['?', '?'];
                 
                 $columns[] = $dateColumn;
@@ -1231,15 +1226,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $productId,
                     $productionId,
                     $productionDate,
-                    $honeySupplierId, // مورد العسل (إن توفر)
+                    $honeySupplierId, // مورد العسل (للتوافق)
                     $packagingIds,
-                    $packagingSupplierId,
-                    $workersList, // العمال الحاضرون (قائمة)
-                    $quantity, // الكمية النهائية
+                    $packagingSupplierId, 
+                    $workersList, // العمال الحاضرين (تلقائي)
+                    $quantity, // الكمية الكاملة
                     null, // expiry_date
-                    $batchNotes, // الملاحظات (إن وُجدت)
+                    $batchNotes, // الملاحظات (تلقائية)
                     $currentUser['id'],
-                    $allSuppliers, // جميع الموردين مع المواد
+                    $allSuppliers, // جميع الموردين مع المواد الخام
                     $honeyVariety ?? null // نوع العسل المستخدم
                 );
                 
@@ -1316,7 +1311,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 }
                                 break;
                             case 'legacy':
-                                // لا يوجد تعريف واضح للمورد في القوالب القديمة؛ يتم تجاوز الخصم تلقائيًا
+                                // لا يوجد تعريف واضح للمورد في القوالب القديمة، يتم تجاهل الخصم تلقائياً
                                 break;
                             default:
                                 if ($materialName !== '') {
@@ -1351,7 +1346,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     error_log('Production stock deduction warning: ' . $stockWarning->getMessage());
                 }
                 
-                // إنشاء أرقام باركود بعدد الكمية المنتجة
+                // إنشاء باركودات متعددة حسب الكمية
                 $batchNumbersToPrint = [];
                 for ($i = 0; $i < $quantity; $i++) {
                     $batchNumbersToPrint[] = $batchNumber;
@@ -1367,12 +1362,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'packaging_supplier_id' => $packagingSupplierId
                 ]);
                 
-                // حفظ أرقام التشغيلة في الجلسة لعرضها في نافذة الطباعة
-                $_SESSION['created_batch_numbers'] = $batchNumbersToPrint; // أرقام باركود بعدد الكمية
+                // حفظ أرقام التشغيلة في session لعرضها في modal الطباعة
+                $_SESSION['created_batch_numbers'] = $batchNumbersToPrint; // باركودات متعددة حسب الكمية
                 $_SESSION['created_batch_product_name'] = $template['product_name'];
                 $_SESSION['created_batch_quantity'] = $quantity;
                 
-                // منع التكرار باستخدام إعادة التوجيه
+                // منع التكرار باستخدام redirect
                 $successMessage = 'تم إنشاء تشغيلة إنتاج بنجاح! رقم التشغيلة: ' . $batchNumber . ' (الكمية: ' . $quantity . ' قطعة)';
                 $redirectParams = ['page' => 'production', 'show_barcode_modal' => '1'];
                 preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
@@ -1384,23 +1379,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    // منع إنشاء قوالب المنتجات من خارج صفحة مخزن الخامات
+    // تم نقل إنشاء قوالب المنتجات إلى صفحة مخزن الخامات
 }
 
 // Pagination
 $pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
-// عدد السجلات في كل صفحة
-$perPage = 5; // خمسة عناصر في كل صفحة
+$perPage = 5; // 5 عناصر لكل صفحة
 $offset = ($pageNum - 1) * $perPage;
 
-// معايير البحث والتصفية
+// البحث والفلترة
 $search = $_GET['search'] ?? '';
 $productId = $_GET['product_id'] ?? '';
 $status = $_GET['status'] ?? '';
 $dateFrom = $_GET['date_from'] ?? '';
 $dateTo = $_GET['date_to'] ?? '';
 
-// بناء شروط الاستعلام
+// بناء استعلام البحث
 $whereConditions = ['1=1'];
 $params = [];
 
@@ -1441,7 +1435,7 @@ if ($dateTo) {
 
 $whereClause = implode(' AND ', $whereConditions);
 
-// حساب إجمالي السجلات
+// حساب العدد الإجمالي
 if ($userIdColumn) {
     $countSql = "SELECT COUNT(*) as total 
                  FROM production p
@@ -1464,35 +1458,16 @@ $totalQuantitySql = str_replace('COUNT(*) as total', 'COALESCE(SUM(p.quantity), 
 $totalQuantityResult = $db->queryOne($totalQuantitySql, $params);
 $totalQuantity = floatval($totalQuantityResult['total'] ?? 0);
 
-// جلب بيانات التشغيلات (أرقام الدُفعات)
-$batchJoinSelect = $hasBatchNumbersTable ? ', bn.batch_number as batch_number' : ', NULL as batch_number';
-$batchJoinClause = '';
-
-if ($hasBatchNumbersTable) {
-    $batchJoinClause = "
-            LEFT JOIN (
-                SELECT b1.production_id, b1.batch_number
-                FROM batch_numbers b1
-                WHERE b1.production_id IS NOT NULL
-                  AND b1.id = (
-                      SELECT MAX(b2.id)
-                      FROM batch_numbers b2
-                      WHERE b2.production_id = b1.production_id
-                  )
-            ) bn ON bn.production_id = p.id";
-}
-
+// الحصول على البيانات
 if ($userIdColumn) {
     $sql = "SELECT p.*, 
                    pr.name as product_name, 
                    pr.category as product_category,
                    u.full_name as worker_name,
                    u.username as worker_username
-                   $batchJoinSelect
             FROM production p
             LEFT JOIN products pr ON p.product_id = pr.id
             LEFT JOIN users u ON p.{$userIdColumn} = u.id
-            $batchJoinClause
             WHERE $whereClause
             ORDER BY p.$dateColumn DESC, p.created_at DESC
             LIMIT ? OFFSET ?";
@@ -1502,10 +1477,8 @@ if ($userIdColumn) {
                    pr.category as product_category,
                    'غير محدد' as worker_name,
                    'غير محدد' as worker_username
-                   $batchJoinSelect
             FROM production p
             LEFT JOIN products pr ON p.product_id = pr.id
-            $batchJoinClause
             WHERE $whereClause
             ORDER BY p.$dateColumn DESC, p.created_at DESC
             LIMIT ? OFFSET ?";
@@ -1516,18 +1489,18 @@ $params[] = $offset;
 
 $productions = $db->query($sql, $params);
 
-// جلب المنتجات النشطة لعرضها في القوائم
+// الحصول على المنتجات والعمال
 $products = $db->query("SELECT id, name, category FROM products WHERE status = 'active' ORDER BY name");
 $workers = $db->query("SELECT id, username, full_name FROM users WHERE role = 'production' AND status = 'active' ORDER BY username");
 
-// جلب قائمة الموردين
+// الحصول على الموردين
 $suppliers = [];
 $suppliersTableCheck = $db->queryOne("SHOW TABLES LIKE 'suppliers'");
 if (!empty($suppliersTableCheck)) {
     $suppliers = $db->query("SELECT id, name, type FROM suppliers WHERE status = 'active' ORDER BY name");
 }
 
-// إنشاء جداول القوالب إذا لم تكن موجودة
+// إنشاء جداول قوالب المنتجات إذا لم تكن موجودة
 try {
     $templatesTableCheck = $db->queryOne("SHOW TABLES LIKE 'product_templates'");
     if (empty($templatesTableCheck)) {
@@ -1536,7 +1509,7 @@ try {
             CREATE TABLE IF NOT EXISTS `product_templates` (
               `id` int(11) NOT NULL AUTO_INCREMENT,
               `product_name` varchar(255) NOT NULL COMMENT 'اسم المنتج',
-              `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Honey quantity in grams',
+              `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية العسل بالجرام',
               `status` enum('active','inactive') DEFAULT 'active',
               `created_by` int(11) NOT NULL,
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1547,13 +1520,13 @@ try {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
     } else {
-        // إضافة عمود honey_quantity إذا لم يكن موجودًا مسبقًا
+        // التحقق من وجود عمود honey_quantity وإضافته إذا لم يكن موجوداً
         $honeyColumnCheck = $db->queryOne("SHOW COLUMNS FROM product_templates LIKE 'honey_quantity'");
         if (empty($honeyColumnCheck)) {
             try {
                 $db->execute("
                     ALTER TABLE `product_templates` 
-                    ADD COLUMN `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Honey quantity in grams' 
+                    ADD COLUMN `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية العسل بالجرام' 
                     AFTER `product_name`
                 ");
                 error_log("Added honey_quantity column to product_templates table");
@@ -1563,7 +1536,7 @@ try {
         }
     }
     
-    // إ?شاء جد^" product_template_packaging
+    // إنشاء جدول product_template_packaging
     $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'product_template_packaging'");
     if (empty($packagingTableCheck)) {
         $db->execute("
@@ -1588,8 +1561,8 @@ try {
             CREATE TABLE IF NOT EXISTS `product_template_raw_materials` (
               `id` int(11) NOT NULL AUTO_INCREMENT,
               `template_id` int(11) NOT NULL,
-              `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة الخام',
-              `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية المادة الخام بالجرام',
+              `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة (مثل: مكسرات، لوز، إلخ)',
+              `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالجرام',
               `unit` varchar(50) DEFAULT 'جرام',
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY (`id`),
@@ -1597,7 +1570,7 @@ try {
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
     } else {
-        
+        // التحقق من وجود الجداول المرتبطة حتى لو كان product_templates موجوداً
         $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'product_template_packaging'");
         if (empty($packagingTableCheck)) {
             $db->execute("
@@ -1621,8 +1594,8 @@ try {
                 CREATE TABLE IF NOT EXISTS `product_template_raw_materials` (
                   `id` int(11) NOT NULL AUTO_INCREMENT,
                   `template_id` int(11) NOT NULL,
-                  `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة الخام',
-                  `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية المادة الخام بالجرام',
+                  `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة (مثل: مكسرات، لوز، إلخ)',
+                  `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالجرام',
                   `unit` varchar(50) DEFAULT 'جرام',
                   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   PRIMARY KEY (`id`),
@@ -1635,13 +1608,13 @@ try {
     error_log("Product templates tables creation error: " . $e->getMessage());
 }
 
-// جلب قوالب المنتجات عبر جميع الأقسام
+// الحصول على قوالب المنتجات من جميع الأقسام
 $templates = [];
 
-// 0. القوالب الموحدة الحديثة (متعددة المواد)
+// 0. القوالب الموحدة الجديدة (متعددة المواد)
 $unifiedTemplatesCheck = $db->queryOne("SHOW TABLES LIKE 'unified_product_templates'");
 if (!empty($unifiedTemplatesCheck)) {
-    // التحقق من وجود جدول المواد الخام وإضافة عمود honey_variety عند الحاجة
+    // التحقق من وجود جدول template_raw_materials وعمود honey_variety
     $templateRawMaterialsCheck = $db->queryOne("SHOW TABLES LIKE 'template_raw_materials'");
     $hasHoneyVariety = false;
     
@@ -1649,12 +1622,12 @@ if (!empty($unifiedTemplatesCheck)) {
         $honeyVarietyCheck = $db->queryOne("SHOW COLUMNS FROM template_raw_materials LIKE 'honey_variety'");
         $hasHoneyVariety = !empty($honeyVarietyCheck);
         
-        // إضافة العمود إذا لم يكن موجودًا
+        // إضافة العمود إذا لم يكن موجوداً
         if (!$hasHoneyVariety) {
             try {
                 $db->execute("
                     ALTER TABLE `template_raw_materials` 
-                    ADD COLUMN `honey_variety` VARCHAR(50) DEFAULT NULL COMMENT 'Honey variety used' 
+                    ADD COLUMN `honey_variety` VARCHAR(50) DEFAULT NULL COMMENT 'نوع العسل (سدر، جبلي، إلخ)' 
                     AFTER `supplier_id`
                 ");
                 $hasHoneyVariety = true;
@@ -1675,7 +1648,7 @@ if (!empty($unifiedTemplatesCheck)) {
     );
     
     foreach ($unifiedTemplates as &$template) {
-        // جلب المواد الخام المرتبطة بالقالب
+        // الحصول على المواد الخام للقالب
         if (!empty($templateRawMaterialsCheck)) {
             $selectColumns = "material_type, material_name, quantity, unit";
             if ($hasHoneyVariety) {
@@ -1694,10 +1667,10 @@ if (!empty($unifiedTemplatesCheck)) {
         
         $template['material_details'] = [];
         foreach ($rawMaterials as $material) {
-            // ترجمة اسم المادة إلى العربية إن كانت قيمة معرفية
+            // ترجمة اسم المادة إلى العربية
             $materialNameArabic = $material['material_name'];
             
-            // قاموس للترجمات الشائعة
+            // قاموس الترجمة للمواد الشائعة
             $materialTranslations = [
                 ':honey_filtered' => 'عسل مصفى',
                 ':honey_raw' => 'عسل خام',
@@ -1715,14 +1688,14 @@ if (!empty($unifiedTemplatesCheck)) {
                 'other' => 'مواد أخرى'
             ];
             
-            // تطبيق الترجمة إذا كانت متاحة
+            // تطبيق الترجمة إذا وُجدت
             if (isset($materialTranslations[$materialNameArabic])) {
                 $materialNameArabic = $materialTranslations[$materialNameArabic];
             }
             
             $materialDisplay = $materialNameArabic;
             
-            // إضافة نوع العسل إن وُجد (فقط إذا توافر العمود)
+            // إضافة نوع العسل إن وُجد (فقط إذا كان العمود موجوداً)
             if ($hasHoneyVariety 
                 && ($material['material_type'] === 'honey_raw' || $material['material_type'] === 'honey_filtered') 
                 && !empty($material['honey_variety'])) {
@@ -1737,7 +1710,7 @@ if (!empty($unifiedTemplatesCheck)) {
         }
     }
     
-    // تصفية القوالب: تجاهل القوالب التي لا تحتوي على مواد
+    // تصفية القوالب: إزالة القوالب الفارغة (التي ليس لها مواد خام)
     $unifiedTemplates = array_filter($unifiedTemplates, function($template) {
         return !empty($template['material_details']);
     });
@@ -1745,7 +1718,7 @@ if (!empty($unifiedTemplatesCheck)) {
     $templates = array_merge($templates, $unifiedTemplates);
 }
 
-// 1. قوالب العسل (القوالب التقليدية)
+// 1. قوالب العسل (القوالب القديمة)
 $honeyTemplatesCheck = $db->queryOne("SHOW TABLES LIKE 'product_templates'");
 if (!empty($honeyTemplatesCheck)) {
     $honeyTemplates = $db->query(
@@ -1831,7 +1804,7 @@ if (!empty($derivativesTemplatesCheck)) {
     $templates = array_merge($templates, $derivativesTemplates);
 }
 
-// جلب أدوات التعبئة المستخدمة في نافذة إنشاء القالب
+// الحصول على أدوات التعبئة للاستخدام في modal إنشاء القالب
 $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
 $packagingMaterials = [];
 if (!empty($packagingTableCheck)) {
@@ -1906,6 +1879,9 @@ $lang = isset($translations) ? $translations : [];
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-box-seam me-2"></i><?php echo isset($lang['production']) ? $lang['production'] : 'الإنتاج'; ?></h2>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProductionModal">
+        <i class="bi bi-plus-circle me-2"></i><?php echo isset($lang['add_production']) ? $lang['add_production'] : 'إضافة إنتاج'; ?>
+    </button>
 </div>
 
 <?php if ($error): ?>
@@ -1947,128 +1923,8 @@ $lang = isset($translations) ? $translations : [];
 
 <div id="productionRecordsSection">
 
-<!-- قسم قوالب المنتجات -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>قوالب المنتجات - إنشاء إنتاج من قالب</h5>
-        <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-light btn-sm">
-            <i class="bi bi-plus-circle me-2"></i>إدارة القوالب في مخزن الخامات
-        </a>
-    </div>
-    <?php if (!empty($templates)): ?>
-    <div class="card-body template-grid">
-        <?php foreach ($templates as $template): ?>
-            <?php 
-            $templateTypeLabels = [
-                'unified' => 'متعدد المواد',
-                'honey' => 'عسل',
-                'olive_oil' => 'زيت زيتون',
-                'beeswax' => 'شمع عسل',
-                'derivatives' => 'مشتقات'
-            ];
-            $typeLabel = $templateTypeLabels[$template['template_type']] ?? 'غير محدد';
-            $typeAccents = [
-                'unified' => ['#0f172a', '#0f172a22'],
-                'honey' => ['#f59e0b', '#f59e0b22'],
-                'olive_oil' => ['#16a34a', '#16a34a22'],
-                'beeswax' => ['#2563eb', '#2563eb22'],
-                'derivatives' => ['#7c3aed', '#7c3aed22']
-            ];
-            $accentPair = $typeAccents[$template['template_type']] ?? ['#334155', '#33415522'];
-            $materialDetails = $template['material_details'] ?? [];
-            $materialsPreview = array_slice($materialDetails, 0, 3);
-            $hasMoreMaterials = count($materialDetails) > 3;
-            $packagingCount = (int)($template['packaging_count'] ?? 0);
-            $rawCount = count($materialDetails);
-            $productsCount = (int)($template['products_count'] ?? 1);
-            ?>
-            <div class="template-card-modern"
-                 style="--template-accent: <?php echo $accentPair[0]; ?>; --template-accent-light: <?php echo $accentPair[1]; ?>;"
-                 data-template-id="<?php echo $template['id']; ?>"
-                 data-template-name="<?php echo htmlspecialchars($template['product_name']); ?>"
-                 data-template-type="<?php echo htmlspecialchars($template['template_type'] ?? 'legacy'); ?>"
-                 onclick="openCreateFromTemplateModal(this)">
-
-                <div class="template-card-header">
-                    <div>
-                        <span class="template-type-pill">
-                            <i class="bi bi-droplet-half me-1"></i><?php echo $typeLabel; ?>
-                        </span>
-                        <h6 class="template-title mt-2"><?php echo htmlspecialchars($template['product_name']); ?></h6>
-                    </div>
-                    <div class="template-products-count">
-                        <i class="bi bi-box me-1"></i>
-                        <?php echo $productsCount; ?>
-                        <span>منتج</span>
-                    </div>
-                </div>
-
-                <div class="template-metrics">
-                    <div class="metric-item">
-                        <span class="metric-label">أدوات التعبئة</span>
-                        <span class="metric-value"><?php echo $packagingCount; ?></span>
-                    </div>
-                    <div class="metric-separator"></div>
-                    <div class="metric-item">
-                        <span class="metric-label">مواد خام</span>
-                        <span class="metric-value"><?php echo $rawCount; ?></span>
-                    </div>
-                    <div class="metric-separator"></div>
-                    <div class="metric-item">
-                        <span class="metric-label">آخر تعديل</span>
-                        <span class="metric-value">
-                            <?php echo htmlspecialchars(date('Y/m/d', strtotime($template['updated_at'] ?? $template['created_at'] ?? 'now'))); ?>
-                        </span>
-                    </div>
-                </div>
-
-                <?php if (!empty($materialsPreview)): ?>
-                <div class="template-materials">
-                    <?php foreach ($materialsPreview as $material): ?>
-                        <div class="material-row">
-                            <div class="material-icon">
-                                <i class="bi bi-drop"></i>
-                            </div>
-                            <div class="material-info">
-                                <div class="material-name"><?php echo htmlspecialchars($material['type']); ?></div>
-                                <div class="material-quantity">
-                                    <?php echo number_format($material['quantity'], 2); ?>
-                                    <span><?php echo htmlspecialchars($material['unit']); ?></span>
-                                </div>
-                            </div>
-                            <?php if (!empty($material['honey_variety'])): ?>
-                                <span class="material-tag"><?php echo htmlspecialchars($material['honey_variety']); ?></span>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-                    <?php if ($hasMoreMaterials): ?>
-                        <div class="materials-more">+ <?php echo $rawCount - count($materialsPreview); ?> مواد إضافية</div>
-                    <?php endif; ?>
-                </div>
-                <?php endif; ?>
-
-                <div class="template-actions">
-                    <span class="template-action-badge">
-                        <i class="bi bi-lightning-charge me-2"></i>ابدأ الإنتاج الآن
-                    </span>
-                </div>
-            </div>
-        <?php endforeach; ?>
-    </div>
-    <?php else: ?>
-        <div class="card-body text-center py-5">
-            <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
-            <h5 class="text-muted">لا توجد قوالب منتجات</h5>
-            <p class="text-muted">قم بإنشاء قوالب المنتجات من صفحة مخزن الخامات</p>
-            <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-primary">
-                <i class="bi bi-box-seam me-2"></i>الذهاب إلى مخزن الخامات
-            </a>
-        </div>
-    <?php endif; ?>
-</div>
-
 <!-- جدول الإنتاج -->
-<div class="card shadow-sm mt-4">
+<div class="card shadow-sm">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i><?php echo isset($lang['production_list']) ? $lang['production_list'] : 'قائمة الإنتاج'; ?> (<?php echo $totalProduction; ?>)</h5>
     </div>
@@ -2083,7 +1939,7 @@ $lang = isset($translations) ? $translations : [];
                         <th><?php echo isset($lang['worker']) ? $lang['worker'] : 'العامل'; ?></th>
                         <th><?php echo isset($lang['date']) ? $lang['date'] : 'التاريخ'; ?></th>
                         <th><?php echo isset($lang['status']) ? $lang['status'] : 'الحالة'; ?></th>
-                        <th><?php echo isset($lang['batch_number']) ? $lang['batch_number'] : 'رقم التشغيلة'; ?></th>
+                        <th><?php echo isset($lang['actions']) ? $lang['actions'] : 'الإجراءات'; ?></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2097,9 +1953,9 @@ $lang = isset($translations) ? $translations : [];
                         <?php foreach ($productions as $prod): ?>
                             <tr>
                                 <td>#<?php echo $prod['id']; ?></td>
-                                <td><?php echo htmlspecialchars($prod['product_name'] ?? 'منتج غير محدد'); ?></td>
+                                <td><?php echo htmlspecialchars($prod['product_name'] ?? 'غير محدد'); ?></td>
                                 <td><?php echo number_format($prod['quantity'] ?? 0, 2); ?></td>
-                                <td><?php echo htmlspecialchars($prod['worker_name'] ?? $prod['worker_username'] ?? 'مستخدم غير محدد'); ?></td>
+                                <td><?php echo htmlspecialchars($prod['worker_name'] ?? $prod['worker_username'] ?? 'غير محدد'); ?></td>
                                 <td><?php echo date('Y-m-d', strtotime($prod[$dateColumn] ?? $prod['created_at'])); ?></td>
                                 <td>
                                     <span class="badge bg-<?php 
@@ -2112,10 +1968,23 @@ $lang = isset($translations) ? $translations : [];
                                     </span>
                                 </td>
                                 <td>
-                                    <?php if (!empty($prod['batch_number'])): ?>
-                                        <span class="badge bg-secondary text-wrap" style="white-space: normal;"><?php echo htmlspecialchars($prod['batch_number']); ?></span>
-                                    <?php else: ?>
-                                        <span class="text-muted">غير متوفر</span>
+                                    <button class="btn btn-sm btn-info" onclick="viewProduction(<?php echo $prod['id']; ?>)" title="<?php echo isset($lang['view']) ? $lang['view'] : 'عرض'; ?>">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    <?php if ($currentUser['role'] === 'production' && $prod['status'] === 'pending'): ?>
+                                        <button class="btn btn-sm btn-warning" onclick="editProduction(<?php echo $prod['id']; ?>)" title="<?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?>">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-danger" onclick="deleteProduction(<?php echo $prod['id']; ?>)" title="<?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?>">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    <?php elseif (in_array($currentUser['role'], ['accountant', 'manager'])): ?>
+                                        <button class="btn btn-sm btn-warning" onclick="editProduction(<?php echo $prod['id']; ?>)" title="<?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?>">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-danger" onclick="deleteProduction(<?php echo $prod['id']; ?>)" title="<?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?>">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -2166,11 +2035,101 @@ $lang = isset($translations) ? $translations : [];
                 </li>
             </ul>
             <div class="text-center mt-2 text-muted">
-                <small>عرض <?php echo min($offset + 1, $totalProduction); ?> - <?php echo min($offset + $perPage, $totalProduction); ?> من أصل <?php echo $totalProduction; ?> سجل</small>
+                <small>عرض <?php echo min($offset + 1, $totalProduction); ?> - <?php echo min($offset + $perPage, $totalProduction); ?> من <?php echo $totalProduction; ?> سجل</small>
             </div>
         </nav>
         <?php endif; ?>
     </div>
+</div>
+
+<!-- قسم قوالب المنتجات -->
+<div class="card shadow-sm mt-5">
+    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>قوالب المنتجات - إنشاء إنتاج من قالب</h5>
+        <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-light btn-sm">
+            <i class="bi bi-plus-circle me-2"></i>إدارة القوالب في مخزن الخامات
+        </a>
+    </div>
+    <?php if (!empty($templates)): ?>
+    <div class="card-body">
+        <div class="row g-3">
+            <?php foreach ($templates as $template): ?>
+                <div class="col-lg-3 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 template-card" style="border-left: 4px solid #0dcaf0; transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;"
+                         data-template-id="<?php echo $template['id']; ?>"
+                         data-template-name="<?php echo htmlspecialchars($template['product_name']); ?>"
+                         data-template-type="<?php echo htmlspecialchars($template['template_type'] ?? 'legacy'); ?>"
+                         onclick="openCreateFromTemplateModal(this)">
+                        <div class="card-body p-3">
+                            <?php 
+                            $templateTypeLabels = [
+                                'unified' => 'متعدد المواد',
+                                'honey' => 'عسل',
+                                'olive_oil' => 'زيت زيتون',
+                                'beeswax' => 'شمع عسل',
+                                'derivatives' => 'مشتقات'
+                            ];
+                            $typeLabel = $templateTypeLabels[$template['template_type']] ?? 'غير محدد';
+                            $typeColors = [
+                                'unified' => 'dark',
+                                'honey' => 'warning',
+                                'olive_oil' => 'success',
+                                'beeswax' => 'primary',
+                                'derivatives' => 'secondary'
+                            ];
+                            $typeColor = $typeColors[$template['template_type']] ?? 'secondary';
+                            ?>
+                            
+                            <!-- Header مدمج -->
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0 text-info fw-bold" style="font-size: 0.95rem;">
+                                    <i class="bi bi-box-seam me-2"></i>
+                                    <?php echo htmlspecialchars($template['product_name']); ?>
+                                </h6>
+                            </div>
+                            
+                            <!-- Badge نوع المادة -->
+                            <div class="mb-3">
+                                <span class="badge bg-<?php echo $typeColor; ?> text-white" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+                                    <?php echo $typeLabel; ?>
+                                </span>
+                            </div>
+                            
+                            <!-- المكونات -->
+                            <?php if (!empty($template['material_details'])): ?>
+                                <?php foreach ($template['material_details'] as $material): ?>
+                                    <div class="d-flex align-items-center mb-2 p-2 bg-light rounded">
+                                        <i class="bi bi-droplet-fill text-<?php echo $typeColor; ?> me-2" style="font-size: 0.9rem;"></i>
+                                        <small class="text-muted me-2" style="font-size: 0.8rem;"><?php echo htmlspecialchars($material['type']); ?>:</small>
+                                        <small class="fw-bold text-<?php echo $typeColor; ?>" style="font-size: 0.85rem;">
+                                            <?php echo number_format($material['quantity'], 2); ?> <?php echo htmlspecialchars($material['unit']); ?>
+                                        </small>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                            
+                            <!-- Footer -->
+                            <div class="text-center mt-3 pt-3 border-top">
+                                <span class="badge bg-success" style="font-size: 0.8rem; padding: 0.5rem 1rem;">
+                                    <i class="bi bi-arrow-right-circle me-2"></i>
+                                    اضغط للإنتاج
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php else: ?>
+        <div class="card-body text-center py-5">
+            <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
+            <h5 class="text-muted">لا توجد قوالب منتجات</h5>
+            <p class="text-muted">قم بإنشاء قوالب المنتجات من صفحة مخزن الخامات</p>
+            <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-primary">
+                <i class="bi bi-box-seam me-2"></i>الذهاب إلى مخزن الخامات
+            </a>
+        </div>
+    <?php endif; ?>
 </div>
 
 </div>
@@ -2182,10 +2141,10 @@ $lang = isset($translations) ? $translations : [];
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                 <div>
-                    <h4 class="mb-1"><i class="bi bi-calendar-day me-2"></i>ملخص اليوم الحالي</h4>
+                    <h4 class="mb-1"><i class="bi bi-calendar-day me-2"></i>ملخص اليوم</h4>
                     <p class="text-muted mb-0">
                         <?php echo htmlspecialchars($productionReportsToday['date_from'] ?? $productionReportsTodayDate); ?>
-                        إلى
+                        —
                         <?php echo htmlspecialchars($productionReportsToday['date_to'] ?? $productionReportsTodayDate); ?>
                     </p>
                 </div>
@@ -2254,7 +2213,7 @@ $lang = isset($translations) ? $translations : [];
                     <h4 class="mb-1"><i class="bi bi-calendar-month me-2"></i>ملخص الشهر الحالي</h4>
                     <p class="text-muted mb-0">
                         <?php echo htmlspecialchars($productionReportsMonth['date_from'] ?? $productionReportsMonthStart); ?>
-                        إلى
+                        —
                         <?php echo htmlspecialchars($productionReportsMonth['date_to'] ?? $productionReportsTodayDate); ?>
                     </p>
                 </div>
@@ -2300,7 +2259,7 @@ $lang = isset($translations) ? $translations : [];
 
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة خلال الشهر</span>
+            <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة للشهر الحالي</span>
         </div>
         <div class="card-body">
             <?php productionPageRenderConsumptionTable($productionReportsMonth['packaging']['items'] ?? []); ?>
@@ -2309,7 +2268,7 @@ $lang = isset($translations) ? $translations : [];
 
     <div class="card shadow-sm">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-            <span><i class="bi bi-droplet-half me-2"></i>المواد الخام خلال الشهر</span>
+            <span><i class="bi bi-droplet-half me-2"></i>المواد الخام للشهر الحالي</span>
         </div>
         <div class="card-body">
             <?php if (!empty($productionReportsMonth['raw']['sub_totals'])): ?>
@@ -2332,7 +2291,7 @@ $lang = isset($translations) ? $translations : [];
 
 <!-- Modal إنشاء إنتاج من قالب -->
 <div class="modal fade" id="createFromTemplateModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable production-template-dialog">
+    <div class="modal-dialog modal-xl production-template-dialog">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title"><i class="bi bi-file-earmark-text me-2"></i>إنشاء تشغيلة إنتاج</h5>
@@ -2369,15 +2328,7 @@ $lang = isset($translations) ? $translations : [];
                         </div>
                     </div>
                     
-                    <!-- ملخص المكونات في القالب -->
-                    <div class="mb-3 section-block d-none" id="templateComponentsSummary">
-                        <h6 class="text-primary section-heading">
-                            <i class="bi bi-activity me-2"></i>ملخص المكونات
-                        </h6>
-                        <div class="template-summary-grid" id="templateComponentsSummaryGrid"></div>
-                    </div>
-                    
-                    <!-- الموردون لكل مادة -->
+                    <!-- الموردون الديناميكيون -->
                     <div class="mb-3 section-block d-none" id="templateSuppliersWrapper">
                         <h6 class="text-primary section-heading">
                             <i class="bi bi-truck me-2"></i>الموردون لكل مادة <span class="text-danger">*</span>
@@ -2386,11 +2337,11 @@ $lang = isset($translations) ? $translations : [];
                         <div class="row g-3" id="templateSuppliersContainer"></div>
                     </div>
                     
-                    <!-- عمال الإنتاج الحاضرون -->
+                    <!-- عمال الإنتاج الحاضرين -->
                     <div class="mb-3 section-block">
-                        <h6 class="text-primary section-heading"><i class="bi bi-people me-2"></i>عمال الإنتاج الحاضرون</h6>
+                        <h6 class="text-primary section-heading"><i class="bi bi-people me-2"></i>عمال الإنتاج الحاضرين</h6>
                         <?php
-                        // جلب عمال الإنتاج الحاضرين داخل المنشأة
+                        // الحصول على العمال الحاضرين اليوم
                         $presentWorkersToday = [];
                         $attendanceTableCheck = $db->queryOne("SHOW TABLES LIKE 'attendance_records'");
                         if (!empty($attendanceTableCheck)) {
@@ -2410,18 +2361,18 @@ $lang = isset($translations) ? $translations : [];
                         <?php if (!empty($presentWorkersToday)): ?>
                             <div class="alert alert-success">
                                 <i class="bi bi-check-circle me-2"></i>
-                                <strong>عمال الإنتاج الحاضرون حاليا:</strong>
+                                <strong>العمال الحاضرين اليوم:</strong>
                                 <ul class="mb-0 mt-2">
                                     <?php foreach ($presentWorkersToday as $worker): ?>
                                         <li><?php echo htmlspecialchars($worker['full_name'] ?? $worker['username']); ?></li>
                                     <?php endforeach; ?>
                                 </ul>
                             </div>
-                            <small class="text-muted">سيتم ربط التشغيلة تلقائياً بجميع عمال الإنتاج الحاضرين حالياً.</small>
+                            <small class="text-muted">سيتم ربط التشغيلة تلقائياً بجميع عمال الإنتاج الحاضرين اليوم</small>
                         <?php else: ?>
                             <div class="alert alert-warning">
                                 <i class="bi bi-exclamation-triangle me-2"></i>
-                                لا يوجد عمال إنتاج حاضرون حالياً. سيتم ربط التشغيلة بالعامل الحالي فقط.
+                                لا يوجد عمال إنتاج حاضرين اليوم. سيتم ربط التشغيلة بالعامل الحالي فقط.
                             </div>
                         <?php endif; ?>
                     </div>
@@ -2432,7 +2383,7 @@ $lang = isset($translations) ? $translations : [];
                         <input type="hidden" name="user_id" value="<?php echo $currentUser['id']; ?>">
                     <?php endif; ?>
                     
-                    <!-- الملاحظات -->
+                    <!-- ملاحظات -->
                     <div class="mb-3 section-block">
                         <label class="form-label fw-bold">ملاحظات (اختياري)</label>
                         <textarea name="batch_notes" class="form-control" rows="3" 
@@ -2549,7 +2500,7 @@ $lang = isset($translations) ? $translations : [];
                     <div class="row mb-3">
                         <div class="col-md-6">
                             <label class="form-label"><?php echo isset($lang['materials_used']) ? $lang['materials_used'] : 'المواد المستخدمة'; ?></label>
-                            <textarea name="materials_used" class="form-control" rows="3" placeholder="<?php echo isset($lang['materials_used_placeholder']) ? $lang['materials_used_placeholder'] : 'أدرج المواد المستخدمة في العملية...'; ?>"></textarea>
+                            <textarea name="materials_used" class="form-control" rows="3" placeholder="<?php echo isset($lang['materials_used_placeholder']) ? $lang['materials_used_placeholder'] : 'وصف المواد المستخدمة...'; ?>"></textarea>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label"><?php echo isset($lang['notes']) ? $lang['notes'] : 'ملاحظات'; ?></label>
@@ -2612,7 +2563,7 @@ $lang = isset($translations) ? $translations : [];
                             <label class="form-label"><?php echo isset($lang['status']) ? $lang['status'] : 'الحالة'; ?></label>
                             <select name="status" id="edit_status" class="form-select">
                                 <option value="pending"><?php echo isset($lang['pending']) ? $lang['pending'] : 'معلق'; ?></option>
-                                <option value="approved"><?php echo isset($lang['approved']) ? $lang['approved'] : 'معتمد'; ?></option>
+                                <option value="approved"><?php echo isset($lang['approved']) ? $lang['approved'] : 'موافق عليه'; ?></option>
                                 <option value="rejected"><?php echo isset($lang['rejected']) ? $lang['rejected'] : 'مرفوض'; ?></option>
                                 <option value="completed"><?php echo isset($lang['completed']) ? $lang['completed'] : 'مكتمل'; ?></option>
                             </select>
@@ -2638,6 +2589,426 @@ $lang = isset($translations) ? $translations : [];
         </div>
     </div>
 </div>
+
+<style>
+/* ⚙️ تحسين عرض نموذج إنشاء التشغيلة */
+.production-template-dialog {
+    width: min(960px, 94vw);
+    height: calc(100vh - 2rem);
+    margin: 1rem auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.production-template-dialog .modal-content {
+    border-radius: 16px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.18);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.production-template-dialog .modal-header,
+.production-template-dialog .modal-footer {
+    padding: 0.75rem 1.25rem;
+    flex-shrink: 0;
+}
+
+.production-template-body {
+    padding: 1rem 1.1rem;
+    flex: 1 1 auto;
+    overflow-y: auto;
+}
+
+@media (max-width: 991.98px) {
+    .production-template-dialog {
+        width: 100%;
+        height: 100vh;
+        margin: 0;
+        border-radius: 0;
+    }
+
+    .production-template-dialog .modal-content {
+        border-radius: 0;
+    }
+}
+
+.production-template-body .section-block {
+    background: #f9fafb;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.production-template-body .section-heading {
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.production-template-body .form-label {
+    font-size: 0.95rem;
+    margin-bottom: 0.35rem;
+}
+
+.production-template-body .small {
+    font-size: 0.75rem;
+}
+
+.production-template-body .alert {
+    margin-bottom: 0.75rem;
+    padding: 0.75rem 0.9rem;
+}
+
+.production-template-body .row.g-3 > [class*="col-"] {
+    margin-bottom: 0;
+}
+
+/* 🎯 ضبط تبويبات الصفحة وتقارير الإنتاج */
+.production-tab-toggle {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.production-tab-toggle .production-tab-btn {
+    flex: 1 1 200px;
+    min-width: 160px;
+    padding: 0.65rem 1.2rem !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(29, 78, 216, 0.35) !important;
+    background: #ffffff !important;
+    color: #1d4ed8 !important;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08) !important;
+    font-weight: 600 !important;
+    transition: all 0.25s ease !important;
+}
+
+.production-tab-toggle .production-tab-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px rgba(59, 130, 246, 0.25) !important;
+}
+
+.production-tab-toggle .production-tab-btn.active {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+    color: #ffffff !important;
+    border-color: transparent !important;
+    box-shadow: 0 12px 26px rgba(37, 99, 235, 0.35) !important;
+}
+
+#productionReportsSection {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+#productionReportsSection .card {
+    border-radius: 16px !important;
+}
+
+#productionReportsSection .production-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1rem;
+}
+
+#productionReportsSection .summary-card {
+    background: #f8fafc;
+    border-radius: 14px;
+    padding: 1.1rem;
+    border: 1px solid rgba(15, 23, 42, 0.05);
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+}
+
+#productionReportsSection .summary-label {
+    font-size: 0.85rem;
+    color: #6b7280;
+    letter-spacing: 0.3px;
+}
+
+#productionReportsSection .summary-value {
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+#productionReportsSection .summary-value.text-secondary {
+    color: #475569 !important;
+}
+
+#productionReportsSection .badge {
+    font-size: 0.8rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 10px;
+}
+
+#productionReportsSection .table {
+    font-size: 0.9rem;
+}
+
+#productionReportsSection .table th {
+    font-size: 0.85rem;
+    letter-spacing: 0.4px;
+}
+
+#productionReportsSection .table td {
+    vertical-align: middle;
+    font-size: 0.85rem;
+}
+
+/* 🎨 تنسيق الألوان والظلال - تدرجات الأزرق */
+
+/* البطاقات والكروت */
+.card {
+    border: none !important;
+    border-radius: 12px !important;
+    box-shadow: 0 2px 15px rgba(13, 110, 253, 0.08) !important;
+    transition: all 0.3s ease !important;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(13, 110, 253, 0.15) !important;
+}
+
+/* رأس البطاقات - تدرج أزرق جميل */
+.card-header {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+    border: none !important;
+    border-radius: 12px 12px 0 0 !important;
+    padding: 1rem 1.5rem !important;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
+}
+
+.card-header.bg-primary,
+.card-header.bg-info,
+.card-header.bg-success {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35) !important;
+}
+
+/* الأزرار - تدرجات أزرق حديثة */
+.btn-primary,
+.btn-info,
+.btn-success,
+.btn-outline-primary,
+.btn-outline-info,
+.btn-outline-success {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+    border: none !important;
+    box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4) !important;
+    transition: all 0.3s ease !important;
+    border-radius: 8px !important;
+    padding: 0.5rem 1.5rem !important;
+    font-weight: 500 !important;
+    color: #fff !important;
+}
+
+.btn-primary:hover,
+.btn-info:hover,
+.btn-success:hover,
+.btn-outline-primary:hover,
+.btn-outline-info:hover,
+.btn-outline-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.6) !important;
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+}
+
+.btn-primary:focus,
+.btn-info:focus,
+.btn-success:focus,
+.btn-outline-primary:focus,
+.btn-outline-info:focus,
+.btn-outline-success:focus {
+    box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.35) !important;
+}
+
+/* الجداول */
+.table {
+    border-radius: 8px !important;
+    overflow: hidden !important;
+}
+
+.table thead th {
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%) !important;
+    color: white !important;
+    border: none !important;
+    font-weight: 600 !important;
+    padding: 1rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.table tbody tr {
+    transition: all 0.2s ease !important;
+}
+
+.table tbody tr:hover {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0%, rgba(59, 130, 246, 0.06) 100%) !important;
+    transform: scale(1.01);
+}
+
+/* رسائل التنبيه */
+.alert {
+    border: none !important;
+    border-radius: 10px !important;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1) !important;
+}
+
+.alert-success {
+    background: linear-gradient(135deg, #d4fc79 0%, #96e6a1 100%) !important;
+    color: #155724 !important;
+}
+
+.alert-danger {
+    background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%) !important;
+    color: #721c24 !important;
+}
+
+.alert-info {
+    background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%) !important;
+    color: #004085 !important;
+}
+
+/* Modal */
+.modal-content {
+    border: none !important;
+    border-radius: 15px !important;
+    box-shadow: 0 10px 40px rgba(13, 110, 253, 0.2) !important;
+}
+
+.modal-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 15px 15px 0 0 !important;
+    padding: 1.25rem 1.5rem !important;
+}
+
+.modal-header .btn-close {
+    filter: brightness(0) invert(1) !important;
+}
+
+.modal-footer {
+    border-top: 1px solid rgba(102, 126, 234, 0.1) !important;
+    padding: 1rem 1.5rem !important;
+    background: rgba(37, 99, 235, 0.04) !important;
+}
+
+/* Badges */
+.badge {
+    border-radius: 6px !important;
+    padding: 0.4rem 0.8rem !important;
+    font-weight: 500 !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.badge.bg-success {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%) !important;
+}
+
+.badge.bg-danger {
+    background: linear-gradient(135deg, #fa709a 0%, #fee140 100%) !important;
+}
+
+.badge.bg-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+}
+
+.badge.bg-info {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+}
+
+.badge.bg-warning {
+    background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%) !important;
+    color: #856404 !important;
+}
+
+/* Form Controls */
+.form-control:focus, .form-select:focus {
+    border-color: #667eea !important;
+    box-shadow: 0 0 0 0.25rem rgba(102, 126, 234, 0.25) !important;
+}
+
+/* تحسينات تصميم modal إنشاء القالب */
+#createTemplateModal .modal-body {
+    padding: 1.5rem;
+}
+
+#createTemplateModal .form-label {
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: #495057;
+}
+
+#createTemplateModal .border {
+    border-color: rgba(102, 126, 234, 0.2) !important;
+    border-radius: 8px !important;
+}
+
+#createTemplateModal .form-check {
+    padding: 0.5rem;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+#createTemplateModal .form-check:hover {
+    background: linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(59, 130, 246, 0.08) 100%);
+}
+
+#createTemplateModal .form-check-input:checked ~ .form-check-label {
+    font-weight: 600;
+    color: #667eea;
+}
+
+#createTemplateModal .badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* عناوين الصفحة */
+h2, h3, h4, h5 {
+    color: #2d3748 !important;
+    font-weight: 600 !important;
+}
+
+/* تأثيرات إضافية */
+.shadow-sm {
+    box-shadow: 0 2px 15px rgba(13, 110, 253, 0.08) !important;
+}
+
+.shadow {
+    box-shadow: 0 4px 20px rgba(13, 110, 253, 0.12) !important;
+}
+
+.shadow-lg {
+    box-shadow: 0 10px 40px rgba(13, 110, 253, 0.15) !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.card, .alert, .btn {
+    animation: fadeIn 0.3s ease-in-out;
+}
+</style>
 
 <?php
 $honeyStockDataForJs = [];
@@ -2852,20 +3223,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function renderTemplateSuppliers(details) {
-    const cacheKey = details?.cache_key;
-    if (!details || !details.success) {
-        return;
-    }
-    if (cacheKey) {
-        window.templateDetailsCache = window.templateDetailsCache || {};
-        window.templateDetailsCache[cacheKey] = details;
-    }
     const wrapper = document.getElementById('templateSuppliersWrapper');
     const container = document.getElementById('templateSuppliersContainer');
     const modeInput = document.getElementById('template_mode');
     const hintText = document.getElementById('templateSuppliersHint');
-    const summaryWrapper = document.getElementById('templateComponentsSummary');
-    const summaryGrid = document.getElementById('templateComponentsSummaryGrid');
 
     if (!container || !wrapper || !modeInput) {
         return;
@@ -2874,12 +3235,6 @@ function renderTemplateSuppliers(details) {
     const components = Array.isArray(details?.components) ? details.components : [];
 
     container.innerHTML = '';
-    if (summaryGrid) {
-        summaryGrid.innerHTML = '';
-    }
-    if (summaryWrapper) {
-        summaryWrapper.classList.add('d-none');
-    }
 
     if (components.length === 0) {
         wrapper.classList.remove('d-none');
@@ -2892,187 +3247,28 @@ function renderTemplateSuppliers(details) {
             </div>
         `;
         if (hintText) {
-        hintText.textContent = 'لا توجد مواد لعرضها.';
+            hintText.textContent = 'لا توجد مواد لعرضها.';
         }
         currentTemplateMode = 'advanced';
         modeInput.value = 'advanced';
         return;
     }
 
-    const determineComponentType = (component) => {
-        if (!component) {
-            return 'generic';
-        }
-        const type = (component.type || '').toString().toLowerCase();
-        if (type) {
-            return type;
-        }
-        const key = (component.key || '').toString().toLowerCase();
-        if (key.startsWith('pack_')) return 'packaging';
-        if (key.startsWith('honey_')) return 'honey_raw';
-        if (key.startsWith('raw_')) return 'raw_general';
-        if (key.startsWith('olive')) return 'olive_oil';
-        if (key.startsWith('beeswax')) return 'beeswax';
-        if (key.startsWith('derivative')) return 'derivatives';
-        if (key.startsWith('nuts')) return 'nuts';
-        return 'generic';
-    };
-
-    const accentColors = {
-        packaging: '#0dcaf0',
-        honey_raw: '#f59e0b',
-        honey_filtered: '#fb923c',
-        honey_main: '#facc15',
-        olive_oil: '#22c55e',
-        beeswax: '#a855f7',
-        derivatives: '#6366f1',
-        nuts: '#d97706',
-        raw_general: '#3b82f6',
-        generic: '#2563eb',
-        default: '#2563eb'
-    };
-
-    const typeLabelsMap = {
-        packaging: 'أداة تعبئة',
-        honey_raw: 'عسل خام',
-        honey_filtered: 'عسل مصفى',
-        honey_main: 'عسل',
-        olive_oil: 'زيت زيتون',
-        beeswax: 'شمع عسل',
-        derivatives: 'مشتقات',
-        nuts: 'مكسرات',
-        raw_general: 'مادة خام',
-        generic: 'مكوّن'
-    };
-
-    const componentIcons = {
-        packaging: 'bi-box-seam',
-        honey_raw: 'bi-droplet-half',
-        honey_filtered: 'bi-droplet',
-        honey_main: 'bi-bezier',
-        olive_oil: 'bi-bezier2',
-        beeswax: 'bi-hexagon',
-        derivatives: 'bi-intersect',
-        nuts: 'bi-record-circle',
-        raw_general: 'bi-diagram-3',
-        generic: 'bi-diagram-2'
-    };
-
-    const stats = {
-        total: components.length,
-        packaging: 0,
-        honey: 0,
-        raw: 0,
-        special: 0
-    };
-
-    components.forEach(component => {
-        const canonicalType = determineComponentType(component);
-        if (canonicalType === 'packaging') {
-            stats.packaging += 1;
-            return;
-        }
-        if (isHoneyComponent(component) || canonicalType === 'honey_raw' || canonicalType === 'honey_filtered' || canonicalType === 'honey_main') {
-            stats.honey += 1;
-            stats.raw += 1;
-            return;
-        }
-        if (['olive_oil', 'beeswax', 'derivatives', 'nuts', 'raw_general'].includes(canonicalType) || canonicalType.startsWith('raw_')) {
-            stats.raw += 1;
-            return;
-        }
-        stats.special += 1;
-    });
-
-    stats.special = Math.max(0, stats.total - stats.raw - stats.packaging);
-
-    if (summaryWrapper && summaryGrid) {
-        const summaryItems = [
-            { key: 'total', label: 'إجمالي المكوّنات', value: stats.total, icon: 'bi-collection' },
-            { key: 'raw', label: 'مواد خام / أساسية', value: stats.raw, icon: 'bi-droplet-half' },
-            { key: 'packaging', label: 'أدوات تعبئة', value: stats.packaging, icon: 'bi-box' },
-            { key: 'honey', label: 'يتطلب نوع عسل', value: stats.honey, icon: 'bi-stars' },
-            { key: 'special', label: 'مكوّنات خاصة', value: stats.special, icon: 'bi-puzzle' }
-        ].filter(item => item.value > 0 || item.key === 'total');
-
-        summaryGrid.innerHTML = summaryItems.map(item => `
-            <div class="template-summary-item">
-                <span class="template-summary-icon">
-                    <i class="bi ${item.icon}"></i>
-                </span>
-                <div class="template-summary-content">
-                    <span class="template-summary-value">${item.value}</span>
-                    <span class="template-summary-label">${item.label}</span>
-                </div>
-            </div>
-        `).join('');
-
-        summaryWrapper.classList.remove('d-none');
-    }
-
-    const createChip = (iconClass, text) => {
-        const chip = document.createElement('span');
-        chip.className = 'component-card-chip';
-        chip.innerHTML = `<i class="bi ${iconClass} me-1"></i>${text}`;
-        return chip;
-    };
-
-    components.forEach(function(component) {
-        const canonicalType = determineComponentType(component);
-        const safeTypeClass = canonicalType.replace(/[^a-z0-9_-]/g, '') || 'generic';
-        const componentKey = (component.key || component.name || ('component_' + Math.random().toString(36).slice(2)));
-
+    details.components.forEach(function(component) {
         const col = document.createElement('div');
-        col.className = 'col-12 col-lg-6';
+        col.className = 'col-md-6';
 
-        const card = document.createElement('div');
-        card.className = `component-card component-type-${safeTypeClass}`;
-        card.style.setProperty('--component-accent', accentColors[canonicalType] || accentColors.default);
+        const label = document.createElement('label');
+        label.className = 'form-label fw-bold';
+        label.textContent = component.label || component.name || 'مادة';
 
-        const header = document.createElement('div');
-        header.className = 'component-card-header';
-
-        const title = document.createElement('span');
-        title.className = 'component-card-title';
-        title.textContent = component.name || component.label || 'مكوّن';
-
-        const badge = document.createElement('span');
-        badge.className = 'component-card-badge';
-        badge.textContent = typeLabelsMap[canonicalType] || typeLabelsMap.generic;
-
-        header.appendChild(title);
-        header.appendChild(badge);
-        card.appendChild(header);
-
-        const meta = document.createElement('div');
-        meta.className = 'component-card-meta';
-        const metaIcon = document.createElement('i');
-        metaIcon.className = `bi ${componentIcons[canonicalType] || componentIcons.generic} me-2`;
-        meta.appendChild(metaIcon);
-        const metaText = document.createElement('span');
-        metaText.textContent = component.description || 'لا توجد تفاصيل إضافية.';
-        meta.appendChild(metaText);
-        card.appendChild(meta);
-
-        const chipsWrapper = document.createElement('div');
-        chipsWrapper.className = 'component-card-chips';
-        if (component.requires_variety || isHoneyComponent(component)) {
-            chipsWrapper.appendChild(createChip('bi-stars', 'يتطلب تحديد نوع العسل'));
-        }
-        if (component.default_supplier) {
-            chipsWrapper.appendChild(createChip('bi-person-check', 'مورد مقترح'));
-        }
-        if (chipsWrapper.children.length > 0) {
-            card.appendChild(chipsWrapper);
-        }
-
-        const controlLabel = document.createElement('label');
-        controlLabel.className = 'form-label fw-semibold small text-muted mb-1';
-        controlLabel.textContent = 'اختر المورد المناسب';
-        card.appendChild(controlLabel);
+        const helper = document.createElement('small');
+        helper.className = 'text-muted d-block mb-2';
+        helper.textContent = component.description || '';
 
         const select = document.createElement('select');
-        select.className = 'form-select form-select-sm component-supplier-select';
+        select.className = 'form-select';
+        const componentKey = (component.key || component.name || ('component_' + Math.random().toString(36).slice(2)));
         select.name = 'material_suppliers[' + componentKey + ']';
         select.dataset.role = 'component-supplier';
         select.required = component.required !== false;
@@ -3095,28 +3291,31 @@ function renderTemplateSuppliers(details) {
             }
             select.appendChild(option);
         });
-
         if (suppliersList.length === 0) {
             const noSupplierOption = document.createElement('option');
             noSupplierOption.value = '';
             noSupplierOption.disabled = true;
-            noSupplierOption.textContent = 'لا يوجد مورد مناسب - راجع قائمة الموردين.';
+            noSupplierOption.textContent = 'لا يوجد مورد مناسب - راجع قائمة الموردين';
             select.appendChild(noSupplierOption);
         }
 
-        card.appendChild(select);
+        col.appendChild(label);
+        if (helper.textContent.trim() !== '') {
+            col.appendChild(helper);
+        }
+        col.appendChild(select);
 
         if (isHoneyComponent(component)) {
             const honeyWrapper = document.createElement('div');
             honeyWrapper.className = 'mt-2';
 
             const honeyLabel = document.createElement('label');
-            honeyLabel.className = 'form-label fw-bold mb-1';
-            honeyLabel.textContent = 'نوع العسل لدى المورد المختار';
+            honeyLabel.className = 'form-label fw-bold';
+            honeyLabel.textContent = 'نوع العسل للمورد المختار';
 
             const honeyInput = document.createElement('input');
             honeyInput.type = 'text';
-            honeyInput.className = 'form-control form-control-sm';
+            honeyInput.className = 'form-control';
             honeyInput.name = 'material_honey_varieties[' + componentKey + ']';
             honeyInput.required = true;
             honeyInput.dataset.role = 'honey-variety-input';
@@ -3126,7 +3325,7 @@ function renderTemplateSuppliers(details) {
 
             const honeyHelper = document.createElement('small');
             honeyHelper.className = 'text-muted d-block mt-1';
-            honeyHelper.textContent = 'اختر أو اكتب نوع العسل المتوفر لدى المورد.';
+            honeyHelper.textContent = 'اختر أو اكتب نوع العسل كما هو متوفر لدى المورد.';
 
             const datalist = document.createElement('datalist');
             const sanitizedKey = componentKey.toString().replace(/[^a-zA-Z0-9_-]/g, '');
@@ -3144,26 +3343,26 @@ function renderTemplateSuppliers(details) {
                 populateHoneyVarietyOptions(honeyInput, datalist, this.value, component);
             });
 
-            card.appendChild(honeyWrapper);
+            col.appendChild(honeyWrapper);
 
+            // Populate initial options if default supplier preselected
             populateHoneyVarietyOptions(honeyInput, datalist, select.value, component);
         }
 
-        col.appendChild(card);
         container.appendChild(col);
     });
 
     wrapper.classList.remove('d-none');
 
     if (hintText) {
-        hintText.textContent = details.hint || 'يرجى اختيار المورد المحاسب للمادة وتحديد نوع العسل عند الحاجة.';
+    hintText.textContent = details.hint || 'يرجى اختيار المورد المناسب لكل مادة وتحديد نوع العسل عند الحاجة.';
     }
 
     currentTemplateMode = 'advanced';
     modeInput.value = 'advanced';
 }
 
-// تحميل بيانات الإنتاج عند التعديل
+// تحميل بيانات الإنتاج للتعديل
 function editProduction(id) {
     const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
     const url = baseUrl + '/dashboard/production.php?page=production&ajax=1&id=' + id;
@@ -3199,7 +3398,7 @@ function editProduction(id) {
         });
 }
 
-// حذف سجل إنتاج
+// حذف الإنتاج
 function deleteProduction(id) {
     if (confirm('<?php echo isset($lang['confirm_delete']) ? $lang['confirm_delete'] : 'هل أنت متأكد من حذف هذا السجل؟'; ?>')) {
         const form = document.createElement('form');
@@ -3215,50 +3414,26 @@ function deleteProduction(id) {
 
 // عرض تفاصيل الإنتاج
 function viewProduction(id) {
-    // TODO: إضافة نافذة لعرض التفاصيل كاملة
+    // يمكن إضافة modal لعرض التفاصيل الكاملة
     alert('عرض تفاصيل الإنتاج #' + id);
 }
 
-// فتح نافذة إنشاء إنتاج من قالب
+// فتح modal إنشاء إنتاج من قالب
 function openCreateFromTemplateModal(element) {
     const templateId = element.getAttribute('data-template-id');
     const templateName = element.getAttribute('data-template-name');
     const templateType = element.getAttribute('data-template-type') || 'legacy';
     
-    try {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    } catch (scrollError) {
-        window.scrollTo(0, 0);
-    }
-    
-    document.querySelectorAll('.template-card-modern.selected-template').forEach(card => {
-        card.classList.remove('selected-template');
-        card.style.setProperty('--template-accent', card.dataset.originalAccent || '#0ea5e9');
-        card.style.setProperty('--template-accent-light', card.dataset.originalAccentLight || 'rgba(14, 165, 233, 0.15)');
-    });
-    if (element) {
-        element.classList.add('selected-template');
-        element.dataset.originalAccent = getComputedStyle(element).getPropertyValue('--template-accent');
-        element.dataset.originalAccentLight = getComputedStyle(element).getPropertyValue('--template-accent-light');
-        element.style.setProperty('--template-accent', '#1d4ed8');
-        element.style.setProperty('--template-accent-light', '#1d4ed822');
-    }
-    
     document.getElementById('template_id').value = templateId;
     document.getElementById('template_product_name').value = templateName;
     document.getElementById('template_type').value = templateType;
     
-    // إعادة تهيئة الحقول التلقائية
-    const batchNotesField = document.querySelector('textarea[name="batch_notes"]');
-    if (batchNotesField) {
-        batchNotesField.value = '';
-    }
+    // إعادة تعيين القيم التلقائية
+    document.querySelector('textarea[name="batch_notes"]').value = '';
 
     const wrapper = document.getElementById('templateSuppliersWrapper');
     const container = document.getElementById('templateSuppliersContainer');
     const modeInput = document.getElementById('template_mode');
-    const summaryWrapper = document.getElementById('templateComponentsSummary');
-    const summaryGrid = document.getElementById('templateComponentsSummaryGrid');
 
     if (container) {
         container.innerHTML = `
@@ -3273,72 +3448,29 @@ function openCreateFromTemplateModal(element) {
     if (wrapper) {
         wrapper.classList.add('d-none');
     }
-    if (summaryGrid) {
-        summaryGrid.innerHTML = '';
-    }
-    if (summaryWrapper) {
-        summaryWrapper.classList.add('d-none');
-    }
     currentTemplateMode = 'advanced';
     if (modeInput) {
         modeInput.value = 'advanced';
     }
 
-    const templateCacheKey = templateId + '::' + templateType;
-    window.templateDetailsCache = window.templateDetailsCache || {};
-
-    const modalElement = document.getElementById('createFromTemplateModal');
-    if (!modalElement) {
-        console.error('createFromTemplateModal element not found in DOM.');
-        return;
-    }
-    const modal = new bootstrap.Modal(modalElement);
-    modal.show();
-
-    const handleTemplateResponse = (data) => {
-        if (data && data.success) {
-            renderTemplateSuppliers(data);
-        } else {
-            if (container) {
-                container.innerHTML = `
-                    <div class="col-12">
-                        <div class="alert alert-warning mb-0">
-                            <i class="bi bi-exclamation-triangle me-2"></i>
-                            لم يتم العثور على مواد لهذا القالب. يرجى مراجعة إعدادات القالب.
-                        </div>
-                    </div>
-                `;
-            }
-        }
-    };
-
-    if (window.templateDetailsCache[templateCacheKey]) {
-        handleTemplateResponse(window.templateDetailsCache[templateCacheKey]);
-        return;
-    }
-
-    const createModalUrl = (relativePath) => {
-        if (/^https?:\/\//i.test(relativePath)) {
-            return relativePath;
-        }
-        try {
-            return new URL(relativePath, window.location.origin).toString();
-        } catch (error) {
-            return window.location.origin + relativePath;
-        }
-    };
-
-    const requestUrl = createModalUrl('/dashboard/production.php?page=production&ajax=template_details&template_id=' + templateId + '&template_type=' + encodeURIComponent(templateType));
-
-    fetch(requestUrl, { cache: 'no-store' })
+    const baseUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+    fetch(baseUrl + '/dashboard/production.php?page=production&ajax=template_details&template_id=' + templateId + '&template_type=' + encodeURIComponent(templateType))
         .then(response => response.ok ? response.json() : Promise.reject(new Error('Network error')))
         .then(data => {
             if (data && data.success) {
-                const cacheKey = data.cache_key || templateCacheKey;
-                window.templateDetailsCache[cacheKey] = data;
-                window.templateDetailsCache[templateCacheKey] = data;
+                renderTemplateSuppliers(data);
+            } else {
+                if (container) {
+                    container.innerHTML = `
+                        <div class="col-12">
+                            <div class="alert alert-warning mb-0">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                لم يتم العثور على مواد لهذا القالب. يرجى مراجعة إعدادات القالب.
+                            </div>
+                        </div>
+                    `;
+                }
             }
-            handleTemplateResponse(data);
         })
         .catch(error => {
             console.error('Error loading template details:', error);
@@ -3352,10 +3484,14 @@ function openCreateFromTemplateModal(element) {
                     </div>
                 `;
             }
+        })
+        .finally(() => {
+            const modal = new bootstrap.Modal(document.getElementById('createFromTemplateModal'));
+            modal.show();
         });
 }
 
-// إضافة معالجة للنماذج للتحقق من الحقول المطلوبة
+// إضافة معالج للنموذج للتحقق من الحقول المطلوبة
 document.getElementById('createFromTemplateForm')?.addEventListener('submit', function(e) {
     const quantity = document.querySelector('input[name="quantity"]').value;
 
@@ -3370,7 +3506,7 @@ document.getElementById('createFromTemplateForm')?.addEventListener('submit', fu
         for (let select of supplierSelects) {
             if (!select.value) {
                 e.preventDefault();
-                alert('يرجى اختيار المورد المناسب لهذه المادة للمتابعة');
+                alert('يرجى اختيار المورد لكل مادة قبل المتابعة');
                 select.focus();
                 return false;
             }
@@ -3380,13 +3516,13 @@ document.getElementById('createFromTemplateForm')?.addEventListener('submit', fu
     for (let input of honeyVarietyInputs) {
         if (input.disabled) {
             e.preventDefault();
-            alert('يرجى اختيار مورد العسل بعد تحديد النوع');
+            alert('يرجى اختيار مورد العسل قبل تحديد نوعه');
             input.focus();
             return false;
         }
         if (!input.value || !input.value.trim()) {
             e.preventDefault();
-            alert('يرجى إدخال نوع العسل لدى المورد المختار');
+            alert('يرجى إدخال نوع العسل لكل مورد مختار');
             input.focus();
             return false;
         }
@@ -3423,19 +3559,19 @@ function printBarcodes() {
     const printQuantity = parseInt(document.getElementById('barcode_print_quantity').value) || 1;
     
     if (batchNumbers.length === 0) {
-        alert('لا توجد أرقام تشغيل للطباعة');
+        alert('لا توجد أرقام تشغيلة للطباعة');
         return;
     }
     
-    // طباعة الباركودات - كل باركود يحمل نفس رقم التشغيلة
+    // طباعة الباركودات - كل باركود يحتوي على نفس رقم التشغيلة
     // الكمية المطلوبة للطباعة
-    const batchNumber = batchNumbers[0]; // كل الباركودات تشترك في نفس الرقم
+    const batchNumber = batchNumbers[0]; // كل الباركودات لها نفس الرقم
     const printUrl = 'print_barcode.php?batch=' + encodeURIComponent(batchNumber) + '&quantity=' + printQuantity + '&print=1';
     
     window.open(printUrl, '_blank');
 }
 
-// إدارة المواد الخام في نافذة إنشاء القالب
+// إدارة المواد الخام في modal إنشاء القالب
 let rawMaterialIndex = 0;
 
 function addRawMaterial() {
@@ -3446,7 +3582,7 @@ function addRawMaterial() {
                 <div class="col-md-4">
                     <label class="form-label small">اسم المادة <span class="text-danger">*</span></label>
                     <input type="text" class="form-control form-control-sm" name="raw_materials[${rawMaterialIndex}][name]" 
-                           placeholder="مثلاً: مكسرات أو عطر" required>
+                           placeholder="مثل: مكسرات، لوز" required>
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small">الكمية <span class="text-danger">*</span></label>
@@ -3497,7 +3633,7 @@ document.getElementById('createTemplateForm')?.addEventListener('submit', functi
         return false;
     }
     
-    // التحقق من إدخال اسم المنتج
+    // التحقق من اسم المنتج
     const productName = document.querySelector('input[name="product_name"]').value.trim();
     if (!productName) {
         e.preventDefault();
@@ -3507,83 +3643,71 @@ document.getElementById('createTemplateForm')?.addEventListener('submit', functi
 });
 
 <?php
-// عرض نموذج الطباعة إذا تم إنشاء إنتاج من قالب
+// عرض modal الطباعة إذا تم إنشاء إنتاج من قالب
 if (isset($_GET['show_barcode_modal']) && isset($_SESSION['created_batch_numbers'])) {
     $batchNumbers = $_SESSION['created_batch_numbers'];
     $productName = $_SESSION['created_batch_product_name'] ?? '';
     $quantity = $_SESSION['created_batch_quantity'] ?? count($batchNumbers);
     
-    // تنظيف بيانات الجلسة
+    // تنظيف session
     unset($_SESSION['created_batch_numbers']);
     unset($_SESSION['created_batch_product_name']);
     unset($_SESSION['created_batch_quantity']);
     
-    $batchNumbersJson = json_encode(array_values($batchNumbers), JSON_UNESCAPED_UNICODE);
-    if ($batchNumbersJson === false) {
-        $batchNumbersJson = '[]';
-    }
-
-    $productNameJson = json_encode($productName, JSON_UNESCAPED_UNICODE);
-    if ($productNameJson === false) {
-        $productNameJson = '""';
-    }
-
-    $firstBatchNumberJson = json_encode($batchNumbers[0] ?? '', JSON_UNESCAPED_UNICODE);
-    if ($firstBatchNumberJson === false) {
-        $firstBatchNumberJson = '""';
-    }
-
-    $quantityValue = (int) $quantity;
-    ?>
+    echo "
     <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const batchNumbers = <?= $batchNumbersJson ?>;
-        const firstBatchNumber = <?= $firstBatchNumberJson ?>;
-        const productName = <?= $productNameJson ?>;
-        const barcodeQuantity = <?= $quantityValue ?>;
-
-        window.batchNumbersToPrint = Array.isArray(batchNumbers) ? batchNumbers : [];
-
-        const productNameInput = document.getElementById('barcode_product_name');
-        const quantityText = document.getElementById('barcode_quantity');
-        const quantityInput = document.getElementById('barcode_print_quantity');
-        const batchListContainer = document.getElementById('batch_numbers_list');
-        const modalElement = document.getElementById('printBarcodesModal');
-
-        if (productNameInput) {
-            productNameInput.value = productName;
-        }
-
-        if (quantityText) {
-            quantityText.textContent = barcodeQuantity;
-        }
-
-        if (quantityInput) {
-            quantityInput.value = barcodeQuantity;
-        }
-
-        if (batchListContainer) {
-            let batchListHtml = '<div class="alert alert-info mb-0">';
-            batchListHtml += '<i class="bi bi-info-circle me-2"></i>';
-            batchListHtml += '<strong>رقم التشغيلة:</strong> ' + (firstBatchNumber || '') + '<br>';
-            batchListHtml += '<small>ستتم طباعة نفس رقم التشغيلة بعدد ' + barcodeQuantity + ' باركود</small>';
-            batchListHtml += '</div>';
-            batchListContainer.innerHTML = batchListHtml;
-        }
-
-        if (modalElement) {
-            const modal = new bootstrap.Modal(modalElement);
-            modal.show();
-        }
+    window.batchNumbersToPrint = " . json_encode($batchNumbers) . ";
+    
+    document.addEventListener('DOMContentLoaded', function() {
+        document.getElementById('barcode_product_name').value = " . json_encode($productName) . ";
+        document.getElementById('barcode_quantity').textContent = " . $quantity . ";
+        document.getElementById('barcode_print_quantity').value = " . $quantity . ";
+        
+        // عرض رقم التشغيلة (كل الباركودات لها نفس الرقم)
+        const batchNumber = " . json_encode($batchNumbers[0] ?? '') . ";
+        let batchListHtml = '<div class=\"alert alert-info mb-0\">';
+        batchListHtml += '<i class=\"bi bi-info-circle me-2\"></i>';
+        batchListHtml += '<strong>رقم التشغيلة:</strong> ' + batchNumber + '<br>';
+        batchListHtml += '<small>سيتم طباعة نفس رقم التشغيلة بعدد ' + " . $quantity . " . ' باركود</small>';
+        batchListHtml += '</div>';
+        document.getElementById('batch_numbers_list').innerHTML = batchListHtml;
+        
+        const modal = new bootstrap.Modal(document.getElementById('printBarcodesModal'));
+        modal.show();
     });
     </script>
-    <?php
+    ";
 }
 ?>
 </script>
 
+<style>
+.template-card {
+    min-height: 180px;
+}
+
+.template-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15) !important;
+    border-left-width: 5px !important;
+}
+
+@media (max-width: 768px) {
+    .template-card {
+        margin-bottom: 0.75rem;
+        min-height: 160px;
+    }
+}
+
+@media (min-width: 1400px) {
+    .template-card {
+        min-height: 200px;
+    }
+}
+</style>
+
 <?php
-// معالجة طلبات AJAX الخاصة بتحميل بيانات الإنتاج
+// معالجة AJAX لتحميل بيانات الإنتاج
 if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && isset($_GET['id'])) {
     $productionId = intval($_GET['id']);
     $production = $db->queryOne(
@@ -3617,24 +3741,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && isset($_GET['id'])) {
 ?>
 
 <script>
-// منع تكرار الإرسال - إضافة رمز فريد لكل نموذج
+// منع تكرار الإرسال - إضافة توكن فريد لكل نموذج
 document.addEventListener('DOMContentLoaded', function() {
     // البحث عن جميع النماذج في الصفحة
     const forms = document.querySelectorAll('form[method="post"], form[method="POST"]');
     
     forms.forEach(function(form) {
-        // التحقق من وجود حقل الرمز مسبقًا
+        // تحقق من عدم وجود توكن موجود بالفعل
         if (!form.querySelector('input[name="submit_token"]')) {
-            // إنشاء رمز فريد
+            // إنشاء توكن فريد
             const token = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             
-            // إنشاء حقل مخفي للاحتفاظ بالرمز
+            // إنشاء حقل مخفي للتوكن
             const tokenInput = document.createElement('input');
             tokenInput.type = 'hidden';
             tokenInput.name = 'submit_token';
             tokenInput.value = token;
             
-            // إلحاق الرمز بالنموذج
+            // إضافة التوكن للنموذج
             form.appendChild(tokenInput);
         }
         
@@ -3642,7 +3766,7 @@ document.addEventListener('DOMContentLoaded', function() {
         form.addEventListener('submit', function(e) {
             const submitButton = form.querySelector('button[type="submit"], input[type="submit"]');
             if (submitButton) {
-                // تعطيل الزر مؤقتًا
+                // تعطيل الزر فوراً
                 submitButton.disabled = true;
                 submitButton.style.opacity = '0.6';
                 submitButton.style.cursor = 'not-allowed';
@@ -3655,7 +3779,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     submitButton.value = 'جاري المعالجة...';
                 }
                 
-                // إعادة تفعيل الزر بعد 3 ثوانٍ (في حال فشل الإرسال)
+                // إعادة تفعيل الزر بعد 3 ثواني (في حالة فشل الإرسال)
                 setTimeout(function() {
                     submitButton.disabled = false;
                     submitButton.style.opacity = '1';
@@ -3666,7 +3790,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         submitButton.value = originalText;
                     }
                     
-                    // تحديث الرمز
+                    // تحديث التوكن
                     const newToken = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
                     const tokenInput = form.querySelector('input[name="submit_token"]');
                     if (tokenInput) {
@@ -3677,21 +3801,21 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // منع إعادة الإرسال عند تحديث الصفحة (F5 أو Refresh)
+    // منع إعادة الإرسال عند الضغط على F5 أو Refresh
     if (performance.navigation.type === 1) {
         // الصفحة تم تحديثها (Refresh)
-        // إزالة أي رسائل خطأ قد تنتج عن إعادة الإرسال
+        // إزالة أي رسائل خطأ قد تكون ناتجة عن إعادة الإرسال
         console.log('تم اكتشاف إعادة تحميل الصفحة - تم منع إعادة الإرسال');
     }
 });
 
-// تحذير عند محاولة مغادرة الصفحة مع وجود تغييرات
+// تحذير عند محاولة إعادة الإرسال
 window.addEventListener('beforeunload', function(e) {
     const forms = document.querySelectorAll('form[method="post"], form[method="POST"]');
     let formModified = false;
     
     forms.forEach(function(form) {
-        // التحقق إذا تم تعديل أي حقل
+        // تحقق إذا تم تعديل أي حقل
         const inputs = form.querySelectorAll('input, textarea, select');
         inputs.forEach(function(input) {
             if (input.value !== input.defaultValue) {
@@ -3700,9 +3824,10 @@ window.addEventListener('beforeunload', function(e) {
         });
     });
     
-    // لا تعرض تحذيرًا إذا لم يتم تعديل أي شيء
+    // لا تعرض تحذير إذا لم يتم تعديل أي شيء
     if (!formModified) {
         return undefined;
     }
 });
 </script>
+

@@ -18,6 +18,11 @@ $currentUser = getCurrentUser();
 $db = db();
 $page = $_GET['page'] ?? 'dashboard';
 
+$pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
+if ($page === 'production') {
+    $pageStylesheets[] = 'assets/css/production-page.css';
+}
+
 $isAjaxRequest = (
     (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') ||
     (!empty($_POST['is_ajax'])) ||

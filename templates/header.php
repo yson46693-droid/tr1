@@ -84,6 +84,40 @@ if (function_exists('processDailyPackagingAlert')) {
     <link href="<?php echo $assetsUrl; ?>css/mobile-tables.css?v=<?php echo $cacheVersion; ?>" rel="stylesheet">
     <link href="<?php echo $assetsUrl; ?>css/pwa.css?v=<?php echo $cacheVersion; ?>" rel="stylesheet">
     <link href="<?php echo $assetsUrl; ?>css/dark-mode.css?v=<?php echo $cacheVersion; ?>" rel="stylesheet">
+    <?php if (!empty($pageStylesheets) && is_array($pageStylesheets)): ?>
+        <?php foreach ($pageStylesheets as $stylesheetPath): ?>
+            <?php
+            if (!is_string($stylesheetPath)) {
+                continue;
+            }
+            $stylesheetPath = trim($stylesheetPath);
+            if ($stylesheetPath === '') {
+                continue;
+            }
+
+            $hasProtocol = (bool) preg_match('#^https?://#i', $stylesheetPath);
+            $isProtocolRelative = !$hasProtocol && strpos($stylesheetPath, '//') === 0;
+            if ($hasProtocol || $isProtocolRelative) {
+                $href = $stylesheetPath;
+            } else {
+                if (strpos($stylesheetPath, '/') === 0) {
+                    $normalizedPath = preg_replace('#/+#', '/', $stylesheetPath);
+                    $href = getRelativeUrl(ltrim($normalizedPath, '/'));
+                } else {
+                    $baseHref = (strpos($stylesheetPath, 'assets/') === 0)
+                        ? '/' . ltrim($stylesheetPath, '/')
+                        : rtrim($assetsUrl, '/') . '/' . ltrim($stylesheetPath, '/');
+                    $href = getRelativeUrl(ltrim($baseHref, '/'));
+                }
+            }
+
+            if (strpos($href, '?') === false) {
+                $href .= '?v=' . $cacheVersion;
+            }
+            ?>
+            <link href="<?php echo htmlspecialchars($href, ENT_QUOTES, 'UTF-8'); ?>" rel="stylesheet">
+        <?php endforeach; ?>
+    <?php endif; ?>
     <?php if ($dir === 'rtl'): ?>
     <link href="<?php echo $assetsUrl; ?>css/rtl.css?v=<?php echo $cacheVersion; ?>" rel="stylesheet">
     <?php endif; ?>

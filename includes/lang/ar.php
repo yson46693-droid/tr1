@@ -185,6 +185,17 @@ $translations = [
     'production_date' => 'تاريخ الإنتاج',
     'materials_used' => 'المواد المستخدمة',
     'add_production' => 'إضافة إنتاج',
+    'production_list' => 'قائمة الإنتاج',
+    'no_production' => 'لا توجد سجلات إنتاج',
+    'select_product' => 'اختر المنتج',
+    'select_worker' => 'اختر العامل',
+    'materials_used_placeholder' => 'وصف المواد المستخدمة...',
+    'notes_placeholder' => 'ملاحظات إضافية...',
+    'worker' => 'العامل',
+    'status' => 'الحالة',
+    'id' => 'رقم',
+    'notes' => 'ملاحظات',
+    'update' => 'تحديث',
     
     // الموافقات
     'approvals' => 'الموافقات',
