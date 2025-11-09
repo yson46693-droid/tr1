@@ -1,0 +1,117 @@
+<?php
+declare(strict_types=1);
+
+if (!defined('ACCESS_ALLOWED')) {
+    define('ACCESS_ALLOWED', true);
+}
+
+// منع تشغيل المهام اليومية أثناء عرض التقرير
+if (!defined('SKIP_LOW_STOCK_REPORT')) {
+    define('SKIP_LOW_STOCK_REPORT', true);
+}
+if (!defined('SKIP_DAILY_CONSUMPTION_REPORT')) {
+    define('SKIP_DAILY_CONSUMPTION_REPORT', true);
+}
+if (!defined('SKIP_DAILY_BACKUP')) {
+    define('SKIP_DAILY_BACKUP', true);
+}
+
+require_once __DIR__ . '/../includes/config.php';
+require_once __DIR__ . '/../includes/db.php';
+
+/**
+ * عرض رسالة خطأ للمستخدم
+ *
+ * @param int $code
+ * @param string $message
+ * @return void
+ */
+function renderReportError(int $code, string $message): void
+{
+    http_response_code($code);
+    header('Content-Type: text/html; charset=UTF-8');
+    echo '<!DOCTYPE html><html lang="ar"><head><meta charset="utf-8"><title>خطأ في عرض التقرير</title>';
+    echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
+    echo '<style>body{font-family:"Cairo","Segoe UI",Tahoma,sans-serif;direction:rtl;text-align:center;padding:40px;background:#f8fafc;color:#0f172a;}';
+    echo '.card{max-width:480px;margin:0 auto;background:#fff;border-radius:16px;padding:32px;box-shadow:0 20px 45px rgba(15,23,42,0.1);}';
+    echo '.code{display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:50%;background:#1d4ed8;color:#fff;font-weight:700;font-size:22px;margin-bottom:18px;}';
+    echo 'h1{margin:0 0 12px;font-size:22px;}p{margin:0;font-size:15px;color:#475569;}</style></head><body>';
+    echo '<div class="card"><div class="code">' . htmlspecialchars((string)$code, ENT_QUOTES, 'UTF-8') . '</div>';
+    echo '<h1>تعذّر عرض التقرير</h1><p>' . htmlspecialchars($message, ENT_QUOTES, 'UTF-8') . '</p></div></body></html>';
+    exit;
+}
+
+$type = $_GET['type'] ?? 'low_stock';
+$token = trim((string)($_GET['token'] ?? ''));
+
+if ($type !== 'low_stock') {
+    renderReportError(404, 'نوع التقرير غير مدعوم.');
+}
+
+if ($token === '') {
+    renderReportError(400, 'المعرف الآمن للتقرير مفقود.');
+}
+
+try {
+    $db = db();
+} catch (Throwable $connectionError) {
+    error_log('Report viewer: DB connection failed - ' . $connectionError->getMessage());
+    renderReportError(500, 'حدث خطأ في الاتصال بقاعدة البيانات.');
+}
+
+if (!defined('LOW_STOCK_REPORT_STATUS_SETTING_KEY')) {
+    define('LOW_STOCK_REPORT_STATUS_SETTING_KEY', 'low_stock_report_status');
+}
+
+$row = null;
+try {
+    $row = $db->queryOne(
+        "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
+        [LOW_STOCK_REPORT_STATUS_SETTING_KEY]
+    );
+} catch (Throwable $queryError) {
+    error_log('Report viewer: status fetch failed - ' . $queryError->getMessage());
+    renderReportError(500, 'تعذّر التحقق من حالة التقرير.');
+}
+
+if (empty($row) || empty($row['value'])) {
+    renderReportError(404, 'لم يتم إنشاء تقرير لهذا اليوم بعد.');
+}
+
+$data = json_decode((string)$row['value'], true);
+if (!is_array($data)) {
+    renderReportError(500, 'تنسيق بيانات التقرير غير صالح.');
+}
+
+$storedToken = (string)($data['access_token'] ?? '');
+if ($storedToken === '' || !hash_equals($storedToken, $token)) {
+    renderReportError(403, 'المعرف الآمن غير صحيح أو انتهت صلاحيته.');
+}
+
+$relativePath = (string)($data['report_path'] ?? '');
+if ($relativePath === '') {
+    renderReportError(404, 'مسار ملف التقرير غير متاح.');
+}
+
+if (strpos($relativePath, '..') !== false) {
+    renderReportError(403, 'مسار الملف غير آمن.');
+}
+
+$fullPath = BASE_PATH . '/' . ltrim(str_replace('\\', '/', $relativePath), '/');
+if (!is_file($fullPath)) {
+    renderReportError(404, 'ملف التقرير غير موجود.');
+}
+
+$contents = @file_get_contents($fullPath);
+if ($contents === false) {
+    renderReportError(500, 'تعذّر قراءة ملف التقرير.');
+}
+
+header('Content-Type: text/html; charset=UTF-8');
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: SAMEORIGIN');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+
+echo $contents;
+

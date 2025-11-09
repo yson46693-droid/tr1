@@ -513,6 +513,12 @@ if (!function_exists('triggerDailyLowStockReport')) {
         $relativePath = null;
         $existingReportPath = null;
         $existingReportRelative = null;
+        $accessToken = null;
+        $viewerPath = null;
+        $absoluteReportUrl = null;
+        $absolutePrintUrl = null;
+        $existingAccessToken = null;
+        $existingViewerPath = null;
         if (!empty($existingData) && ($existingData['date'] ?? null) === $todayDate) {
             $storedPath = $existingData['report_path'] ?? null;
             if (!empty($storedPath)) {
@@ -521,6 +527,12 @@ if (!function_exists('triggerDailyLowStockReport')) {
                     $existingReportPath = $candidate;
                     $existingReportRelative = ltrim($storedPath, '/\\');
                 }
+            }
+            if (!empty($existingData['access_token'])) {
+                $existingAccessToken = (string) $existingData['access_token'];
+            }
+            if (!empty($existingData['viewer_path'])) {
+                $existingViewerPath = (string) $existingData['viewer_path'];
             }
         }
 
@@ -540,10 +552,33 @@ if (!function_exists('triggerDailyLowStockReport')) {
                 $status = 'failed';
                 $errorMessage = 'فشل إنشاء ملف HTML للتقرير.';
             } else {
-                $reportUrl = getRelativeUrl($relativePath);
+                $accessToken = $existingAccessToken;
+                if (empty($accessToken)) {
+                    try {
+                        $accessToken = bin2hex(random_bytes(16));
+                    } catch (Throwable $tokenError) {
+                        $accessToken = sha1($relativePath . microtime(true) . mt_rand());
+                        error_log('Low Stock Report: random_bytes failed, using fallback token - ' . $tokenError->getMessage());
+                    }
+                }
+
+                $viewerPath = $existingViewerPath;
+                if (empty($viewerPath) || strpos($viewerPath, 'reports/view.php') !== 0) {
+                    $viewerPath = 'reports/view.php?' . http_build_query(
+                        [
+                            'type' => 'low_stock',
+                            'token' => $accessToken,
+                        ],
+                        '',
+                        '&',
+                        PHP_QUERY_RFC3986
+                    );
+                }
+
+                $reportUrl = getRelativeUrl($viewerPath);
                 $printUrl = $reportUrl . (strpos($reportUrl, '?') === false ? '?print=1' : '&print=1');
 
-                $absoluteReportUrl = getAbsoluteUrl($relativePath);
+                $absoluteReportUrl = getAbsoluteUrl($viewerPath);
                 $absolutePrintUrl = $absoluteReportUrl . (strpos($absoluteReportUrl, '?') === false ? '?print=1' : '&print=1');
 
                 $summaryLines = [];
@@ -617,9 +652,19 @@ if (!function_exists('triggerDailyLowStockReport')) {
             if (!empty($relativePath)) {
                 $finalData['report_path'] = $relativePath;
             }
+            if (!empty($viewerPath)) {
+                $finalData['viewer_path'] = $viewerPath;
+            }
+            if (!empty($accessToken)) {
+                $finalData['access_token'] = $accessToken;
+            }
             if (isset($reportUrl)) {
                 $finalData['report_url'] = $reportUrl;
                 $finalData['print_url'] = $printUrl ?? $reportUrl;
+            }
+            if (!empty($absoluteReportUrl)) {
+                $finalData['absolute_report_url'] = $absoluteReportUrl;
+                $finalData['absolute_print_url'] = $absolutePrintUrl ?? $absoluteReportUrl;
             }
 
             if ($status === 'completed') {
