@@ -1949,8 +1949,98 @@ $lang = isset($translations) ? $translations : [];
 
 <div id="productionRecordsSection">
 
+<!-- قسم قوالب المنتجات -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>قوالب المنتجات - إنشاء إنتاج من قالب</h5>
+        <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-light btn-sm">
+            <i class="bi bi-plus-circle me-2"></i>إدارة القوالب في مخزن الخامات
+        </a>
+    </div>
+    <?php if (!empty($templates)): ?>
+    <div class="card-body">
+        <div class="row g-3">
+            <?php foreach ($templates as $template): ?>
+                <div class="col-lg-3 col-md-4 col-sm-6">
+                    <div class="card shadow-sm h-100 template-card" style="border-left: 4px solid #0dcaf0; transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;"
+                         data-template-id="<?php echo $template['id']; ?>"
+                         data-template-name="<?php echo htmlspecialchars($template['product_name']); ?>"
+                         data-template-type="<?php echo htmlspecialchars($template['template_type'] ?? 'legacy'); ?>"
+                         onclick="openCreateFromTemplateModal(this)">
+                        <div class="card-body p-3">
+                            <?php 
+                            $templateTypeLabels = [
+                                'unified' => 'متعدد المواد',
+                                'honey' => 'عسل',
+                                'olive_oil' => 'زيت زيتون',
+                                'beeswax' => 'شمع عسل',
+                                'derivatives' => 'مشتقات'
+                            ];
+                            $typeLabel = $templateTypeLabels[$template['template_type']] ?? 'غير محدد';
+                            $typeColors = [
+                                'unified' => 'dark',
+                                'honey' => 'warning',
+                                'olive_oil' => 'success',
+                                'beeswax' => 'primary',
+                                'derivatives' => 'secondary'
+                            ];
+                            $typeColor = $typeColors[$template['template_type']] ?? 'secondary';
+                            ?>
+                            
+                            <!-- Header مدمج -->
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <h6 class="mb-0 text-info fw-bold" style="font-size: 0.95rem;">
+                                    <i class="bi bi-box-seam me-2"></i>
+                                    <?php echo htmlspecialchars($template['product_name']); ?>
+                                </h6>
+                            </div>
+                            
+                            <!-- Badge نوع المادة -->
+                            <div class="mb-3">
+                                <span class="badge bg-<?php echo $typeColor; ?> text-white" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+                                    <?php echo $typeLabel; ?>
+                                </span>
+                            </div>
+                            
+                            <!-- المكونات -->
+                            <?php if (!empty($template['material_details'])): ?>
+                                <?php foreach ($template['material_details'] as $material): ?>
+                                    <div class="d-flex align-items-center mb-2 p-2 bg-light rounded">
+                                        <i class="bi bi-droplet-fill text-<?php echo $typeColor; ?> me-2" style="font-size: 0.9rem;"></i>
+                                        <small class="text-muted me-2" style="font-size: 0.8rem;"><?php echo htmlspecialchars($material['type']); ?>:</small>
+                                        <small class="fw-bold text-<?php echo $typeColor; ?>" style="font-size: 0.85rem;">
+                                            <?php echo number_format($material['quantity'], 2); ?> <?php echo htmlspecialchars($material['unit']); ?>
+                                        </small>
+                                    </div>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                            
+                            <!-- Footer -->
+                            <div class="text-center mt-3 pt-3 border-top">
+                                <span class="badge bg-success" style="font-size: 0.8rem; padding: 0.5rem 1rem;">
+                                    <i class="bi bi-arrow-right-circle me-2"></i>
+                                    اضغط للإنتاج
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php else: ?>
+        <div class="card-body text-center py-5">
+            <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
+            <h5 class="text-muted">لا توجد قوالب منتجات</h5>
+            <p class="text-muted">قم بإنشاء قوالب المنتجات من صفحة مخزن الخامات</p>
+            <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-primary">
+                <i class="bi bi-box-seam me-2"></i>الذهاب إلى مخزن الخامات
+            </a>
+        </div>
+    <?php endif; ?>
+</div>
+
 <!-- جدول الإنتاج -->
-<div class="card shadow-sm">
+<div class="card shadow-sm mt-4">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i><?php echo isset($lang['production_list']) ? $lang['production_list'] : 'قائمة الإنتاج'; ?> (<?php echo $totalProduction; ?>)</h5>
     </div>
@@ -2053,96 +2143,6 @@ $lang = isset($translations) ? $translations : [];
         </nav>
         <?php endif; ?>
     </div>
-</div>
-
-<!-- قسم قوالب المنتجات -->
-<div class="card shadow-sm mt-5">
-    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-file-earmark-text me-2"></i>قوالب المنتجات - إنشاء إنتاج من قالب</h5>
-        <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-light btn-sm">
-            <i class="bi bi-plus-circle me-2"></i>إدارة القوالب في مخزن الخامات
-        </a>
-    </div>
-    <?php if (!empty($templates)): ?>
-    <div class="card-body">
-        <div class="row g-3">
-            <?php foreach ($templates as $template): ?>
-                <div class="col-lg-3 col-md-4 col-sm-6">
-                    <div class="card shadow-sm h-100 template-card" style="border-left: 4px solid #0dcaf0; transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;"
-                         data-template-id="<?php echo $template['id']; ?>"
-                         data-template-name="<?php echo htmlspecialchars($template['product_name']); ?>"
-                         data-template-type="<?php echo htmlspecialchars($template['template_type'] ?? 'legacy'); ?>"
-                         onclick="openCreateFromTemplateModal(this)">
-                        <div class="card-body p-3">
-                            <?php 
-                            $templateTypeLabels = [
-                                'unified' => 'متعدد المواد',
-                                'honey' => 'عسل',
-                                'olive_oil' => 'زيت زيتون',
-                                'beeswax' => 'شمع عسل',
-                                'derivatives' => 'مشتقات'
-                            ];
-                            $typeLabel = $templateTypeLabels[$template['template_type']] ?? 'غير محدد';
-                            $typeColors = [
-                                'unified' => 'dark',
-                                'honey' => 'warning',
-                                'olive_oil' => 'success',
-                                'beeswax' => 'primary',
-                                'derivatives' => 'secondary'
-                            ];
-                            $typeColor = $typeColors[$template['template_type']] ?? 'secondary';
-                            ?>
-                            
-                            <!-- Header مدمج -->
-                            <div class="d-flex justify-content-between align-items-center mb-3">
-                                <h6 class="mb-0 text-info fw-bold" style="font-size: 0.95rem;">
-                                    <i class="bi bi-box-seam me-2"></i>
-                                    <?php echo htmlspecialchars($template['product_name']); ?>
-                                </h6>
-                            </div>
-                            
-                            <!-- Badge نوع المادة -->
-                            <div class="mb-3">
-                                <span class="badge bg-<?php echo $typeColor; ?> text-white" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
-                                    <?php echo $typeLabel; ?>
-                                </span>
-                            </div>
-                            
-                            <!-- المكونات -->
-                            <?php if (!empty($template['material_details'])): ?>
-                                <?php foreach ($template['material_details'] as $material): ?>
-                                    <div class="d-flex align-items-center mb-2 p-2 bg-light rounded">
-                                        <i class="bi bi-droplet-fill text-<?php echo $typeColor; ?> me-2" style="font-size: 0.9rem;"></i>
-                                        <small class="text-muted me-2" style="font-size: 0.8rem;"><?php echo htmlspecialchars($material['type']); ?>:</small>
-                                        <small class="fw-bold text-<?php echo $typeColor; ?>" style="font-size: 0.85rem;">
-                                            <?php echo number_format($material['quantity'], 2); ?> <?php echo htmlspecialchars($material['unit']); ?>
-                                        </small>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                            
-                            <!-- Footer -->
-                            <div class="text-center mt-3 pt-3 border-top">
-                                <span class="badge bg-success" style="font-size: 0.8rem; padding: 0.5rem 1rem;">
-                                    <i class="bi bi-arrow-right-circle me-2"></i>
-                                    اضغط للإنتاج
-                                </span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    <?php else: ?>
-        <div class="card-body text-center py-5">
-            <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
-            <h5 class="text-muted">لا توجد قوالب منتجات</h5>
-            <p class="text-muted">قم بإنشاء قوالب المنتجات من صفحة مخزن الخامات</p>
-            <a href="<?php echo getDashboardUrl('production'); ?>?page=raw_materials_warehouse" class="btn btn-primary">
-                <i class="bi bi-box-seam me-2"></i>الذهاب إلى مخزن الخامات
-            </a>
-        </div>
-    <?php endif; ?>
 </div>
 
 </div>
