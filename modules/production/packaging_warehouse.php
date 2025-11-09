@@ -464,7 +464,7 @@ if (!function_exists('shouldShowPackagingUseButton')) {
             }
         }
 
-        $targetNames = ['بابلز', 'bubble', 'bubbles'];
+        $targetNames = ['بابلز', 'bubble', 'bubbles', 'شريط لاصق', 'لاصق', 'adhesive tape', 'tape'];
         foreach ($targetNames as $targetName) {
             $normalizedTarget = normalizePackagingString($targetName);
             if ($normalizedTarget !== '') {
@@ -1857,7 +1857,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                 <?php
                                     $materialQuantity = isset($material['quantity']) ? (float)$material['quantity'] : 0.0;
                                     $showUseButton = $usePackagingTable && shouldShowPackagingUseButton($material);
-                                    $useButtonDisabled = $materialQuantity < 1;
+                                    $useButtonDisabled = $materialQuantity <= 0;
                                     $quantityElementId = 'material-quantity-' . $material['id'];
                                 ?>
                                 <td style="padding: 0.4rem 0.25rem;">
@@ -1883,6 +1883,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                     <div class="btn-group btn-group-sm">
                                         <?php if ($showUseButton): ?>
                                             <button class="btn btn-outline-primary btn-sm"
+                                                    type="button"
                                                     data-id="<?php echo $material['id']; ?>"
                                                     data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                                     data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
@@ -2009,6 +2010,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                             <div class="d-grid gap-2 d-flex mt-3">
                                 <?php if ($showUseButton): ?>
                                     <button class="btn btn-sm btn-outline-primary flex-fill"
+                                            type="button"
                                             data-id="<?php echo $material['id']; ?>"
                                             data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                             data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
