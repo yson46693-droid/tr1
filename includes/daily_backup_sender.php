@@ -10,6 +10,17 @@ if (!defined('ACCESS_ALLOWED')) {
 const DAILY_BACKUP_JOB_KEY = 'daily_backup_telegram';
 const DAILY_BACKUP_STATUS_SETTING_KEY = 'daily_backup_status';
 
+if (!function_exists('dailyBackupFileMatchesDate')) {
+    function dailyBackupFileMatchesDate(string $path, string $targetDate): bool
+    {
+        if (!is_file($path)) {
+            return false;
+        }
+
+        return date('Y-m-d', (int)filemtime($path)) === $targetDate;
+    }
+}
+
 if (!function_exists('dailyBackupEnsureJobTable')) {
     /**
      * التأكد من وجود جدول تتبع المهام اليومية.
@@ -130,6 +141,11 @@ if (!function_exists('triggerDailyBackupDelivery')) {
         $db = db();
         dailyBackupEnsureJobTable();
 
+        $backupsBaseDir = rtrim(
+            defined('BACKUPS_PATH') ? BACKUPS_PATH : (dirname(__DIR__) . '/backups'),
+            '/\\'
+        );
+
         $jobState = null;
         try {
             $jobState = $db->queryOne(
@@ -140,7 +156,13 @@ if (!function_exists('triggerDailyBackupDelivery')) {
             error_log('Daily Backup: failed loading job state - ' . $stateError->getMessage());
         }
 
-        if (!empty($jobState['last_sent_at'])) {
+        $jobRelativePath = (string)($jobState['last_file_path'] ?? '');
+        $jobFilePath = $jobRelativePath !== ''
+            ? $backupsBaseDir . '/' . ltrim($jobRelativePath, '/\\')
+            : null;
+        $jobFileValid = $jobFilePath !== null && dailyBackupFileMatchesDate($jobFilePath, $todayDate);
+
+        if (!empty($jobState['last_sent_at']) && $jobFileValid) {
             $lastSentDate = substr((string) $jobState['last_sent_at'], 0, 10);
             if ($lastSentDate === $todayDate) {
                 $statusData['status'] = 'already_sent';
@@ -169,22 +191,22 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                 }
             }
 
-            $existingDataHasFile = false;
+        $existingDataHasFile = false;
             if (
                 !empty($existingData['file_path']) &&
                 ($existingData['date'] ?? null) === $todayDate
             ) {
-                $candidateExisting = rtrim(defined('BACKUPS_PATH') ? BACKUPS_PATH : (dirname(__DIR__) . '/backups'), '/\\')
-                    . '/' . ltrim((string)$existingData['file_path'], '/\\');
-                if (is_file($candidateExisting)) {
-                    $existingDataHasFile = true;
-                }
+            $candidateExisting = $backupsBaseDir . '/' . ltrim((string)$existingData['file_path'], '/\\');
+            if (dailyBackupFileMatchesDate($candidateExisting, $todayDate)) {
+                $existingDataHasFile = true;
+            }
             }
 
             if (
                 !empty($existingData) &&
                 ($existingData['date'] ?? null) === $todayDate &&
-                in_array($existingData['status'] ?? null, ['completed', 'sent'], true)
+            in_array($existingData['status'] ?? null, ['completed', 'sent'], true) &&
+            $existingDataHasFile
             ) {
                 $db->commit();
                 dailyBackupNotifyManager('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.');

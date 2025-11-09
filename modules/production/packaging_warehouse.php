@@ -43,6 +43,17 @@ $filters = [
 $tableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
 $usePackagingTable = !empty($tableCheck);
 
+if ($usePackagingTable) {
+    $aliasColumnCheck = $db->queryOne("SHOW COLUMNS FROM packaging_materials LIKE 'alias'");
+    if (empty($aliasColumnCheck)) {
+        try {
+            $db->execute("ALTER TABLE `packaging_materials` ADD COLUMN `alias` VARCHAR(255) DEFAULT NULL AFTER `name`");
+        } catch (Throwable $aliasError) {
+            error_log('Packaging alias column error: ' . $aliasError->getMessage());
+        }
+    }
+}
+
 // إنشاء جدول تسجيل التلفيات إذا لم يكن موجوداً
 $damageLogTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_damage_logs'");
 if (empty($damageLogTableCheck)) {
@@ -74,7 +85,66 @@ if (empty($damageLogTableCheck)) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'add_packaging_quantity') {
+    if ($action === 'update_packaging_alias') {
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!$usePackagingTable) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'ميزة الاسم المستعار غير متاحة في الوضع الحالي.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $materialId = intval($_POST['material_id'] ?? 0);
+        $aliasValue = trim((string)($_POST['alias'] ?? ''));
+
+        if ($materialId <= 0) {
+            echo json_encode([
+                'success' => false,
+                'message' => 'معرّف الأداة غير صحيح.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        try {
+            $original = $db->queryOne(
+                "SELECT id, alias FROM packaging_materials WHERE id = ?",
+                [$materialId]
+            );
+
+            if (!$original) {
+                throw new Exception('أداة التعبئة غير موجودة.');
+            }
+
+            $db->execute(
+                "UPDATE packaging_materials SET alias = ?, updated_at = NOW() WHERE id = ?",
+                [$aliasValue !== '' ? $aliasValue : null, $materialId]
+            );
+
+            logAudit(
+                $currentUser['id'],
+                'update_packaging_alias',
+                'packaging_materials',
+                $materialId,
+                ['alias' => $original['alias'] ?? null],
+                ['alias' => $aliasValue !== '' ? $aliasValue : null]
+            );
+
+            echo json_encode([
+                'success' => true,
+                'alias' => $aliasValue,
+                'message' => 'تم حفظ الاسم المستعار بنجاح.'
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Throwable $aliasUpdateError) {
+            error_log('Packaging alias update error: ' . $aliasUpdateError->getMessage());
+            echo json_encode([
+                'success' => false,
+                'message' => 'تعذّر حفظ الاسم المستعار: ' . $aliasUpdateError->getMessage()
+            ], JSON_UNESCAPED_UNICODE);
+        }
+        exit;
+    } elseif ($action === 'add_packaging_quantity') {
         $materialId = intval($_POST['material_id'] ?? 0);
         $additionalQuantity = isset($_POST['additional_quantity']) ? round(floatval($_POST['additional_quantity']), 4) : 0.0;
         $notes = trim($_POST['notes'] ?? '');
@@ -430,7 +500,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // تحميل قائمة أدوات التعبئة بعد معالجة الطلبات
 if ($usePackagingTable) {
     $packagingMaterials = $db->query(
-        "SELECT id, material_id, name, type, specifications, quantity, unit, status, created_at, updated_at
+        "SELECT id, material_id, name, alias, type, specifications, quantity, unit, status, created_at, updated_at
          FROM packaging_materials 
          WHERE status = 'active'
          ORDER BY name"
@@ -464,6 +534,12 @@ if ($usePackagingTable) {
          WHERE " . implode(' AND ', $whereConditions) . "
          ORDER BY name"
     );
+    foreach ($packagingMaterials as &$legacyMaterial) {
+        if (!array_key_exists('alias', $legacyMaterial)) {
+            $legacyMaterial['alias'] = null;
+        }
+    }
+    unset($legacyMaterial);
 }
 
 // بناء استعلام للحصول على الاستخدامات
@@ -517,6 +593,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && isset($_GET['material_id']))
             'id' => intval($materialRow['id'] ?? $materialId),
             'material_id' => $materialRow['material_id'] ?? null,
             'name' => $materialRow['name'] ?? '',
+            'alias' => $materialRow['alias'] ?? null,
             'type' => $materialRow['type'] ?? null,
             'category' => $materialRow['category'] ?? null,
             'specifications' => $materialRow['specifications'] ?? '',
@@ -723,12 +800,14 @@ foreach ($packagingMaterials as $material) {
         $type = strtolower($material['type'] ?? '');
         $specifications = strtolower($material['specifications'] ?? '');
         $materialIdStr = strtolower($material['material_id'] ?? '');
+        $aliasValue = strtolower($material['alias'] ?? '');
         
         if (strpos($name, $search) === false && 
             strpos($category, $search) === false &&
             strpos($type, $search) === false &&
             strpos($specifications, $search) === false &&
-            strpos($materialIdStr, $search) === false) {
+            strpos($materialIdStr, $search) === false &&
+            strpos($aliasValue, $search) === false) {
             continue;
         }
     }
@@ -827,6 +906,7 @@ foreach ($packagingMaterials as $material) {
     $materialName = $material['name'] ?? ('أداة #' . ($material['id'] ?? ''));
     $packagingReport['top_items'][] = [
         'name' => $materialName,
+        'alias' => $material['alias'] ?? null,
         'type' => $typeLabel,
         'quantity' => $quantity,
         'unit' => $unit,
@@ -1030,11 +1110,36 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
                                 <td style="padding: 0.4rem 0.25rem;"><?php echo $offset + $index + 1; ?></td>
                                 <td style="padding: 0.4rem 0.25rem; line-height: 1.3;">
                                     <div style="font-weight: 600; font-size: 0.875rem;"><?php echo htmlspecialchars($material['name']); ?></div>
+                                    <?php 
+                                        $aliasValue = trim((string)($material['alias'] ?? ''));
+                                        $aliasDisplayText = $aliasValue !== '' ? $aliasValue : 'لا يوجد اسم مستعار';
+                                        $aliasDisplayClass = $aliasValue !== '' ? 'text-info' : 'text-muted';
+                                    ?>
+                                    <div class="alias-display <?php echo $aliasDisplayClass; ?>" data-empty-text="لا يوجد اسم مستعار" style="font-size: 0.75rem; margin-top: 2px;">
+                                        <span class="fw-semibold text-secondary">الاسم المستعار:</span>
+                                        <span class="alias-text"><?php echo htmlspecialchars($aliasDisplayText); ?></span>
+                                    </div>
                                     <?php if (!empty($material['specifications'])): ?>
                                         <div style="font-size: 0.75rem; color: #6c757d; margin-top: 2px;"><?php echo htmlspecialchars($material['specifications']); ?></div>
                                     <?php endif; ?>
                                     <?php if (!empty($material['material_id'])): ?>
                                         <div style="font-size: 0.7rem; color: #0dcaf0; margin-top: 2px;"><?php echo htmlspecialchars($material['material_id']); ?></div>
+                                    <?php endif; ?>
+                                    <?php if ($usePackagingTable): ?>
+                                        <form class="alias-inline-form mt-2" data-material-id="<?php echo $material['id']; ?>">
+                                            <div class="input-group input-group-sm alias-input-group">
+                                                <input type="text"
+                                                       name="alias"
+                                                       class="form-control form-control-sm"
+                                                       placeholder="اكتب الاسم المستعار"
+                                                       value="<?php echo htmlspecialchars($aliasValue, ENT_QUOTES, 'UTF-8'); ?>"
+                                                       maxlength="255">
+                                                <button class="btn btn-outline-secondary" type="submit">
+                                                    حفظ
+                                                </button>
+                                            </div>
+                                            <div class="alias-status small text-muted mt-1" role="status"></div>
+                                        </form>
                                     <?php endif; ?>
                                 </td>
                                 <td style="padding: 0.4rem 0.25rem; font-size: 0.8rem;"><?php echo htmlspecialchars($material['type'] ?? $material['category'] ?? '-'); ?></td>
@@ -1097,6 +1202,31 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
                             <div class="d-flex justify-content-between align-items-start mb-2">
                                 <div class="flex-grow-1">
                                     <h6 class="mb-1"><?php echo htmlspecialchars($material['name']); ?></h6>
+                                    <?php 
+                                        $aliasValue = trim((string)($material['alias'] ?? ''));
+                                        $aliasDisplayText = $aliasValue !== '' ? $aliasValue : 'لا يوجد اسم مستعار';
+                                        $aliasDisplayClass = $aliasValue !== '' ? 'text-info' : 'text-muted';
+                                    ?>
+                                    <div class="alias-display <?php echo $aliasDisplayClass; ?> small mb-1" data-empty-text="لا يوجد اسم مستعار">
+                                        <span class="fw-semibold text-secondary">الاسم المستعار:</span>
+                                        <span class="alias-text"><?php echo htmlspecialchars($aliasDisplayText); ?></span>
+                                    </div>
+                                    <?php if ($usePackagingTable): ?>
+                                        <form class="alias-inline-form alias-mobile-form mt-2" data-material-id="<?php echo $material['id']; ?>">
+                                            <div class="input-group input-group-sm alias-input-group mb-1">
+                                                <input type="text"
+                                                       name="alias"
+                                                       class="form-control form-control-sm"
+                                                       placeholder="اسم مستعار"
+                                                       value="<?php echo htmlspecialchars($aliasValue, ENT_QUOTES, 'UTF-8'); ?>"
+                                                       maxlength="255">
+                                                <button class="btn btn-outline-secondary" type="submit">
+                                                    حفظ
+                                                </button>
+                                            </div>
+                                            <div class="alias-status small text-muted mb-2" role="status"></div>
+                                        </form>
+                                    <?php endif; ?>
                                     <?php if (!empty($material['specifications'])): ?>
                                         <small class="text-muted d-block"><?php echo htmlspecialchars($material['specifications']); ?></small>
                                     <?php endif; ?>
@@ -1328,7 +1458,12 @@ $packagingReport['last_updated'] = $lastUpdatedTimestamp
                                     <?php foreach ($packagingReport['top_items'] as $index => $item): ?>
                                         <tr>
                                             <td><?php echo $index + 1; ?></td>
-                                            <td class="fw-semibold"><?php echo htmlspecialchars($item['name']); ?></td>
+                                            <td class="fw-semibold">
+                                                <?php echo htmlspecialchars($item['name']); ?>
+                                                <?php if (!empty($item['alias'])): ?>
+                                                    <div class="small text-info mt-1"><?php echo htmlspecialchars($item['alias']); ?></div>
+                                                <?php endif; ?>
+                                            </td>
                                             <td><?php echo $item['code'] ? htmlspecialchars((string)$item['code']) : '-'; ?></td>
                                             <td><?php echo htmlspecialchars($item['type']); ?></td>
                                             <td>
@@ -1906,6 +2041,104 @@ function openEditModalFromData(material) {
         nameInput.select();
     }, 200);
 }
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const aliasForms = document.querySelectorAll('.alias-inline-form');
+
+    aliasForms.forEach(function (form) {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const materialId = form.getAttribute('data-material-id');
+            if (!materialId) {
+                return;
+            }
+
+            const input = form.querySelector('input[name="alias"]');
+            const submitButton = form.querySelector('button[type="submit"]');
+            const statusEl = form.querySelector('.alias-status');
+            const aliasValue = input ? input.value.trim() : '';
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                if (!submitButton.dataset.originalLabel) {
+                    submitButton.dataset.originalLabel = submitButton.innerHTML;
+                }
+                submitButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+            }
+
+            if (statusEl) {
+                statusEl.textContent = 'جارٍ الحفظ...';
+                statusEl.classList.remove('text-success', 'text-danger');
+                statusEl.classList.add('text-muted');
+            }
+
+            try {
+                const response = await fetch(window.location.href, {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: new URLSearchParams({
+                        action: 'update_packaging_alias',
+                        material_id: materialId,
+                        alias: aliasValue
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    if (statusEl) {
+                        statusEl.textContent = data.message || 'تم الحفظ بنجاح.';
+                        statusEl.classList.remove('text-muted', 'text-danger');
+                        statusEl.classList.add('text-success');
+                    }
+
+                    let aliasDisplay = form.previousElementSibling;
+                    if (!(aliasDisplay && aliasDisplay.classList && aliasDisplay.classList.contains('alias-display'))) {
+                        const container = form.closest('td, .card-body');
+                        aliasDisplay = container ? container.querySelector('.alias-display') : null;
+                    }
+
+                    if (aliasDisplay) {
+                        const aliasTextEl = aliasDisplay.querySelector('.alias-text');
+                        const emptyText = aliasDisplay.getAttribute('data-empty-text') || 'لا يوجد اسم مستعار';
+
+                        if (aliasTextEl) {
+                            aliasTextEl.textContent = aliasValue !== '' ? aliasValue : emptyText;
+                        }
+
+                        aliasDisplay.classList.remove('text-info', 'text-muted');
+                        aliasDisplay.classList.add(aliasValue !== '' ? 'text-info' : 'text-muted');
+                    }
+                } else {
+                    if (statusEl) {
+                        statusEl.textContent = data.message || 'تعذّر حفظ الاسم المستعار.';
+                        statusEl.classList.remove('text-muted', 'text-success');
+                        statusEl.classList.add('text-danger');
+                    }
+                }
+            } catch (error) {
+                console.error('Alias update error:', error);
+                if (statusEl) {
+                    statusEl.textContent = 'حدث خطأ في الاتصال بالخادم.';
+                    statusEl.classList.remove('text-muted', 'text-success');
+                    statusEl.classList.add('text-danger');
+                }
+            } finally {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = submitButton.dataset.originalLabel || 'حفظ';
+                }
+            }
+        });
+    });
+});
 </script>
 
 

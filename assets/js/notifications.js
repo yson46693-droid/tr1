@@ -634,22 +634,42 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // تحديث الإشعارات (استخدام الفترة من config أو 60 ثانية افتراضياً)
     let pollInterval = 60000;
-    if (typeof NOTIFICATION_POLL_INTERVAL !== 'undefined') {
-        pollInterval = NOTIFICATION_POLL_INTERVAL;
-    }
-    if (window.currentUser && window.currentUser.role === 'production') {
-        pollInterval = Math.min(pollInterval, 15000);
-        if (checkNotificationPermission() === 'default') {
-            const requestOnInteraction = () => {
-                requestNotificationPermission().catch(err => console.error('Error requesting notification permission:', err));
-                document.body.removeEventListener('click', requestOnInteraction);
-                document.body.removeEventListener('touchstart', requestOnInteraction);
-            };
-            document.body.addEventListener('click', requestOnInteraction, { once: true });
-            document.body.addEventListener('touchstart', requestOnInteraction, { once: true });
+    if (typeof window.NOTIFICATION_POLL_INTERVAL !== 'undefined') {
+        const parsed = Number(window.NOTIFICATION_POLL_INTERVAL);
+        if (Number.isFinite(parsed) && parsed > 0) {
+            pollInterval = parsed;
         }
     }
-    notificationCheckInterval = setInterval(loadNotifications, pollInterval);
+    const autoRefreshEnabled = (function () {
+        if (typeof window.NOTIFICATION_AUTO_REFRESH_ENABLED === 'undefined') {
+            return true;
+        }
+        const value = window.NOTIFICATION_AUTO_REFRESH_ENABLED;
+        if (typeof value === 'string') {
+            return value === 'true' || value === '1';
+        }
+        return Boolean(value);
+    })();
+
+    if (autoRefreshEnabled) {
+        if (window.currentUser && window.currentUser.role === 'production') {
+            pollInterval = Math.min(pollInterval, 15000);
+            if (checkNotificationPermission() === 'default') {
+                const requestOnInteraction = () => {
+                    requestNotificationPermission().catch(err => console.error('Error requesting notification permission:', err));
+                    document.body.removeEventListener('click', requestOnInteraction);
+                    document.body.removeEventListener('touchstart', requestOnInteraction);
+                };
+                document.body.addEventListener('click', requestOnInteraction, { once: true });
+                document.body.addEventListener('touchstart', requestOnInteraction, { once: true });
+            }
+        }
+
+        if (!window.__notificationAutoRefreshActive) {
+            window.__notificationAutoRefreshActive = true;
+            notificationCheckInterval = setInterval(loadNotifications, pollInterval);
+        }
+    }
     
     // طلب الإذن عند النقر على أيقونة الإشعارات (user-generated event)
     // البحث عن أيقونة الإشعارات في header

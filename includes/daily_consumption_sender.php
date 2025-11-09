@@ -10,6 +10,16 @@ if (!defined('ACCESS_ALLOWED')) {
 const DAILY_CONSUMPTION_JOB_KEY = 'daily_consumption_report';
 const DAILY_CONSUMPTION_STATUS_SETTING_KEY = 'daily_consumption_report_status';
 
+if (!function_exists('consumptionReportFileMatchesDate')) {
+    function consumptionReportFileMatchesDate(string $path, string $targetDate): bool
+    {
+        if (!is_file($path)) {
+            return false;
+        }
+        return date('Y-m-d', (int)filemtime($path)) === $targetDate;
+    }
+}
+
 if (!function_exists('dailyConsumptionEnsureJobTable')) {
     /**
      * التأكد من وجود جدول system_daily_jobs.
@@ -156,7 +166,7 @@ if (!function_exists('triggerDailyConsumptionReport')) {
                         !empty($decodedStatus['report_path'])
                     ) {
                         $candidatePath = $reportsBaseDir . '/' . ltrim((string)$decodedStatus['report_path'], '/\\');
-                        if (is_file($candidatePath)) {
+                        if (consumptionReportFileMatchesDate($candidatePath, $todayDate)) {
                             $existingReportPath = $candidatePath;
                         }
                     }
@@ -176,27 +186,43 @@ if (!function_exists('triggerDailyConsumptionReport')) {
             error_log('Daily Consumption: failed loading job state - ' . $stateError->getMessage());
         }
 
+        $jobRelativePath = (string)($jobState['last_file_path'] ?? '');
+        $jobReportPath = $jobRelativePath !== ''
+            ? $reportsBaseDir . '/' . ltrim($jobRelativePath, '/\\')
+            : null;
+        $jobReportValid = $jobReportPath !== null && consumptionReportFileMatchesDate($jobReportPath, $todayDate);
+
         if (!empty($jobState['last_sent_at'])) {
             $lastSentDate = substr((string) $jobState['last_sent_at'], 0, 10);
             if ($lastSentDate === $todayDate) {
                 $snapshotStatus = $statusSnapshot['status'] ?? null;
-                if (!empty($statusSnapshot) && in_array($snapshotStatus, ['completed', 'completed_no_data', 'already_sent'], true)) {
+                $snapshotHasValidFile = $existingReportPath !== null && consumptionReportFileMatchesDate($existingReportPath, $todayDate);
+
+                if (
+                    !empty($statusSnapshot) &&
+                    in_array($snapshotStatus, ['completed', 'completed_no_data', 'already_sent'], true) &&
+                    ($snapshotHasValidFile || $jobReportValid)
+                ) {
                     $statusSnapshot['status'] = 'already_sent';
                     $statusSnapshot['checked_at'] = date('Y-m-d H:i:s');
                     $statusSnapshot['last_sent_at'] = $jobState['last_sent_at'];
+                    if ($jobReportValid && !$snapshotHasValidFile && $jobRelativePath !== '') {
+                        $statusSnapshot['report_path'] = $jobRelativePath;
+                    }
                     dailyConsumptionSaveStatus($statusSnapshot);
                     error_log('[DailyConsumption] Skipped: already sent earlier today.');
                     dailyConsumptionNotifyManager('تم إرسال تقرير الاستهلاك اليومي مسبقاً اليوم.');
                     return;
                 }
 
-                if (empty($statusSnapshot)) {
+                if (empty($statusSnapshot) && $jobReportValid) {
                     dailyConsumptionSaveStatus([
                         'date' => $todayDate,
                         'target_date' => $targetDate,
                         'status' => 'already_sent',
                         'checked_at' => date('Y-m-d H:i:s'),
                         'last_sent_at' => $jobState['last_sent_at'],
+                        'report_path' => $jobRelativePath,
                     ]);
                     error_log('[DailyConsumption] Skipped: job state indicates already sent today.');
                     return;
@@ -223,7 +249,7 @@ if (!function_exists('triggerDailyConsumptionReport')) {
                         !empty($decoded['report_path'])
                     ) {
                         $candidateExisting = $reportsBaseDir . '/' . ltrim((string)$decoded['report_path'], '/\\');
-                        if (is_file($candidateExisting)) {
+                        if (consumptionReportFileMatchesDate($candidateExisting, $todayDate)) {
                             $existingDataReportPath = $candidateExisting;
                         }
                     }

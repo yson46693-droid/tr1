@@ -15,6 +15,16 @@ const PACKAGING_ALERT_JOB_KEY = 'packaging_low_stock_alert';
 const PACKAGING_ALERT_STATUS_SETTING_KEY = 'packaging_alert_status';
 const PACKAGING_ALERT_THRESHOLD = 20;
 
+if (!function_exists('packagingReportFileMatchesDate')) {
+    function packagingReportFileMatchesDate(string $path, string $targetDate): bool
+    {
+        if (!is_file($path)) {
+            return false;
+        }
+        return date('Y-m-d', (int)filemtime($path)) === $targetDate;
+    }
+}
+
 /**
  * تجهيز جدول تتبع المهام اليومية
  */
@@ -137,7 +147,7 @@ function processDailyPackagingAlert(): void {
 
     if (!empty($existingData['report_path']) && ($existingData['date'] ?? null) === $today) {
         $candidate = $reportsBase . '/' . ltrim((string)$existingData['report_path'], '/\\');
-        if (is_file($candidate)) {
+        if (packagingReportFileMatchesDate($candidate, $today)) {
             $existingReportPath = $candidate;
             $existingReportRelative = ltrim((string)$existingData['report_path'], '/\\');
             $existingViewerPath = (string)($existingData['viewer_path'] ?? '');
@@ -170,7 +180,7 @@ function processDailyPackagingAlert(): void {
     $jobReportPath = null;
     if ($jobRelativePath !== '') {
         $candidate = $reportsBase . '/' . ltrim($jobRelativePath, '/\\');
-        if (is_file($candidate)) {
+        if (packagingReportFileMatchesDate($candidate, $today)) {
             $jobReportPath = $candidate;
         }
     }

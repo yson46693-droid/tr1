@@ -9,6 +9,19 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/pdf_helper.php';
 require_once __DIR__ . '/path_helper.php';
+
+if (!function_exists('lowStockReportFileMatchesDate')) {
+    /**
+     * يتحقق أن ملف التقرير يتبع تاريخاً معيناً بناءً على آخر تعديل.
+     */
+    function lowStockReportFileMatchesDate(string $path, string $targetDate): bool
+    {
+        if (!is_file($path)) {
+            return false;
+        }
+        return date('Y-m-d', (int)filemtime($path)) === $targetDate;
+    }
+}
 /**
  * إزالة ملفات التقارير الأقدم والاحتفاظ بآخر تقرير فقط.
  *
@@ -323,7 +336,7 @@ if (!function_exists('triggerDailyLowStockReport')) {
                         !empty($decoded['report_path'])
                     ) {
                         $candidate = $reportsBaseDir . '/' . ltrim((string)$decoded['report_path'], '/\\');
-                        if (is_file($candidate)) {
+                        if (lowStockReportFileMatchesDate($candidate, $todayDate)) {
                             $existingReportPath = $candidate;
                             $existingViewerPath = (string)($decoded['viewer_path'] ?? '');
                             $existingAccessToken = (string)($decoded['access_token'] ?? '');
@@ -347,17 +360,25 @@ if (!function_exists('triggerDailyLowStockReport')) {
 
         if (!empty($jobState['last_sent_at'])) {
             $lastSentDate = substr((string)$jobState['last_sent_at'], 0, 10);
-            if (
-                $lastSentDate === $todayDate &&
-                !empty($statusSnapshot) &&
-                in_array($statusSnapshot['status'] ?? null, ['completed', 'completed_no_issues'], true) &&
-                $existingReportPath !== null
-            ) {
-                $statusSnapshot['status'] = 'already_sent';
-                $statusSnapshot['checked_at'] = date('Y-m-d H:i:s');
-                $statusSnapshot['last_sent_at'] = $jobState['last_sent_at'];
-                lowStockReportSaveStatus($statusSnapshot);
-                return;
+            $jobRelativePath = (string)($jobState['last_file_path'] ?? '');
+            $jobCandidate = $jobRelativePath !== ''
+                ? $reportsBaseDir . '/' . ltrim($jobRelativePath, '/\\')
+                : null;
+
+            if ($lastSentDate === $todayDate) {
+                $hasValidSnapshotFile = $existingReportPath !== null && lowStockReportFileMatchesDate($existingReportPath, $todayDate);
+                $hasValidJobFile = $jobCandidate !== null && lowStockReportFileMatchesDate($jobCandidate, $todayDate);
+
+                if (($hasValidSnapshotFile || $hasValidJobFile) && !empty($statusSnapshot)) {
+                    $statusSnapshot['status'] = 'already_sent';
+                    $statusSnapshot['checked_at'] = date('Y-m-d H:i:s');
+                    $statusSnapshot['last_sent_at'] = $jobState['last_sent_at'];
+                    if ($hasValidJobFile && !$hasValidSnapshotFile && $jobRelativePath !== '') {
+                        $statusSnapshot['report_path'] = $jobRelativePath;
+                    }
+                    lowStockReportSaveStatus($statusSnapshot);
+                    return;
+                }
             }
         }
 
@@ -370,17 +391,28 @@ if (!function_exists('triggerDailyLowStockReport')) {
             );
 
             $existingData = [];
+            $existingDataHasFile = false;
             if ($existing && isset($existing['value'])) {
                 $decoded = json_decode((string)$existing['value'], true);
                 if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                     $existingData = $decoded;
+                    if (
+                        ($decoded['date'] ?? null) === $todayDate &&
+                        !empty($decoded['report_path'])
+                    ) {
+                        $candidateExisting = $reportsBaseDir . '/' . ltrim((string)$decoded['report_path'], '/\\');
+                        if (lowStockReportFileMatchesDate($candidateExisting, $todayDate)) {
+                            $existingDataHasFile = true;
+                        }
+                    }
                 }
             }
 
             if (
                 !empty($existingData) &&
                 ($existingData['date'] ?? null) === $todayDate &&
-                in_array($existingData['status'] ?? null, ['completed', 'completed_no_issues', 'already_sent'], true)
+                in_array($existingData['status'] ?? null, ['completed', 'completed_no_issues', 'already_sent'], true) &&
+                $existingDataHasFile
             ) {
                 $db->commit();
                 return;
@@ -563,9 +595,8 @@ if (!function_exists('triggerDailyLowStockReport')) {
         if (!empty($existingData) && ($existingData['date'] ?? null) === $todayDate) {
             $storedPath = $existingData['report_path'] ?? null;
             if (!empty($storedPath)) {
-                $reportsBase = $reportsBaseDir;
-                $candidate = $reportsBase . '/' . ltrim($storedPath, '/\\');
-                if (file_exists($candidate)) {
+                $candidate = $reportsBaseDir . '/' . ltrim($storedPath, '/\\');
+                if (lowStockReportFileMatchesDate($candidate, $todayDate)) {
                     $existingReportPath = $candidate;
                     $existingReportRelative = ltrim($storedPath, '/\\');
                 }

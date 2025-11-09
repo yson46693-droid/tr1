@@ -92,11 +92,15 @@ if (!defined('ACCESS_ALLOWED')) {
                 });
             }
             
-            // تحميل الإشعارات
+            // إعداد معلمات الإشعارات العالمية
+            window.NOTIFICATION_POLL_INTERVAL = <?php echo (int) NOTIFICATION_POLL_INTERVAL; ?>;
+            window.NOTIFICATION_AUTO_REFRESH_ENABLED = <?php echo NOTIFICATION_AUTO_REFRESH_ENABLED ? 'true' : 'false'; ?>;
+            window.NOTIFICATION_POLL_INTERVAL = Number(window.NOTIFICATION_POLL_INTERVAL) || 60000;
             if (typeof loadNotifications === 'function') {
-                loadNotifications();
-                const interval = <?php echo NOTIFICATION_POLL_INTERVAL; ?>;
-                setInterval(loadNotifications, interval);
+                if (!window.__notificationInitialLoadDone) {
+                    loadNotifications();
+                    window.__notificationInitialLoadDone = true;
+                }
             }
             
             // تهيئة نظام التحقق من التحديثات

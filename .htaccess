@@ -85,8 +85,24 @@ RewriteRule ^(.*)$ index.php [QSA,L]
     AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
 </IfModule>
 
-# Protect sensitive files
-<FilesMatch "\.(sql|log|ini|conf)$">
-    Order allow,deny
-    Deny from all
+# Protect sensitive files but allow application log access
+<FilesMatch "^(?!php-errors\.log$).*\.(sql|log|ini|conf)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
+
+# Allow direct access to the PHP error log for debugging
+<Files "php-errors.log">
+    <IfModule mod_authz_core.c>
+        Require all granted
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Allow from all
+    </IfModule>
+</Files>

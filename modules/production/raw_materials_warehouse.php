@@ -15,6 +15,409 @@ require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/honey_varieties.php';
 
+if (!function_exists('buildRawMaterialsReportHtmlDocument')) {
+    /**
+     * إنشاء مستند HTML كامل لتقرير مخزن الخامات.
+     *
+     * @param array<string, mixed> $report
+     */
+    function buildRawMaterialsReportHtmlDocument(array $report): string
+    {
+        $generatedAt = htmlspecialchars((string)($report['generated_at'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $generatedBy = htmlspecialchars((string)($report['generated_by'] ?? ''), ENT_QUOTES, 'UTF-8');
+        $sectionsCount = number_format((int)($report['sections_count'] ?? 0));
+        $totalRecords = number_format((int)($report['total_records'] ?? 0));
+        $totalSuppliers = number_format((int)($report['total_suppliers'] ?? 0));
+        $zeroItems = number_format((int)($report['zero_items'] ?? 0));
+        $sectionsOrder = $report['sections_order'] ?? [];
+        $sections = $report['sections'] ?? [];
+
+        ob_start();
+        ?>
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="utf-8">
+    <title>تقرير مخزن الخامات</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: "Cairo", "Tajawal", "Segoe UI", Tahoma, sans-serif;
+            background: #f8fafc;
+            margin: 0;
+            padding: 32px;
+            color: #0f172a;
+        }
+        .report-wrapper {
+            max-width: 960px;
+            margin: 0 auto;
+            background: #ffffff;
+            border-radius: 20px;
+            box-shadow: 0 18px 55px rgba(15, 23, 42, 0.12);
+            padding: 32px;
+        }
+        header {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 20px;
+            margin-bottom: 28px;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 28px;
+            color: #1d4ed8;
+        }
+        header .meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            color: #475569;
+            font-size: 14px;
+        }
+        header .meta span {
+            background: #e2e8f0;
+            padding: 6px 14px;
+            border-radius: 999px;
+        }
+        .summary {
+            margin-bottom: 32px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 16px;
+        }
+        .summary-card {
+            background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
+            color: #ffffff;
+            border-radius: 18px;
+            padding: 18px 20px;
+            box-shadow: 0 16px 35px rgba(37, 99, 235, 0.20);
+        }
+        .summary-card .label {
+            font-size: 13px;
+            opacity: 0.85;
+            margin-bottom: 8px;
+            display: block;
+        }
+        .summary-card .value {
+            font-size: 22px;
+            font-weight: 700;
+        }
+        section {
+            margin-bottom: 36px;
+            border: 1px solid #e2e8f0;
+            border-radius: 18px;
+            padding: 24px;
+            background: #f8fafc;
+        }
+        section h2 {
+            margin: 0 0 14px;
+            font-size: 20px;
+            color: #0f172a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        section h2 .badge {
+            background: #1d4ed8;
+            color: #fff;
+            border-radius: 999px;
+            font-size: 12px;
+            padding: 4px 10px;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .metric-card {
+            background: #ffffff;
+            border-radius: 14px;
+            border: 1px solid #e2e8f0;
+            padding: 16px;
+            box-shadow: 0 10px 30px rgba(148, 163, 184, 0.18);
+        }
+        .metric-card .label {
+            font-size: 13px;
+            color: #475569;
+            margin-bottom: 6px;
+        }
+        .metric-card .value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1d4ed8;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #ffffff;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+        }
+        thead {
+            background: #e2e8f0;
+        }
+        th, td {
+            padding: 14px 16px;
+            text-align: right;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 14px;
+        }
+        th {
+            font-weight: 600;
+            color: #1f2937;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .no-data {
+            text-align: center;
+            font-size: 15px;
+            color: #64748b;
+            padding: 24px 0;
+        }
+        .actions-bar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: flex-start;
+            gap: 12px;
+            margin-top: 32px;
+        }
+        .actions-bar a {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+            background: #1d4ed8;
+            color: #ffffff;
+            padding: 10px 18px;
+            border-radius: 12px;
+            font-size: 14px;
+            transition: opacity 0.2s ease;
+        }
+        .actions-bar a.secondary {
+            background: #ffffff;
+            color: #1d4ed8;
+            border: 1px solid #1d4ed8;
+        }
+        .actions-bar a:hover {
+            opacity: 0.85;
+        }
+        @media print {
+            body { background: #ffffff; padding: 16px; }
+            .report-wrapper { box-shadow: none; padding: 0; }
+            .actions-bar { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+<div class="report-wrapper">
+    <header>
+        <h1>تقرير مخزن الخامات</h1>
+        <div class="meta">
+            <span>تاريخ التوليد: <?= $generatedAt; ?></span>
+            <span>أُعد بواسطة: <?= $generatedBy; ?></span>
+        </div>
+    </header>
+    <div class="summary">
+        <div class="summary-card">
+            <span class="label">عدد الأقسام</span>
+            <span class="value"><?= $sectionsCount; ?></span>
+        </div>
+        <div class="summary-card">
+            <span class="label">إجمالي السجلات</span>
+            <span class="value"><?= $totalRecords; ?></span>
+        </div>
+        <div class="summary-card">
+            <span class="label">الموردون النشطون</span>
+            <span class="value"><?= $totalSuppliers; ?></span>
+        </div>
+        <div class="summary-card">
+            <span class="label">عناصر بدون مخزون</span>
+            <span class="value"><?= $zeroItems; ?></span>
+        </div>
+    </div>
+    <?php
+    $hasSections = false;
+    if (is_array($sectionsOrder) && !empty($sectionsOrder)) {
+        foreach ($sectionsOrder as $sectionKey) {
+            $sectionData = $sections[$sectionKey] ?? null;
+            if (!$sectionData || !is_array($sectionData)) {
+                continue;
+            }
+            $hasSections = true;
+            $sectionTitle = htmlspecialchars((string)($sectionData['title'] ?? 'قسم غير محدد'), ENT_QUOTES, 'UTF-8');
+            $recordsCount = number_format((int)($sectionData['records'] ?? 0));
+            $metrics = $sectionData['metrics'] ?? [];
+            $topItems = $sectionData['top_items'] ?? [];
+            ?>
+            <section>
+                <h2>
+                    <span><?= $sectionTitle; ?></span>
+                    <span class="badge">عدد السجلات: <?= $recordsCount; ?></span>
+                </h2>
+                <?php if (!empty($metrics) && is_array($metrics)): ?>
+                    <div class="metrics">
+                        <?php foreach ($metrics as $metric): ?>
+                            <div class="metric-card">
+                                <span class="label"><?= htmlspecialchars((string)($metric['label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></span>
+                                <span class="value">
+                                    <?php
+                                    $metricValue = (float)($metric['value'] ?? 0);
+                                    $metricDecimals = isset($metric['decimals']) ? (int)$metric['decimals'] : ((isset($metric['unit']) && $metric['unit']) ? 2 : 0);
+                                    $metricLabel = number_format($metricValue, $metricDecimals);
+                                    if (!empty($metric['unit'])) {
+                                        $metricLabel .= ' ' . htmlspecialchars((string)$metric['unit'], ENT_QUOTES, 'UTF-8');
+                                    }
+                                    echo $metricLabel;
+                                    ?>
+                                </span>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+                <?php if (!empty($topItems) && is_array($topItems)): ?>
+                    <table>
+                        <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>العنصر</th>
+                            <th>الكمية</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($topItems as $index => $item): ?>
+                            <tr>
+                                <td><?= number_format($index + 1); ?></td>
+                                <td><?= htmlspecialchars((string)($item['label'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></td>
+                                <td>
+                                    <?php
+                                    $value = (float)($item['value'] ?? 0);
+                                    $decimals = isset($item['decimals']) ? (int)$item['decimals'] : ((isset($item['unit']) && $item['unit']) ? 2 : 0);
+                                    $formatted = number_format($value, $decimals);
+                                    if (!empty($item['unit'])) {
+                                        $formatted .= ' ' . htmlspecialchars((string)$item['unit'], ENT_QUOTES, 'UTF-8');
+                                    }
+                                    echo $formatted;
+                                    ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php else: ?>
+                    <div class="no-data">لا توجد عناصر مميزة لعرضها في هذا القسم.</div>
+                <?php endif; ?>
+            </section>
+            <?php
+        }
+    }
+    if (!$hasSections) {
+        ?>
+        <div class="no-data">لا توجد بيانات كافية لتوليد التقرير في الوقت الحالي.</div>
+        <?php
+    }
+    ?>
+</div>
+<script>
+(function() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('print') === '1') {
+        window.addEventListener('load', function () {
+            setTimeout(function () {
+                window.print();
+            }, 100);
+        });
+    }
+})();
+</script>
+</body>
+</html>
+<?php
+        return (string)ob_get_clean();
+    }
+}
+
+if (!function_exists('storeRawMaterialsReportDocument')) {
+    /**
+     * حفظ تقرير مخزن الخامات في مجلد خاص وإرجاع مسارات العرض والطباعة.
+     *
+     * @param array<string, mixed> $report
+     * @return array<string, string>|null
+     */
+    function storeRawMaterialsReportDocument(array $report): ?array
+    {
+        try {
+            if (!function_exists('ensurePrivateDirectory')) {
+                return null;
+            }
+
+            ensurePrivateDirectory();
+
+            $basePath = defined('REPORTS_PRIVATE_PATH')
+                ? REPORTS_PRIVATE_PATH
+                : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__, 2) . '/reports'));
+
+            $basePath = rtrim((string)$basePath, '/\\');
+            if ($basePath === '') {
+                return null;
+            }
+
+            $exportsDir = $basePath . DIRECTORY_SEPARATOR . 'exports';
+            $reportDir = $exportsDir . DIRECTORY_SEPARATOR . 'raw_materials';
+
+            if (!is_dir($exportsDir) && !@mkdir($exportsDir, 0755, true)) {
+                return null;
+            }
+            if (!is_dir($reportDir) && !@mkdir($reportDir, 0755, true)) {
+                return null;
+            }
+
+            $document = buildRawMaterialsReportHtmlDocument($report);
+
+            // تنظيف الملفات القديمة قبل إنشاء تقرير جديد
+            $pattern = $reportDir . DIRECTORY_SEPARATOR . 'raw-materials-report-*.html';
+            foreach (glob($pattern) ?: [] as $file) {
+                if (is_string($file)) {
+                    @unlink($file);
+                }
+            }
+
+            $token = bin2hex(random_bytes(8));
+            $filename = sprintf('raw-materials-report-%s-%s.html', date('Ymd-His'), $token);
+            $fullPath = $reportDir . DIRECTORY_SEPARATOR . $filename;
+
+            if (@file_put_contents($fullPath, $document) === false) {
+                return null;
+            }
+
+            $relativePath = 'exports/raw_materials/' . $filename;
+            $viewerPath = '/reports/view.php?type=export&file=' . rawurlencode($relativePath) . '&token=' . $token;
+            $printPath = $viewerPath . '&print=1';
+
+            $absoluteViewer = getAbsoluteUrl(ltrim($viewerPath, '/'));
+            $absolutePrint = getAbsoluteUrl(ltrim($printPath, '/'));
+
+            return [
+                'relative_path' => $relativePath,
+                'viewer_path' => $viewerPath,
+                'print_path' => $printPath,
+                'absolute_viewer_url' => $absoluteViewer,
+                'absolute_print_url' => $absolutePrint,
+                'token' => $token,
+            ];
+        } catch (Throwable $error) {
+            error_log('Raw materials report storage failed: ' . $error->getMessage());
+            return null;
+        }
+    }
+}
+
 $rawReportQueryOne = static function ($dbConnection, $sql, $params = []) {
     try {
         return $dbConnection->queryOne($sql, $params);
@@ -1566,6 +1969,13 @@ if ($section === 'nuts') {
         $mix['ingredients'] = $ingredients;
     }
 }
+
+$rawMaterialsReportMeta = storeRawMaterialsReportDocument($rawWarehouseReport);
+$rawMaterialsReportViewUrl = $rawMaterialsReportMeta['viewer_path'] ?? '';
+$rawMaterialsReportPrintUrl = $rawMaterialsReportMeta['print_path'] ?? '';
+$rawMaterialsReportAbsoluteView = $rawMaterialsReportMeta['absolute_viewer_url'] ?? '';
+$rawMaterialsReportAbsolutePrint = $rawMaterialsReportMeta['absolute_print_url'] ?? '';
+$rawMaterialsReportGeneratedAt = $rawWarehouseReport['generated_at'] ?? date('Y-m-d H:i');
 ?>
 
 <style>
@@ -1762,7 +2172,15 @@ if ($section === 'nuts') {
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
     <h2 class="mb-0"><i class="bi bi-box-seam me-2"></i>مخزن الخامات</h2>
     <div class="d-flex flex-wrap gap-2">
-        <button type="button" class="btn btn-outline-secondary" id="generateRawMaterialsReportBtn">
+        <button
+            type="button"
+            class="btn btn-outline-secondary"
+            id="generateRawMaterialsReportBtn"
+            data-viewer-url="<?php echo htmlspecialchars((string)$rawMaterialsReportAbsoluteView, ENT_QUOTES, 'UTF-8'); ?>"
+            data-print-url="<?php echo htmlspecialchars((string)$rawMaterialsReportAbsolutePrint, ENT_QUOTES, 'UTF-8'); ?>"
+            data-report-ready="<?php echo $rawMaterialsReportViewUrl !== '' ? '1' : '0'; ?>"
+            data-generated-at="<?php echo htmlspecialchars((string)$rawMaterialsReportGeneratedAt, ENT_QUOTES, 'UTF-8'); ?>"
+        >
             <i class="bi bi-file-bar-graph me-1"></i>
             توليد تقرير المخزن
         </button>
@@ -1773,123 +2191,39 @@ if ($section === 'nuts') {
 </div>
 
 <div class="modal fade" id="rawMaterialsReportModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-dialog modal-dialog-centered modal-md">
         <div class="modal-content">
             <div class="modal-header bg-dark text-white">
-                <h5 class="modal-title"><i class="bi bi-clipboard-data me-2"></i>تقرير احترافي لمخزن الخامات</h5>
+                <h5 class="modal-title"><i class="bi bi-clipboard-data me-2"></i>خيارات تقرير مخزن الخامات</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
             </div>
             <div class="modal-body">
-                <div id="rawMaterialsReportContent" class="raw-report-content">
-                    <div class="report-header d-flex flex-column flex-lg-row justify-content-between align-items-start gap-3 mb-4">
-                        <div>
-                            <h3 class="fw-semibold mb-1">تقرير مخزن الخامات</h3>
-                            <div class="text-muted small">تاريخ التوليد: <?php echo htmlspecialchars($rawWarehouseReport['generated_at']); ?></div>
-                            <div class="text-muted small">أُعد بواسطة: <?php echo htmlspecialchars($rawWarehouseReport['generated_by']); ?></div>
-                        </div>
-                        <div class="text-lg-end">
-                            <div class="d-flex flex-wrap gap-2 justify-content-start justify-content-lg-end">
-                                <span class="badge bg-primary-subtle text-primary fw-semibold px-3 py-2">
-                                    عدد الأقسام: <?php echo number_format($rawWarehouseReport['sections_count']); ?>
-                                </span>
-                                <span class="badge bg-success-subtle text-success fw-semibold px-3 py-2">
-                                    إجمالي السجلات: <?php echo number_format($rawWarehouseReport['total_records']); ?>
-                                </span>
-                                <span class="badge bg-info-subtle text-info fw-semibold px-3 py-2">
-                                    الموردون النشطون: <?php echo number_format($rawWarehouseReport['total_suppliers']); ?>
-                                </span>
-                            </div>
-                            <div class="text-muted small mt-2">
-                                عناصر بدون مخزون: <?php echo number_format($rawWarehouseReport['zero_items']); ?>
-                            </div>
-                        </div>
+                <?php if ($rawMaterialsReportViewUrl): ?>
+                    <p class="mb-3 text-muted">
+                        تم حفظ نسخة من التقرير في مساحة التخزين الآمنة بتاريخ
+                        <span class="fw-semibold"><?php echo htmlspecialchars($rawMaterialsReportGeneratedAt, ENT_QUOTES, 'UTF-8'); ?></span>.
+                        اختر الإجراء المطلوب أدناه.
+                    </p>
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-primary" id="rawReportViewBtn">
+                            <i class="bi bi-display me-2"></i>
+                            عرض التقرير داخل المتصفح
+                        </button>
+                        <button type="button" class="btn btn-outline-primary" id="rawReportPrintBtn">
+                            <i class="bi bi-printer me-2"></i>
+                            طباعة / حفظ التقرير كـ PDF
+                        </button>
                     </div>
-
-                    <?php foreach ($rawWarehouseReport['sections_order'] as $sectionKey): ?>
-                        <?php $sectionData = $rawWarehouseReport['sections'][$sectionKey] ?? null; ?>
-                        <?php if (!$sectionData) { continue; } ?>
-                        <div class="raw-report-section mb-5">
-                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-                                <h5 class="fw-semibold mb-0"><i class="bi bi-grid-1x2 me-2"></i><?php echo htmlspecialchars($sectionData['title']); ?></h5>
-                                <span class="badge bg-secondary-subtle text-secondary fw-semibold px-3 py-2">
-                                    عدد السجلات: <?php echo number_format($sectionData['records'] ?? 0); ?>
-                                </span>
-                            </div>
-
-                            <?php if (!empty($sectionData['metrics'])): ?>
-                                <div class="row g-3 mb-4">
-                                    <?php foreach ($sectionData['metrics'] as $metric): ?>
-                                        <div class="col-sm-6 col-lg-3">
-                                            <div class="border rounded-4 p-3 h-100 bg-light">
-                                                <div class="text-muted small mb-1"><?php echo htmlspecialchars($metric['label']); ?></div>
-                                                <div class="fs-5 fw-semibold text-primary">
-                                                    <?php
-                                                    $decimals = $metric['decimals'] ?? (isset($metric['unit']) && $metric['unit'] ? 2 : 0);
-                                                    $value = $metric['value'] ?? 0;
-                                                    if (isset($metric['unit']) && $metric['unit']) {
-                                                        echo number_format((float)$value, $decimals) . ' ' . htmlspecialchars($metric['unit']);
-                                                    } else {
-                                                        echo number_format((float)$value, $decimals);
-                                                    }
-                                                    ?>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php endif; ?>
-
-                            <?php if (!empty($sectionData['top_items'])): ?>
-                                <h6 class="fw-semibold mb-2"><i class="bi bi-bar-chart-steps me-2"></i>أهم العناصر</h6>
-                                <div class="table-responsive mb-4">
-                                    <table class="table table-sm table-striped align-middle">
-                                        <thead class="table-light">
-                                            <tr>
-                                                <th>#</th>
-                                                <th>العنصر</th>
-                                                <th>الكمية</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <?php foreach ($sectionData['top_items'] as $index => $item): ?>
-                                                <tr>
-                                                    <td><?php echo $index + 1; ?></td>
-                                                    <td><?php echo htmlspecialchars($item['label']); ?></td>
-                                                    <td>
-                                                        <span class="badge bg-primary-subtle text-primary fw-semibold">
-                                                            <?php
-                                                            $decimals = $item['decimals'] ?? (isset($item['unit']) && $item['unit'] ? 2 : 0);
-                                                            $value = $item['value'] ?? 0;
-                                                            if (isset($item['unit']) && $item['unit']) {
-                                                                echo number_format((float)$value, $decimals) . ' ' . htmlspecialchars($item['unit']);
-                                                            } else {
-                                                                echo number_format((float)$value, $decimals);
-                                                            }
-                                                            ?>
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            <?php endforeach; ?>
-                                        </tbody>
-                                    </table>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-
-                    <?php if (empty($rawWarehouseReport['sections'])): ?>
-                        <div class="alert alert-light border text-muted text-center">
-                            لا توجد بيانات كافية لتوليد التقرير في الوقت الحالي.
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">إغلاق</button>
-                <button type="button" class="btn btn-primary" id="printRawMaterialsReportBtn">
-                    <i class="bi bi-printer me-1"></i>
-                    طباعة التقرير
-                </button>
+                    <div class="alert alert-light border mt-3 mb-0 small text-muted">
+                        <i class="bi bi-shield-lock me-1"></i>
+                        يتم فتح التقرير عبر `view.php` لضمان الحماية ومنع خطأ Forbidden.
+                    </div>
+                <?php else: ?>
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        تعذّر تجهيز ملف التقرير. يرجى تحديث الصفحة أو التأكد من صلاحيات مجلد التخزين.
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -3519,88 +3853,61 @@ foreach ($honeyVarietiesCatalog as $catalogVariety => $meta) {
 document.addEventListener('DOMContentLoaded', function () {
     const reportButton = document.getElementById('generateRawMaterialsReportBtn');
     const reportModalElement = document.getElementById('rawMaterialsReportModal');
-    const printButton = document.getElementById('printRawMaterialsReportBtn');
+    const viewButton = document.getElementById('rawReportViewBtn');
+    const printButton = document.getElementById('rawReportPrintBtn');
 
-    function getReportModalInstance() {
-        if (!reportModalElement) {
-            return null;
+    const openInNewTab = (url) => {
+        if (!url) {
+            alert('تعذّر فتح التقرير الآن. يرجى تحديث الصفحة وإعادة المحاولة.');
+            return;
         }
-        if (typeof bootstrap === 'undefined') {
-            console.warn('Bootstrap.js غير محمل بعد، تعذّر تهيئة نافذة التقرير.');
-            return null;
+        window.open(url, '_blank', 'noopener');
+    };
+
+    const hideModal = () => {
+        if (!reportModalElement || typeof bootstrap === 'undefined') {
+            return;
         }
-        return bootstrap.Modal.getOrCreateInstance(reportModalElement);
-    }
+        const instance = bootstrap.Modal.getInstance(reportModalElement);
+        if (instance) {
+            instance.hide();
+        }
+    };
 
     if (reportButton) {
-        reportButton.addEventListener('click', () => {
-            const modalInstance = getReportModalInstance();
-            if (modalInstance) {
-                modalInstance.show();
+        const viewUrl = reportButton.getAttribute('data-viewer-url') || '';
+        const printUrlAttr = reportButton.getAttribute('data-print-url') || '';
+        const isReady = reportButton.getAttribute('data-report-ready') === '1';
+        const resolvedPrintUrl = printUrlAttr || (viewUrl ? (viewUrl.includes('?') ? `${viewUrl}&print=1` : `${viewUrl}?print=1`) : '');
+
+        if (!isReady) {
+            reportButton.addEventListener('click', () => {
+                alert('لا يمكن توليد التقرير حالياً. يرجى تحديث الصفحة أو التأكد من صلاحيات مجلد التخزين.');
+            });
+        } else {
+            reportButton.addEventListener('click', () => {
+                if (!reportModalElement || typeof bootstrap === 'undefined') {
+                    openInNewTab(viewUrl);
+                    return;
+                }
+                const instance = bootstrap.Modal.getOrCreateInstance(reportModalElement);
+                instance.show();
+            });
+
+            if (viewButton) {
+                viewButton.addEventListener('click', () => {
+                    openInNewTab(viewUrl);
+                    hideModal();
+                });
             }
-        });
-    }
 
-    if (printButton) {
-        printButton.addEventListener('click', () => {
-            const reportContent = document.getElementById('rawMaterialsReportContent');
-            if (!reportContent) {
-                return;
+            if (printButton) {
+                printButton.addEventListener('click', () => {
+                    openInNewTab(resolvedPrintUrl);
+                    hideModal();
+                });
             }
-
-            const printWindow = window.open('', '_blank', 'width=1024,height=768');
-            const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-                .map((element) => element.outerHTML)
-                .join('\n');
-
-            printWindow.document.write(`<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<title>تقرير مخزن الخامات</title>
-${stylesheets}
-<style>
-body { font-family: 'Tajawal', 'Cairo', sans-serif; padding: 32px; background: #f8fafc; color: #0f172a; }
-.report-header { border-bottom: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
-.badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #e0f2fe; color: #0369a1; font-size: 12px; font-weight: 600; }
-.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 24px; }
-.summary-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 16px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08); }
-.summary-card .label { color: #64748b; font-size: 13px; margin-bottom: 6px; }
-.summary-card .value { font-size: 20px; font-weight: 600; }
-.raw-section { margin-bottom: 36px; }
-.raw-section h5 { color: #1f2937; margin-bottom: 12px; font-weight: 600; }
-table { width: 100%; border-collapse: collapse; margin-bottom: 28px; background: #fff; border-radius: 16px; overflow: hidden; }
-table thead { background: #f1f5f9; }
-table th, table td { padding: 14px 16px; border: 1px solid #e2e8f0; text-align: right; }
-table th { font-weight: 600; color: #1e293b; background: #f8fafc; }
-.notes { border-left: 4px solid #38bdf8; background: #ecfeff; padding: 16px 20px; border-radius: 12px; }
-@media print {
-    body { padding: 0; background: #fff; }
-    .badge { background: #bfdbfe; color: #1d4ed8; }
-}
-</style>
-</head>
-<body>
-<div class="report-header">
-    <div>
-        <h2 style="margin:0 0 8px; font-weight:700;">تقرير مخزن الخامات</h2>
-        <div style="color:#64748b; font-size:13px;">تاريخ التوليد: <?php echo htmlspecialchars($rawWarehouseReport['generated_at']); ?></div>
-        <div style="color:#64748b; font-size:13px;">أُعد بواسطة: <?php echo htmlspecialchars($rawWarehouseReport['generated_by']); ?></div>
-    </div>
-    <div style="text-align:left;">
-        <div class="badge">عدد الأقسام: <?php echo number_format($rawWarehouseReport['sections_count']); ?></div>
-        <div class="badge" style="margin-right:8px;">إجمالي السجلات: <?php echo number_format($rawWarehouseReport['total_records']); ?></div>
-        <div class="badge" style="margin-right:8px;">الموردون النشطون: <?php echo number_format($rawWarehouseReport['total_suppliers']); ?></div>
-        <div style="color:#64748b; font-size:12px; margin-top:8px;">عناصر بدون مخزون: <?php echo number_format($rawWarehouseReport['zero_items']); ?></div>
-    </div>
-</div>
-${reportContent.outerHTML}
-</body>
-</html>`);
-            printWindow.document.close();
-            printWindow.focus();
-            printWindow.print();
-        });
+        }
     }
 });
 </script>

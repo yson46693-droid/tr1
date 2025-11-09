@@ -122,6 +122,28 @@ function ensurePrivateDirectory(string $directory): void
 
 ensurePrivateDirectory(PRIVATE_STORAGE_PATH);
 ensurePrivateDirectory(REPORTS_PRIVATE_PATH);
+
+$logsDirectory = PRIVATE_STORAGE_PATH . '/logs';
+ensurePrivateDirectory($logsDirectory);
+
+$defaultErrorLog = $logsDirectory . '/php-errors.log';
+if (is_dir($logsDirectory) && is_writable($logsDirectory)) {
+    if (!file_exists($defaultErrorLog)) {
+        @touch($defaultErrorLog);
+    }
+
+    if (is_writable($defaultErrorLog)) {
+        ini_set('log_errors', '1');
+        ini_set('error_log', $defaultErrorLog);
+        if (!defined('APP_ERROR_LOG')) {
+            define('APP_ERROR_LOG', $defaultErrorLog);
+        }
+    } else {
+        error_log('Error log file is not writable: ' . $defaultErrorLog);
+    }
+} else {
+    error_log('Logs directory is not writable: ' . $logsDirectory);
+}
 define('ASSETS_PATH', dirname(__DIR__) . '/assets/');
 
 // إعدادات تكامل aPDF.io - يمكن تخزين المفتاح في متغير بيئة APDF_IO_API_KEY لأمان أفضل
@@ -198,9 +220,18 @@ define('REPORTS_AUTO_DELETE', true); // حذف التقارير بعد الإر�
 define('REPORTS_RETENTION_HOURS', 24); // الاحتفاظ بالتقارير لمدة 24 ساعة
 
 // إعدادات الإشعارات
-define('NOTIFICATIONS_ENABLED', true);
-define('BROWSER_NOTIFICATIONS_ENABLED', true);
-define('NOTIFICATION_POLL_INTERVAL', 60000); // 60 ثانية (دقيقة واحدة) - تم تقليل الطلبات على السيرفر
+if (!defined('NOTIFICATIONS_ENABLED')) {
+    define('NOTIFICATIONS_ENABLED', true);
+}
+if (!defined('BROWSER_NOTIFICATIONS_ENABLED')) {
+    define('BROWSER_NOTIFICATIONS_ENABLED', true);
+}
+if (!defined('NOTIFICATION_POLL_INTERVAL')) {
+    define('NOTIFICATION_POLL_INTERVAL', 120000); // 120 ثانية افتراضياً
+}
+if (!defined('NOTIFICATION_AUTO_REFRESH_ENABLED')) {
+    define('NOTIFICATION_AUTO_REFRESH_ENABLED', true);
+}
 
 // إعدادات Telegram Bot
 // للحصول على Bot Token: تحدث مع @BotFather في Telegram
