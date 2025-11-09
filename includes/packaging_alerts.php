@@ -9,9 +9,10 @@ if (!defined('ACCESS_ALLOWED')) {
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/simple_telegram.php';
-require_once __DIR__ . '/pdf_helper.php';
+require_once __DIR__ . '/path_helper.php';
 
 const PACKAGING_ALERT_JOB_KEY = 'packaging_low_stock_alert';
+const PACKAGING_ALERT_STATUS_SETTING_KEY = 'packaging_alert_status';
 const PACKAGING_ALERT_THRESHOLD = 20;
 
 /**
@@ -44,6 +45,43 @@ function packagingAlertEnsureJobTable(): void {
 }
 
 /**
+ * حذف ملفات التقارير القديمة والاحتفاظ بآخر تقرير فقط.
+ */
+function packagingAlertCleanupOldReports(string $reportsDir, string $currentFilename): void {
+    $pattern = rtrim($reportsDir, '/\\') . '/packaging-low-stock-*.html';
+    $files = glob($pattern) ?: [];
+
+    foreach ($files as $file) {
+        if (!is_string($file)) {
+            continue;
+        }
+        if (basename($file) === $currentFilename) {
+            continue;
+        }
+        @unlink($file);
+    }
+}
+
+/**
+ * حفظ حالة تقرير أدوات التعبئة في system_settings.
+ *
+ * @param array<string, mixed> $data
+ */
+function packagingAlertSaveStatus(array $data): void {
+    try {
+        $db = db();
+        $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $db->execute(
+            "INSERT INTO system_settings (`key`, `value`) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            [PACKAGING_ALERT_STATUS_SETTING_KEY, $json]
+        );
+    } catch (Throwable $saveError) {
+        error_log('Packaging alert status save error: ' . $saveError->getMessage());
+    }
+}
+
+/**
  * معالجة التنبيه اليومي لأدوات التعبئة منخفضة الكمية
  */
 function processDailyPackagingAlert(): void {
@@ -54,10 +92,6 @@ function processDailyPackagingAlert(): void {
     }
 
     if (!function_exists('isLoggedIn') || !isLoggedIn()) {
-        return;
-    }
-
-    if (!isTelegramConfigured()) {
         return;
     }
 
@@ -85,6 +119,29 @@ function processDailyPackagingAlert(): void {
         }
     }
 
+    $existingData = [];
+    try {
+        $existingRow = $db->queryOne(
+            "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
+            [PACKAGING_ALERT_STATUS_SETTING_KEY]
+        );
+        if ($existingRow && isset($existingRow['value'])) {
+            $decoded = json_decode((string)$existingRow['value'], true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $existingData = $decoded;
+            }
+        }
+    } catch (Throwable $statusError) {
+        error_log('Packaging alert status fetch error: ' . $statusError->getMessage());
+    }
+
+    $statusData = [
+        'date' => $today,
+        'status' => 'pending',
+        'started_at' => date('Y-m-d H:i:s'),
+    ];
+    packagingAlertSaveStatus($statusData);
+
     try {
         $lowStockItems = $db->query(
             "SELECT name, type, quantity, unit 
@@ -97,27 +154,189 @@ function processDailyPackagingAlert(): void {
         );
     } catch (Throwable $queryError) {
         error_log('Packaging alert query error: ' . $queryError->getMessage());
+        $statusData['status'] = 'failed';
+        $statusData['error'] = 'تعذّر جلب بيانات أدوات التعبئة منخفضة الكمية.';
+        $statusData['completed_at'] = date('Y-m-d H:i:s');
+        packagingAlertSaveStatus($statusData);
         return;
     }
 
     if (empty($lowStockItems)) {
+        $statusData['status'] = 'completed_no_issues';
+        $statusData['completed_at'] = date('Y-m-d H:i:s');
+        $statusData['counts'] = [
+            'total_items' => 0,
+            'by_type' => [],
+        ];
+        packagingAlertSaveStatus($statusData);
         return;
     }
 
-    $pdfPath = packagingAlertGeneratePdf($lowStockItems);
-    if (!$pdfPath) {
+    $totalItems = count($lowStockItems);
+    $typeBreakdown = [];
+    foreach ($lowStockItems as $item) {
+        $typeKey = trim((string)($item['type'] ?? 'غير محدد'));
+        if ($typeKey === '') {
+            $typeKey = 'غير محدد';
+        }
+        $typeBreakdown[$typeKey] = ($typeBreakdown[$typeKey] ?? 0) + 1;
+    }
+
+    $reportFilePath = null;
+    $relativePath = null;
+    $viewerPath = null;
+    $accessToken = null;
+    $absoluteReportUrl = null;
+    $absolutePrintUrl = null;
+
+    if (
+        !empty($existingData) &&
+        ($existingData['date'] ?? null) === $today &&
+        !empty($existingData['report_path'])
+    ) {
+        $candidate = BASE_PATH . '/' . ltrim((string)$existingData['report_path'], '/\\');
+        if (file_exists($candidate)) {
+            $reportFilePath = $candidate;
+            $relativePath = ltrim((string)$existingData['report_path'], '/\\');
+            $viewerPath = (string)($existingData['viewer_path'] ?? '');
+            $accessToken = (string)($existingData['access_token'] ?? '');
+        }
+    }
+
+    if ($reportFilePath === null) {
+        $reportFilePath = packagingAlertGenerateReport($lowStockItems);
+        if ($reportFilePath !== null) {
+            $relativePath = ltrim(str_replace(BASE_PATH, '', $reportFilePath), '/\\');
+        }
+    }
+
+    if ($reportFilePath === null || $relativePath === null) {
+        $statusData['status'] = 'failed';
+        $statusData['error'] = 'فشل إنشاء ملف HTML لتقرير أدوات التعبئة.';
+        $statusData['completed_at'] = date('Y-m-d H:i:s');
+        packagingAlertSaveStatus($statusData);
         return;
     }
 
-    $caption = "تقرير أدوات التعبئة منخفضة الكمية\nالتاريخ: " . date('Y-m-d H:i') . "\nالحد الأدنى: أقل من " . PACKAGING_ALERT_THRESHOLD . ' قطعة';
-
-    $sent = sendTelegramFile($pdfPath, $caption);
-    if ($sent && file_exists($pdfPath)) {
-        @unlink($pdfPath);
-        $pdfPath = null;
+    if (empty($accessToken)) {
+        try {
+            $accessToken = bin2hex(random_bytes(16));
+        } catch (Throwable $tokenError) {
+            $accessToken = sha1($relativePath . microtime(true) . mt_rand());
+            error_log('Packaging alert: random_bytes failed, fallback token used - ' . $tokenError->getMessage());
+        }
     }
 
-    if (!$sent) {
+    if (empty($viewerPath) || strpos($viewerPath, 'reports/view.php') !== 0) {
+        $viewerPath = 'reports/view.php?' . http_build_query(
+            [
+                'type' => 'packaging',
+                'token' => $accessToken,
+            ],
+            '',
+            '&',
+            PHP_QUERY_RFC3986
+        );
+    }
+
+    $reportUrl = getRelativeUrl($viewerPath);
+    $printUrl = $reportUrl . (strpos($reportUrl, '?') === false ? '?print=1' : '&print=1');
+    $absoluteReportUrl = getAbsoluteUrl($viewerPath);
+    $absolutePrintUrl = $absoluteReportUrl . (strpos($absoluteReportUrl, '?') === false ? '?print=1' : '&print=1');
+
+    if (!isTelegramConfigured()) {
+        $statusData = [
+            'date' => $today,
+            'status' => 'failed',
+            'completed_at' => date('Y-m-d H:i:s'),
+            'counts' => [
+                'total_items' => $totalItems,
+                'by_type' => $typeBreakdown,
+            ],
+            'report_path' => $relativePath,
+            'viewer_path' => $viewerPath,
+            'access_token' => $accessToken,
+            'report_url' => $reportUrl,
+            'print_url' => $printUrl,
+            'absolute_report_url' => $absoluteReportUrl,
+            'absolute_print_url' => $absolutePrintUrl,
+            'error' => 'إعدادات Telegram غير مكتملة',
+        ];
+        packagingAlertSaveStatus($statusData);
+        return;
+    }
+
+    $summaryLines = [];
+    foreach ($typeBreakdown as $typeLabel => $count) {
+        $summaryLines[] = '• ' . htmlspecialchars($typeLabel, ENT_QUOTES, 'UTF-8') . ': ' . intval($count);
+    }
+    if (empty($summaryLines)) {
+        $summaryLines[] = '• لا توجد أصناف محددة حسب النوع.';
+    }
+
+    $detailLines = [];
+    $previewItems = [];
+    $slice = array_slice($lowStockItems, 0, 5);
+    foreach ($slice as $item) {
+        $name = htmlspecialchars(trim((string)($item['name'] ?? 'غير محدد')), ENT_QUOTES, 'UTF-8');
+        $type = htmlspecialchars(trim((string)($item['type'] ?? 'غير محدد')), ENT_QUOTES, 'UTF-8');
+        $unit = htmlspecialchars(trim((string)($item['unit'] ?? 'قطعة')), ENT_QUOTES, 'UTF-8');
+        $qty = $item['quantity'];
+        if (is_numeric($qty)) {
+            $qtyFmt = rtrim(rtrim(number_format((float)$qty, 3, '.', ''), '0'), '.');
+        } else {
+            $qtyFmt = (string)$qty;
+        }
+        $detailLines[] = '• ' . $name . ' — ' . $qtyFmt . ' ' . $unit . ' (' . $type . ')';
+        $previewItems[] = [
+            'name' => $name,
+            'type' => $type,
+            'quantity' => $qtyFmt,
+            'unit' => $unit,
+        ];
+    }
+    if (count($lowStockItems) > count($slice)) {
+        $detailLines[] = '• ...';
+    }
+
+    $message = "📦 <b>تقرير أدوات التعبئة منخفضة الكمية</b>\n";
+    $message .= 'التاريخ: ' . date('Y-m-d H:i:s') . "\n";
+    $message .= 'الحد الأدنى للتنبيه: أقل من ' . PACKAGING_ALERT_THRESHOLD . " قطعة\n\n";
+    $message .= '<b>عدد العناصر المنخفضة:</b> ' . $totalItems . "\n";
+    $message .= "<b>ملخص حسب النوع:</b>\n" . implode("\n", $summaryLines);
+    if (!empty($detailLines)) {
+        $message .= "\n\n<b>أبرز الأدوات:</b>\n" . implode("\n", $detailLines);
+    }
+    $message .= "\n\n✅ التقرير محفوظ في النظام ويمكن طباعته أو حفظه من خلال الروابط التالية.";
+
+    $buttons = [
+        [
+            ['text' => 'عرض التقرير', 'url' => $absoluteReportUrl],
+            ['text' => 'طباعة / حفظ PDF', 'url' => $absolutePrintUrl],
+        ],
+    ];
+
+    $sendResult = sendTelegramMessageWithButtons($message, $buttons);
+    if (empty($sendResult['success'])) {
+        $statusData = [
+            'date' => $today,
+            'status' => 'failed',
+            'completed_at' => date('Y-m-d H:i:s'),
+            'counts' => [
+                'total_items' => $totalItems,
+                'by_type' => $typeBreakdown,
+            ],
+            'preview' => $previewItems,
+            'report_path' => $relativePath,
+            'viewer_path' => $viewerPath,
+            'access_token' => $accessToken,
+            'report_url' => $reportUrl,
+            'print_url' => $printUrl,
+            'absolute_report_url' => $absoluteReportUrl,
+            'absolute_print_url' => $absolutePrintUrl,
+            'error' => 'فشل إرسال رابط التقرير إلى Telegram' . (!empty($sendResult['error']) ? ' (' . $sendResult['error'] . ')' : ''),
+        ];
+        packagingAlertSaveStatus($statusData);
         return;
     }
 
@@ -133,41 +352,55 @@ function processDailyPackagingAlert(): void {
                 [PACKAGING_ALERT_JOB_KEY]
             );
         }
-
-        if (function_exists('createNotificationForRole')) {
-            try {
-                $relativeLink = null;
-                if ($pdfPath && defined('BASE_PATH') && function_exists('getRelativeUrl')) {
-                    $relative = ltrim(str_replace(BASE_PATH, '', $pdfPath), '/\\');
-                    if ($relative !== '') {
-                        $relativeLink = getRelativeUrl($relative);
-                    }
-                }
-
-                createNotificationForRole(
-                    'manager',
-                    'تقرير المخازن اليومي',
-                    'تم إرسال تقرير أدوات التعبئة منخفضة الكمية إلى قناة Telegram الخاصة بالمخازن.',
-                    'info',
-                    $relativeLink
-                );
-            } catch (Throwable $notificationError) {
-                error_log('Packaging alert notification error: ' . $notificationError->getMessage());
-            }
-        }
     } catch (Throwable $updateError) {
         error_log('Packaging alert update error: ' . $updateError->getMessage());
     }
+
+    if (function_exists('createNotificationForRole')) {
+        try {
+            createNotificationForRole(
+                'manager',
+                'تقرير المخازن اليومي',
+                'تم إرسال تقرير أدوات التعبئة منخفضة الكمية إلى قناة Telegram.',
+                'info',
+                $reportUrl
+            );
+        } catch (Throwable $notificationError) {
+            error_log('Packaging alert notification error: ' . $notificationError->getMessage());
+        }
+    }
+
+    $finalData = [
+        'date' => $today,
+        'status' => 'completed',
+        'completed_at' => date('Y-m-d H:i:s'),
+        'counts' => [
+            'total_items' => $totalItems,
+            'by_type' => $typeBreakdown,
+        ],
+        'preview' => $previewItems,
+        'report_path' => $relativePath,
+        'viewer_path' => $viewerPath,
+        'access_token' => $accessToken,
+        'report_url' => $reportUrl,
+        'print_url' => $printUrl,
+        'absolute_report_url' => $absoluteReportUrl,
+        'absolute_print_url' => $absolutePrintUrl,
+        'file_deleted' => false,
+    ];
+
+    packagingAlertSaveStatus($finalData);
 }
 
 /**
- * إنشاء ملف PDF بسيط يحتوي على العناصر منخفضة الكمية
+ * إنشاء ملف HTML لتقرير أدوات التعبئة منخفضة الكمية.
  *
  * @param array<int, array<string, mixed>> $items
  * @return string|null
  */
-function packagingAlertGeneratePdf(array $items): ?string {
-    $reportsDir = rtrim(REPORTS_PATH, '/\\') . '/alerts';
+function packagingAlertGenerateReport(array $items): ?string {
+    $baseReportsPath = defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__) . '/reports/');
+    $reportsDir = rtrim($baseReportsPath, '/\\') . '/alerts';
     if (!is_dir($reportsDir)) {
         @mkdir($reportsDir, 0755, true);
     }
@@ -176,25 +409,43 @@ function packagingAlertGeneratePdf(array $items): ?string {
         return null;
     }
 
-    $filename = sprintf('packaging-low-stock-%s.pdf', date('Ymd-His'));
-    $filePath = $reportsDir . '/' . $filename;
+    $filename = sprintf('packaging-low-stock-%s.html', date('Ymd-His'));
+    $filePath = $reportsDir . DIRECTORY_SEPARATOR . $filename;
 
     $title = 'تقرير أدوات التعبئة منخفضة الكمية';
     $timestamp = date('Y-m-d H:i');
     $thresholdLine = 'الحد الأدنى للتنبيه: أقل من ' . PACKAGING_ALERT_THRESHOLD . ' قطعة';
 
-    // لتغيير البيانات المعروضة في التقرير، عدل بناء متغير $rowsHtml أدناه.
+    $totalItems = count($items);
+    $typeBreakdown = [];
+
+    foreach ($items as $item) {
+        $typeKey = trim((string)($item['type'] ?? 'غير محدد'));
+        if ($typeKey === '') {
+            $typeKey = 'غير محدد';
+        }
+        $typeBreakdown[$typeKey] = ($typeBreakdown[$typeKey] ?? 0) + 1;
+    }
+
+    $typeSummary = '';
+    if (!empty($typeBreakdown)) {
+        foreach ($typeBreakdown as $typeLabel => $count) {
+            $typeSummary .= '<li><span class="label">' . htmlspecialchars($typeLabel, ENT_QUOTES, 'UTF-8')
+                . '</span><span class="value">' . intval($count) . '</span></li>';
+        }
+    }
+
     $rowsHtml = '';
     foreach ($items as $item) {
         $name = htmlspecialchars(trim((string)($item['name'] ?? 'غير محدد')), ENT_QUOTES, 'UTF-8');
         $type = htmlspecialchars(trim((string)($item['type'] ?? 'غير محدد')), ENT_QUOTES, 'UTF-8');
         $unit = htmlspecialchars(trim((string)($item['unit'] ?? 'قطعة')), ENT_QUOTES, 'UTF-8');
-        $quantity = $item['quantity'];
+        $quantityRaw = $item['quantity'];
 
-        if (is_numeric($quantity)) {
-            $quantity = rtrim(rtrim(number_format((float)$quantity, 3, '.', ''), '0'), '.');
+        if (is_numeric($quantityRaw)) {
+            $quantity = rtrim(rtrim(number_format((float)$quantityRaw, 3, '.', ''), '0'), '.');
         } else {
-            $quantity = (string)$quantity;
+            $quantity = (string)$quantityRaw;
         }
 
         $rowsHtml .= '<tr><td>' . $name . '</td><td>' . $type . '</td><td>' . htmlspecialchars($quantity, ENT_QUOTES, 'UTF-8') . ' ' . $unit . '</td></tr>';
@@ -207,44 +458,71 @@ function packagingAlertGeneratePdf(array $items): ?string {
     $styles = '
         @page { margin: 18mm 15mm; }
         body { font-family: "Amiri", "Cairo", "Segoe UI", Tahoma, sans-serif; direction: rtl; text-align: right; margin:0; background:#f8fafc; color:#0f172a; }
-        /* لتغيير الخط العربي، استبدل أسماء الخطوط في السطر أعلاه أو فعّل رابط Google Fonts داخل الوسم <head>. */
-        .report { padding:32px; background:#ffffff; border-radius:16px; box-shadow:0 12px 40px rgba(15,23,42,0.08); }
+        .report-wrapper { padding: 32px; background:#ffffff; border-radius:16px; box-shadow:0 12px 40px rgba(15,23,42,0.08); }
+        .actions { display:flex; flex-direction:column; gap:8px; align-items:flex-start; margin-bottom:20px; }
+        .actions button { background:#1d4ed8; color:#fff; border:none; padding:10px 18px; border-radius:10px; font-size:15px; cursor:pointer; transition:opacity 0.2s ease; }
+        .actions button:hover { opacity:0.9; }
+        .actions .hint { font-size:13px; color:#475569; }
         header { text-align:center; margin-bottom:24px; }
         header h1 { margin:0; font-size:26px; color:#1d4ed8; }
         header .meta { display:flex; justify-content:center; gap:16px; flex-wrap:wrap; margin-top:12px; color:#475569; font-size:14px; }
         header .meta span { background:#e2e8f0; padding:6px 14px; border-radius:999px; }
+        .summary { background:#1d4ed8; color:#ffffff; padding:18px 24px; border-radius:14px; margin-bottom:28px; }
+        .summary h2 { margin:0 0 12px; font-size:18px; }
+        .summary ul { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:12px; }
+        .summary li { display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.15); padding:12px 16px; border-radius:12px; font-size:15px; }
+        .summary .label { font-weight:600; }
+        .summary .value { font-size:17px; font-weight:700; }
         .threshold { margin-bottom:24px; padding:16px; background:#f1f5f9; border-radius:14px; color:#1e293b; font-size:15px; }
         table { width:100%; border-collapse:collapse; }
         th, td { padding:12px 16px; border:1px solid #e2e8f0; font-size:14px; }
         th { background:#1d4ed8; color:#ffffff; font-size:15px; }
         tr:nth-child(even) td { background:#f8fafc; }
         .empty { text-align:center; padding:36px 0; color:#64748b; font-style:italic; font-size:15px; }
+        @media print { .actions { display:none !important; } body { background:#ffffff; } }
     ';
 
     $fontHint = '<!-- لإضافة خط عربي من Google Fonts، يمكنك استخدام الرابط التالي (أزل التعليق إذا لزم الأمر):
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&display=swap">
 -->';
 
-    $body = '<div class="report"><header><h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
+    $summarySection = '';
+    if (!empty($typeSummary)) {
+        $summarySection = '<section class="summary"><h2>ملخص حسب النوع</h2><ul>' . $typeSummary . '</ul></section>';
+    }
+
+    $body = '<div class="report-wrapper">'
+        . '<div class="actions">'
+        . '<button id="printReportButton" type="button">طباعة / حفظ كـ PDF</button>'
+        . '<span class="hint">يمكنك أيضاً استخدام الرابط المرسل عبر Telegram لعرض التقرير وطباعته.</span>'
+        . '</div>'
+        . '<header><h1>' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>'
         . '<div class="meta"><span>' . htmlspecialchars(COMPANY_NAME, ENT_QUOTES, 'UTF-8') . '</span>'
-        . '<span>' . htmlspecialchars($timestamp, ENT_QUOTES, 'UTF-8') . '</span></div></header>'
+        . '<span>' . htmlspecialchars($timestamp, ENT_QUOTES, 'UTF-8') . '</span>'
+        . '<span>عدد العناصر المنخفضة: ' . $totalItems . '</span>'
+        . '</div></header>'
+        . $summarySection
         . '<div class="threshold">' . htmlspecialchars($thresholdLine, ENT_QUOTES, 'UTF-8') . '</div>'
         . '<table><thead><tr><th>اسم الأداة</th><th>النوع</th><th>الكمية الحالية</th></tr></thead><tbody>'
         . $rowsHtml . '</tbody></table></div>';
 
+    $printScript = '<script>(function(){function triggerPrint(){window.print();}'
+        . 'document.addEventListener("DOMContentLoaded",function(){var btn=document.getElementById("printReportButton");'
+        . 'if(btn){btn.addEventListener("click",function(e){e.preventDefault();triggerPrint();});}'
+        . 'var params=new URLSearchParams(window.location.search);'
+        . 'if(params.get("print")==="1"){setTimeout(triggerPrint,700);}'
+        . '});})();</script>';
+
     $document = '<!DOCTYPE html><html lang="ar"><head><meta charset="utf-8"><title>'
         . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</title><meta name="viewport" content="width=device-width, initial-scale=1">'
-        . $fontHint . '<style>' . $styles . '</style></head><body>' . $body . '</body></html>';
+        . $fontHint . '<style>' . $styles . '</style></head><body>' . $body . $printScript . '</body></html>';
 
-    try {
-        apdfSavePdfToPath($document, $filePath, [
-            'landscape' => false,
-            'preferCSSPageSize' => true,
-        ]);
-    } catch (Throwable $e) {
-        error_log('Packaging alert aPDF.io error: ' . $e->getMessage());
+    if (@file_put_contents($filePath, $document) === false) {
+        error_log('Packaging alert: unable to write HTML report to ' . $filePath);
         return null;
     }
+
+    packagingAlertCleanupOldReports($reportsDir, $filename);
 
     return $filePath;
 }

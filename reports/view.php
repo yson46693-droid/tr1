@@ -43,9 +43,23 @@ function renderReportError(int $code, string $message): void
 
 $type = $_GET['type'] ?? 'low_stock';
 $token = trim((string)($_GET['token'] ?? ''));
+$settingKey = null;
 
-if ($type !== 'low_stock') {
-    renderReportError(404, 'نوع التقرير غير مدعوم.');
+switch ($type) {
+    case 'low_stock':
+        if (!defined('LOW_STOCK_REPORT_STATUS_SETTING_KEY')) {
+            define('LOW_STOCK_REPORT_STATUS_SETTING_KEY', 'low_stock_report_status');
+        }
+        $settingKey = LOW_STOCK_REPORT_STATUS_SETTING_KEY;
+        break;
+    case 'packaging':
+        if (!defined('PACKAGING_ALERT_STATUS_SETTING_KEY')) {
+            define('PACKAGING_ALERT_STATUS_SETTING_KEY', 'packaging_alert_status');
+        }
+        $settingKey = PACKAGING_ALERT_STATUS_SETTING_KEY;
+        break;
+    default:
+        renderReportError(404, 'نوع التقرير غير مدعوم.');
 }
 
 if ($token === '') {
@@ -59,15 +73,11 @@ try {
     renderReportError(500, 'حدث خطأ في الاتصال بقاعدة البيانات.');
 }
 
-if (!defined('LOW_STOCK_REPORT_STATUS_SETTING_KEY')) {
-    define('LOW_STOCK_REPORT_STATUS_SETTING_KEY', 'low_stock_report_status');
-}
-
 $row = null;
 try {
     $row = $db->queryOne(
         "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
-        [LOW_STOCK_REPORT_STATUS_SETTING_KEY]
+        [$settingKey]
     );
 } catch (Throwable $queryError) {
     error_log('Report viewer: status fetch failed - ' . $queryError->getMessage());
