@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/reports.php';
 require_once __DIR__ . '/../includes/production_helper.php';
 require_once __DIR__ . '/../includes/invoices.php';
 require_once __DIR__ . '/../includes/telegram_config.php';
+require_once __DIR__ . '/../includes/path_helper.php';
 
 requireRole(['accountant', 'sales', 'production', 'manager']);
 
@@ -45,18 +46,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
         } elseif ($action === 'send_telegram') {
-        $filePath = $_POST['file_path'] ?? '';
         $reportType = $_POST['type'] ?? '';
         $reportName = $_POST['report_name'] ?? '';
-        
+        $payloadJson = $_POST['payload'] ?? '';
+        $payload = [];
+        if ($payloadJson !== '') {
+            $decodedPayload = json_decode($payloadJson, true);
+            if (is_array($decodedPayload)) {
+                $payload = $decodedPayload;
+            }
+        }
+
+        $reportArray = null;
+        $relativePath = '';
+        if (isset($payload['relative_path'])) {
+            $relativePath = ltrim(str_replace('\\', '/', (string)$payload['relative_path']), '/');
+            if ($relativePath !== '' && !preg_match('#\.\.[/\\\\]#', $relativePath)) {
+                $fullPath = rtrim(
+                    defined('REPORTS_PRIVATE_PATH')
+                        ? REPORTS_PRIVATE_PATH
+                        : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__) . '/reports')),
+                    '/\\'
+                ) . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+
+                if (is_file($fullPath)) {
+                    $viewerPath = (string)($payload['viewer_path'] ?? '');
+                    $reportUrl = (string)($payload['file_path'] ?? $payload['report_url'] ?? $viewerPath);
+
+                    $absoluteReportUrl = (string)($payload['absolute_report_url'] ?? '');
+                    if ($absoluteReportUrl === '' && $viewerPath !== '') {
+                        $absoluteReportUrl = getAbsoluteUrl(ltrim($viewerPath, '/'));
+                    }
+                    if ($absoluteReportUrl === '' && $reportUrl !== '') {
+                        $absoluteReportUrl = getAbsoluteUrl(ltrim($reportUrl, '/'));
+                    }
+
+                    $printUrl = (string)($payload['print_url'] ?? '');
+                    if ($printUrl === '' && $reportUrl !== '') {
+                        $printUrl = $reportUrl . (strpos($reportUrl, '?') !== false ? '&' : '?') . 'print=1';
+                    }
+                    $absolutePrintUrl = (string)($payload['absolute_print_url'] ?? '');
+                    if ($absolutePrintUrl === '' && $absoluteReportUrl !== '') {
+                        $absolutePrintUrl = $absoluteReportUrl . (strpos($absoluteReportUrl, '?') !== false ? '&' : '?') . 'print=1';
+                    }
+
+                    $reportArray = [
+                        'file_path' => $fullPath,
+                        'relative_path' => $relativePath,
+                        'report_url' => $reportUrl,
+                        'absolute_report_url' => $absoluteReportUrl,
+                        'print_url' => $printUrl ?: $reportUrl,
+                        'absolute_print_url' => $absolutePrintUrl ?: $absoluteReportUrl,
+                        'token' => $payload['token'] ?? '',
+                        'total_rows' => $payload['total_rows'] ?? 0,
+                        'generated_at' => $payload['generated_at'] ?? date('Y-m-d H:i:s'),
+                    ];
+                }
+            }
+        }
+
+        if ($reportArray !== null) {
+            $sendResult = sendReportAndDelete($reportArray, $reportType, $reportName);
+            echo json_encode($sendResult, JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $filePath = $_POST['file_path'] ?? '';
         if (empty($filePath) || !file_exists($filePath)) {
             echo json_encode(['success' => false, 'error' => 'الملف غير موجود']);
             exit;
         }
-        
+
         try {
-            sendReportAndDelete($filePath, $reportType, $reportName);
-            echo json_encode(['success' => true, 'message' => 'تم إرسال التقرير إلى Telegram بنجاح']);
+            $result = sendReportAndDelete($filePath, $reportType, $reportName);
+            echo json_encode($result, JSON_UNESCAPED_UNICODE);
         } catch (Exception $e) {
             error_log("Telegram send error: " . $e->getMessage());
             echo json_encode(['success' => false, 'error' => 'فشل في إرسال التقرير إلى Telegram']);
@@ -106,7 +169,7 @@ if (is_array($filters)) {
 }
 
 try {
-    $filePath = null;
+    $reportResult = null;
     $reportTitle = '';
     
     switch ($reportType) {
@@ -144,9 +207,9 @@ try {
                 $reportTitle = 'تقرير الإنتاجية';
                 
                 if ($format === 'pdf') {
-                    $filePath = generatePDFReport('productivity', $reportData, $reportTitle, $filters);
+                    $reportResult = generatePDFReport('productivity', $reportData, $reportTitle, $filters);
                 } else {
-                    $filePath = generateExcelReport('productivity', $reportData, $reportTitle, $filters);
+                    $reportResult = generateExcelReport('productivity', $reportData, $reportTitle, $filters);
                 }
             } catch (Exception $e) {
                 error_log("Productivity report error: " . $e->getMessage());
@@ -186,9 +249,9 @@ try {
                 $reportTitle = 'تقرير الفواتير';
                 
                 if ($format === 'pdf') {
-                    $filePath = generatePDFReport('invoices', $reportData, $reportTitle, $filters);
+                    $reportResult = generatePDFReport('invoices', $reportData, $reportTitle, $filters);
                 } else {
-                    $filePath = generateExcelReport('invoices', $reportData, $reportTitle, $filters);
+                    $reportResult = generateExcelReport('invoices', $reportData, $reportTitle, $filters);
                 }
             } catch (Exception $e) {
                 error_log("Invoices report error: " . $e->getMessage());
@@ -225,9 +288,9 @@ try {
             $reportTitle = 'تقرير المبيعات';
             
             if ($format === 'pdf') {
-                $filePath = generatePDFReport('sales', $reportData, $reportTitle, $filters);
+                $reportResult = generatePDFReport('sales', $reportData, $reportTitle, $filters);
             } else {
-                $filePath = generateExcelReport('sales', $reportData, $reportTitle, $filters);
+                $reportResult = generateExcelReport('sales', $reportData, $reportTitle, $filters);
             }
             break;
             
@@ -284,9 +347,9 @@ try {
             $reportTitle = 'التقرير المالي';
             
             if ($format === 'pdf') {
-                $filePath = generatePDFReport('financial', $reportData, $reportTitle, $filters);
+                $reportResult = generatePDFReport('financial', $reportData, $reportTitle, $filters);
             } else {
-                $filePath = generateExcelReport('financial', $reportData, $reportTitle, $filters);
+                $reportResult = generateExcelReport('financial', $reportData, $reportTitle, $filters);
             }
             break;
             
@@ -298,71 +361,83 @@ try {
             die('نوع التقرير غير صحيح');
     }
     
-    if ($filePath && file_exists($filePath)) {
-        // إذا كان طلب POST، نعيد JSON
+    $reportFilePath = null;
+    $reportIsArray = is_array($reportResult);
+    if ($format === 'pdf' && $reportIsArray) {
+        $reportFilePath = $reportResult['file_path'] ?? null;
+    } else {
+        $reportFilePath = $reportResult;
+    }
+
+    if ($reportFilePath && file_exists($reportFilePath)) {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            // حساب URL الملف بناءً على المسار الفعلي
-            $fileUrl = str_replace($_SERVER['DOCUMENT_ROOT'] ?? '', '', $filePath);
-            $fileUrl = str_replace('\\', '/', $fileUrl);
-            
-            // إذا لم يكن المسار يبدأ بـ /، أضفه
-            if (!str_starts_with($fileUrl, '/')) {
-                $fileUrl = '/' . $fileUrl;
+            if ($format === 'pdf' && $reportIsArray) {
+                echo json_encode([
+                    'success' => true,
+                    'file_path' => $reportResult['report_url'] ?? '',
+                    'viewer_path' => $reportResult['viewer_path'] ?? '',
+                    'absolute_report_url' => $reportResult['absolute_report_url'] ?? '',
+                    'print_url' => $reportResult['print_url'] ?? ($reportResult['report_url'] ?? ''),
+                    'absolute_print_url' => $reportResult['absolute_print_url'] ?? ($reportResult['absolute_report_url'] ?? ''),
+                    'relative_path' => $reportResult['relative_path'] ?? '',
+                    'report_name' => $reportTitle,
+                    'token' => $reportResult['token'] ?? '',
+                    'message' => 'تم توليد التقرير بنجاح (HTML قابل للعرض والطباعة)',
+                    'file_type' => 'html',
+                    'is_html' => true,
+                    'is_csv' => false,
+                ], JSON_UNESCAPED_UNICODE);
+            } else {
+                $fileUrl = str_replace($_SERVER['DOCUMENT_ROOT'] ?? '', '', $reportFilePath);
+                $fileUrl = str_replace('\\', '/', $fileUrl);
+                if (!str_starts_with($fileUrl, '/')) {
+                    $fileUrl = '/' . $fileUrl;
+                }
+                $fileUrl = preg_replace('#/+#', '/', $fileUrl);
+                $extension = strtolower(pathinfo($reportFilePath, PATHINFO_EXTENSION));
+                $isCsv = ($extension === 'csv');
+
+                echo json_encode([
+                    'success' => true,
+                    'file_path' => $fileUrl,
+                    'report_name' => $reportTitle,
+                    'message' => 'تم توليد التقرير بنجاح' . ($isCsv ? ' (ملف CSV)' : ''),
+                    'file_type' => $extension,
+                    'is_html' => false,
+                    'is_csv' => $isCsv
+                ], JSON_UNESCAPED_UNICODE);
             }
-            
-            // تحسين المسار - إزالة المسارات المكررة
-            $fileUrl = preg_replace('#/+#', '/', $fileUrl);
-            
-            // إذا كان الملف HTML بدلاً من PDF، نضيف ملاحظة
-            $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-            $isHtml = ($extension === 'html');
-            $isCsv = ($extension === 'csv');
-            
-            echo json_encode([
-                'success' => true,
-                'file_path' => $fileUrl,
-                'report_name' => $reportTitle,
-                'message' => 'تم توليد التقرير بنجاح' . ($isHtml ? ' (ملف HTML - يمكن فتحه في المتصفح)' : ($isCsv ? ' (ملف CSV)' : '')),
-                'file_type' => $extension,
-                'is_html' => $isHtml,
-                'is_csv' => $isCsv
-            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        
-        // إرسال إلى Telegram إذا كان مفعّل (للطلبات GET)
-        if (isTelegramConfigured() && isset($_GET['send_telegram']) && $_GET['send_telegram'] == '1') {
-            sendReportAndDelete($filePath, $reportType, $reportTitle);
+
+        if ($format === 'pdf' && $reportIsArray) {
+            if (isTelegramConfigured() && isset($_GET['send_telegram']) && $_GET['send_telegram'] == '1') {
+                sendReportAndDelete($reportResult, $reportType, $reportTitle);
+            }
+
+            header('Location: ' . ($reportResult['report_url'] ?? '/'));
+            exit;
         }
-        
-        // تحميل الملف
-        $fileName = basename($filePath);
-        
-        // تحديد نوع الملف بناءً على الامتداد الفعلي
-        $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-        if ($extension === 'html') {
-            $mimeType = 'text/html';
-        } elseif ($extension === 'csv') {
-            $mimeType = 'text/csv';
-        } elseif ($format === 'pdf') {
-            $mimeType = 'application/pdf';
-        } else {
-            $mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-        }
-        
+
+        // تنزيل الملفات غير HTML (Excel/CSV)
+        $fileName = basename($reportFilePath);
+        $extension = strtolower(pathinfo($reportFilePath, PATHINFO_EXTENSION));
+        $mimeType = $extension === 'csv'
+            ? 'text/csv'
+            : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
         header('Content-Type: ' . $mimeType);
         header('Content-Disposition: attachment; filename="' . $fileName . '"');
-        header('Content-Length: ' . filesize($filePath));
+        header('Content-Length: ' . filesize($reportFilePath));
         header('Cache-Control: must-revalidate');
         header('Pragma: public');
-        
-        readfile($filePath);
-        
-        // حذف الملف بعد التحميل (إذا كان مفعّل)
+
+        readfile($reportFilePath);
+
         if (REPORTS_AUTO_DELETE && !isset($_GET['send_telegram'])) {
-            @unlink($filePath);
+            @unlink($reportFilePath);
         }
-        
+
         exit;
     } else {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -378,7 +453,7 @@ try {
     error_log("Stack trace: " . $e->getTraceAsString());
     error_log("Report Type: " . ($reportType ?? 'unknown'));
     error_log("Format: " . ($format ?? 'unknown'));
-    error_log("File Path: " . ($filePath ?? 'not generated'));
+    error_log("Report Result: " . (is_array($reportResult ?? null) ? json_encode($reportResult) : ($reportResult ?? 'not generated')));
     
     // التحقق من وجود مجلد التقارير
     if (defined('REPORTS_PATH')) {

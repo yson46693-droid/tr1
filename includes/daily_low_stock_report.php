@@ -356,6 +356,21 @@ if (!function_exists('triggerDailyLowStockReport')) {
                 lowStockReportSaveStatus($statusSnapshot);
                 return;
             }
+
+            $jobRelativePath = (string)($jobState['last_file_path'] ?? '');
+            if ($lastSentDate === $todayDate && $existingReportPath === null && $jobRelativePath !== '') {
+                $candidate = $reportsBaseDir . '/' . ltrim($jobRelativePath, '/\\');
+                if (is_file($candidate)) {
+                    lowStockReportSaveStatus([
+                        'date' => $todayDate,
+                        'status' => 'already_sent',
+                        'checked_at' => date('Y-m-d H:i:s'),
+                        'last_sent_at' => $jobState['last_sent_at'],
+                        'report_path' => $jobRelativePath,
+                    ]);
+                    return;
+                }
+            }
         }
 
         // منع التكرار خلال نفس اليوم باستخدام قفل بسيط
@@ -635,40 +650,9 @@ if (!function_exists('triggerDailyLowStockReport')) {
                 $absoluteReportUrl = getAbsoluteUrl($viewerPath);
                 $absolutePrintUrl = $absoluteReportUrl . (strpos($absoluteReportUrl, '?') === false ? '?print=1' : '&print=1');
 
-                $summaryLines = [];
-                foreach ($counts as $key => $value) {
-                    if ($value <= 0) {
-                        continue;
-                    }
-                    $summaryLines[] = '• ' . htmlspecialchars(formatLowStockCountLabel($key), ENT_QUOTES, 'UTF-8') . ': ' . intval($value);
-                }
-                if (empty($summaryLines)) {
-                    $summaryLines[] = '• لا توجد عناصر منخفضة في هذا اليوم.';
-                }
-
-                $detailLines = [];
-                foreach ($sections as $section) {
-                    $title = htmlspecialchars((string)($section['title'] ?? 'قسم غير محدد'), ENT_QUOTES, 'UTF-8');
-                    $detailLines[] = '— ' . $title;
-                    $sectionLines = $section['lines'] ?? [];
-                    $limited = array_slice($sectionLines, 0, 3);
-                    foreach ($limited as $line) {
-                        $detailLines[] = '   ' . htmlspecialchars(ltrim((string)$line), ENT_QUOTES, 'UTF-8');
-                    }
-                    if (count($sectionLines) > 3) {
-                        $detailLines[] = '   ...';
-                    }
-                }
-
                 $message = "⚠️ <b>تقرير الكميات المنخفضة</b>\n";
                 $message .= 'التاريخ: ' . date('Y-m-d H:i:s') . "\n\n";
-                $message .= "<b>الملخص:</b>\n" . implode("\n", $summaryLines);
-
-                if (!empty($detailLines)) {
-                    $message .= "\n\n<b>أبرز العناصر:</b>\n" . implode("\n", $detailLines);
-                }
-
-                $message .= "\n\n✅ التقرير محفوظ في النظام ويمكن طباعته أو حفظه عبر الروابط التالية.";
+                $message .= "✅ التقرير محفوظ في النظام ويمكن عرضه أو طباعته من خلال الأزرار التالية.";
 
                 if (!isTelegramConfigured()) {
                     $status = 'failed';

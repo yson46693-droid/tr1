@@ -133,6 +133,39 @@ if (!function_exists('triggerDailyConsumptionReport')) {
         $db = db();
         dailyConsumptionEnsureJobTable();
 
+        $reportsBaseDir = rtrim(
+            defined('REPORTS_PRIVATE_PATH')
+                ? REPORTS_PRIVATE_PATH
+                : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__) . '/reports')),
+            '/\\'
+        );
+
+        $statusSnapshot = [];
+        $existingReportPath = null;
+        try {
+            $rawStatus = $db->queryOne(
+                "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
+                [DAILY_CONSUMPTION_STATUS_SETTING_KEY]
+            );
+            if ($rawStatus && isset($rawStatus['value'])) {
+                $decodedStatus = json_decode((string)$rawStatus['value'], true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decodedStatus)) {
+                    $statusSnapshot = $decodedStatus;
+                    if (
+                        ($decodedStatus['date'] ?? null) === $todayDate &&
+                        !empty($decodedStatus['report_path'])
+                    ) {
+                        $candidatePath = $reportsBaseDir . '/' . ltrim((string)$decodedStatus['report_path'], '/\\');
+                        if (is_file($candidatePath)) {
+                            $existingReportPath = $candidatePath;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable $statusError) {
+            error_log('Daily Consumption: failed loading status - ' . $statusError->getMessage());
+        }
+
         $jobState = null;
         try {
             $jobState = $db->queryOne(
@@ -146,13 +179,19 @@ if (!function_exists('triggerDailyConsumptionReport')) {
         if (!empty($jobState['last_sent_at'])) {
             $lastSentDate = substr((string) $jobState['last_sent_at'], 0, 10);
             if ($lastSentDate === $todayDate) {
-                $statusData['status'] = 'already_sent';
-                $statusData['last_sent_at'] = $jobState['last_sent_at'];
-                $statusData['note'] = 'Consumption report already delivered today';
-                dailyConsumptionSaveStatus($statusData);
-                error_log('[DailyConsumption] Skipped: already sent earlier today.');
-                dailyConsumptionNotifyManager('تم إرسال تقرير الاستهلاك اليومي مسبقاً اليوم.');
-                return;
+                if (
+                    !empty($statusSnapshot) &&
+                    in_array($statusSnapshot['status'] ?? null, ['completed', 'completed_no_data'], true) &&
+                    $existingReportPath !== null
+                ) {
+                    $statusSnapshot['status'] = 'already_sent';
+                    $statusSnapshot['checked_at'] = date('Y-m-d H:i:s');
+                    $statusSnapshot['last_sent_at'] = $jobState['last_sent_at'];
+                    dailyConsumptionSaveStatus($statusSnapshot);
+                    error_log('[DailyConsumption] Skipped: already sent earlier today.');
+                    dailyConsumptionNotifyManager('تم إرسال تقرير الاستهلاك اليومي مسبقاً اليوم.');
+                    return;
+                }
             }
         }
 
@@ -165,17 +204,28 @@ if (!function_exists('triggerDailyConsumptionReport')) {
             );
 
             $existingData = [];
+            $existingDataReportPath = null;
             if ($existing && isset($existing['value'])) {
                 $decoded = json_decode((string) $existing['value'], true);
                 if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
                     $existingData = $decoded;
+                    if (
+                        ($decoded['date'] ?? null) === $todayDate &&
+                        !empty($decoded['report_path'])
+                    ) {
+                        $candidateExisting = $reportsBaseDir . '/' . ltrim((string)$decoded['report_path'], '/\\');
+                        if (is_file($candidateExisting)) {
+                            $existingDataReportPath = $candidateExisting;
+                        }
+                    }
                 }
             }
 
             if (
                 !empty($existingData) &&
                 ($existingData['date'] ?? null) === $todayDate &&
-                in_array($existingData['status'] ?? null, ['completed', 'completed_no_data'], true)
+                in_array($existingData['status'] ?? null, ['completed', 'completed_no_data'], true) &&
+                $existingDataReportPath !== null
             ) {
                 $db->commit();
                 return;
@@ -263,19 +313,20 @@ if (!function_exists('triggerDailyConsumptionReport')) {
             return;
         }
 
+        $relativePath = $result['relative_path'] ?? null;
         try {
             if ($jobState) {
                 $db->execute(
                     "UPDATE system_daily_jobs
-                     SET last_sent_at = NOW(), last_file_path = NULL, updated_at = NOW()
+                     SET last_sent_at = NOW(), last_file_path = ?, updated_at = NOW()
                      WHERE job_key = ?",
-                    [DAILY_CONSUMPTION_JOB_KEY]
+                    [$relativePath, DAILY_CONSUMPTION_JOB_KEY]
                 );
             } else {
                 $db->execute(
                     "INSERT INTO system_daily_jobs (job_key, last_sent_at, last_file_path)
-                     VALUES (?, NOW(), NULL)",
-                    [DAILY_CONSUMPTION_JOB_KEY]
+                     VALUES (?, NOW(), ?)",
+                    [DAILY_CONSUMPTION_JOB_KEY, $relativePath]
                 );
             }
         } catch (Throwable $logError) {
@@ -288,6 +339,11 @@ if (!function_exists('triggerDailyConsumptionReport')) {
             'status' => 'completed',
             'completed_at' => date('Y-m-d H:i:s'),
             'message' => $message ?: 'تم إرسال التقرير بنجاح.',
+            'report_path' => $relativePath,
+            'report_url' => $result['report_url'] ?? null,
+            'print_url' => $result['print_url'] ?? null,
+            'absolute_report_url' => $result['absolute_report_url'] ?? null,
+            'absolute_print_url' => $result['absolute_print_url'] ?? null,
         ]);
 
         error_log('[DailyConsumption] Report generated and sent successfully.');

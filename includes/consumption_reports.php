@@ -7,7 +7,6 @@ require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/inventory_movements.php';
 require_once __DIR__ . '/simple_export.php';
-require_once __DIR__ . '/pdf_helper.php';
 require_once __DIR__ . '/reports.php';
 
 function consumptionGetTableColumns($table)
@@ -491,6 +490,10 @@ function buildConsumptionReportHtml($summary, $meta)
     $gradient = 'linear-gradient(135deg, #1e3a5f 0%, #3498db 100%)';
     $html = '<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>' . htmlspecialchars($title) . '</title><style>
     body{font-family:"Segoe UI",Arial,sans-serif;background:#f5f8fd;color:#1f2937;padding:40px;}
+    .actions{display:flex;gap:10px;align-items:center;margin-bottom:24px;}
+    .actions button{background:' . $secondary . ';color:#fff;border:none;padding:10px 18px;border-radius:12px;font-size:14px;cursor:pointer;transition:opacity .2s ease;}
+    .actions button:hover{opacity:.92;}
+    .actions .hint{font-size:12px;color:#475569;}
     .header{background:' . $gradient . ';color:#fff;padding:30px;border-radius:18px;box-shadow:0 12px 32px rgba(30,58,95,0.28);margin-bottom:35px;text-align:center;}
     .header h1{font-size:28px;margin:0;}
     .header p{margin:8px 0 0;font-size:15px;opacity:0.9;}
@@ -513,7 +516,9 @@ function buildConsumptionReportHtml($summary, $meta)
     .subtotals{display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;}
     .subtotal{background:#fff;border-radius:14px;padding:16px;box-shadow:0 8px 20px rgba(15,23,42,0.06);min-width:180px;}
     .footer{margin-top:40px;text-align:center;font-size:12px;color:#94a3b8;}
+    @media print{body{background:#fff;padding:0;}.actions{display:none !important;}}
     </style></head><body>';
+    $html .= '<div class="actions"><button id="printReportButton" type="button">طباعة / حفظ كـ PDF</button><span class="hint">يمكنك أيضاً استخدام المتصفح لحفظ التقرير كملف PDF.</span></div>';
     $html .= '<div class="header"><h1>' . htmlspecialchars($title) . '</h1>';
     if ($periodLabel !== '') {
         $html .= '<p>' . htmlspecialchars($periodLabel) . '</p>';
@@ -569,32 +574,88 @@ function buildConsumptionReportHtml($summary, $meta)
         $html .= '</tbody></table></div>';
     }
     $html .= '</div>';
+
     $html .= '<div class="footer">شركة البركة &mdash; نظام التقارير الذكي</div>';
+    $html .= '<script>(function(){function triggerPrint(){window.print();}document.addEventListener("DOMContentLoaded",function(){var btn=document.getElementById("printReportButton");if(btn){btn.addEventListener("click",function(e){e.preventDefault();triggerPrint();});}var params=new URLSearchParams(window.location.search);if(params.get("print")==="1"){setTimeout(triggerPrint,600);}});})();</script>';
     $html .= '</body></html>';
     return $html;
 }
 
 function generateConsumptionPdf($summary, $meta)
 {
-    $html = buildConsumptionReportHtml($summary, $meta);
-    $fileName = sanitizeFileName(($meta['file_prefix'] ?? 'consumption_report') . '_' . $summary['date_from'] . '_' . $summary['date_to']) . '.pdf';
-    $dir = rtrim(REPORTS_PATH, '/\\');
-    if (!file_exists($dir)) {
-        mkdir($dir, 0755, true);
+    $document = buildConsumptionReportHtml($summary, $meta);
+
+    $baseDir = rtrim(
+        defined('REPORTS_PRIVATE_PATH')
+            ? REPORTS_PRIVATE_PATH
+            : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__) . '/reports/')),
+        '/\\'
+    );
+
+    ensurePrivateDirectory($baseDir);
+
+    $reportsDir = $baseDir . DIRECTORY_SEPARATOR . 'consumption';
+    ensurePrivateDirectory($reportsDir);
+
+    if (!is_dir($reportsDir) || !is_writable($reportsDir)) {
+        throw new RuntimeException('تعذر الوصول إلى مجلد تقارير الاستهلاك. يرجى التحقق من الصلاحيات.');
     }
-    $filePath = $dir . DIRECTORY_SEPARATOR . $fileName;
+
+    $prefix = sanitizeFileName($meta['file_prefix'] ?? 'consumption_report');
+    $prefix = $prefix !== '' ? $prefix : 'consumption_report';
 
     try {
-        apdfSavePdfToPath($html, $filePath, [
-            'landscape' => false,
-            'preferCSSPageSize' => true,
-        ]);
-    } catch (Throwable $e) {
-        error_log('Consumption report PDF error: ' . $e->getMessage());
-        throw new RuntimeException('تعذر إنشاء ملف PDF لتقرير الاستهلاك: ' . $e->getMessage());
+        $token = bin2hex(random_bytes(16));
+    } catch (Throwable $tokenError) {
+        $token = sha1($prefix . microtime(true) . mt_rand());
+        error_log('generateConsumptionPdf: random_bytes failed, fallback token used - ' . $tokenError->getMessage());
     }
 
-    return $filePath;
+    $fileName = $prefix . '-' . date('Ymd-His') . '-' . $token . '.html';
+    $filePath = $reportsDir . DIRECTORY_SEPARATOR . $fileName;
+
+    if (@file_put_contents($filePath, $document) === false) {
+        throw new RuntimeException('تعذر حفظ ملف تقرير الاستهلاك. يرجى التحقق من الصلاحيات.');
+    }
+
+    $relativePath = 'consumption/' . $fileName;
+    $viewerPath = 'reports/view.php?' . http_build_query(
+        [
+            'type' => 'consumption',
+            'file' => $relativePath,
+            'token' => $token,
+        ],
+        '',
+        '&',
+        PHP_QUERY_RFC3986
+    );
+
+    $reportUrl = getRelativeUrl($viewerPath);
+    $absoluteReportUrl = getAbsoluteUrl($viewerPath);
+    $printUrl = $reportUrl . (str_contains($reportUrl, '?') ? '&' : '?') . 'print=1';
+    $absolutePrintUrl = $absoluteReportUrl . (str_contains($absoluteReportUrl, '?') ? '&' : '?') . 'print=1';
+
+    return [
+        'file_path' => $filePath,
+        'relative_path' => $relativePath,
+        'viewer_path' => $viewerPath,
+        'report_url' => $reportUrl,
+        'absolute_report_url' => $absoluteReportUrl,
+        'print_url' => $printUrl,
+        'absolute_print_url' => $absolutePrintUrl,
+        'token' => $token,
+        'title' => $meta['title'] ?? 'تقرير الاستهلاك',
+        'generated_at' => $summary['generated_at'] ?? date('Y-m-d H:i:s'),
+        'total_rows' => intval(
+            (is_countable($summary['packaging']['items'] ?? null) ? count($summary['packaging']['items']) : 0) +
+            (is_countable($summary['raw']['items'] ?? null) ? count($summary['raw']['items']) : 0)
+        ),
+        'summary' => [
+            'packaging' => $summary['packaging']['total_out'] ?? 0,
+            'raw' => $summary['raw']['total_out'] ?? 0,
+            'net' => ($summary['packaging']['net'] ?? 0) + ($summary['raw']['net'] ?? 0),
+        ],
+    ];
 }
 
 function sendConsumptionReport($dateFrom, $dateTo, $scopeLabel)
@@ -615,8 +676,8 @@ function sendConsumptionReport($dateFrom, $dateTo, $scopeLabel)
         'scope' => $scopeLabel,
         'file_prefix' => 'consumption_report'
     ];
-    $filePath = generateConsumptionPdf($summary, $meta);
-    $result = sendReportAndDelete($filePath, $title, $scopeLabel);
+    $reportInfo = generateConsumptionPdf($summary, $meta);
+    $result = sendReportAndDelete($reportInfo, $title, $scopeLabel);
     return $result;
 }
 

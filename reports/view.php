@@ -19,6 +19,15 @@ if (!defined('SKIP_DAILY_BACKUP')) {
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
 
+$reportsBaseDir = null;
+if (defined('REPORTS_PRIVATE_PATH')) {
+    $reportsBaseDir = rtrim(str_replace('\\', '/', REPORTS_PRIVATE_PATH), '/');
+} elseif (defined('REPORTS_PATH')) {
+    $reportsBaseDir = rtrim(str_replace('\\', '/', REPORTS_PATH), '/');
+} else {
+    $reportsBaseDir = str_replace('\\', '/', BASE_PATH . '/reports');
+}
+
 /**
  * عرض رسالة خطأ للمستخدم
  *
@@ -44,6 +53,7 @@ function renderReportError(int $code, string $message): void
 $type = $_GET['type'] ?? 'low_stock';
 $token = trim((string)($_GET['token'] ?? ''));
 $settingKey = null;
+$usesSettingsTable = true;
 
 switch ($type) {
     case 'low_stock':
@@ -58,6 +68,10 @@ switch ($type) {
         }
         $settingKey = PACKAGING_ALERT_STATUS_SETTING_KEY;
         break;
+    case 'export':
+    case 'consumption':
+        $usesSettingsTable = false;
+        break;
     default:
         renderReportError(404, 'نوع التقرير غير مدعوم.');
 }
@@ -66,58 +80,86 @@ if ($token === '') {
     renderReportError(400, 'المعرف الآمن للتقرير مفقود.');
 }
 
-try {
-    $db = db();
-} catch (Throwable $connectionError) {
-    error_log('Report viewer: DB connection failed - ' . $connectionError->getMessage());
-    renderReportError(500, 'حدث خطأ في الاتصال بقاعدة البيانات.');
-}
+$relativePath = '';
 
-$row = null;
-try {
-    $row = $db->queryOne(
-        "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
-        [$settingKey]
-    );
-} catch (Throwable $queryError) {
-    error_log('Report viewer: status fetch failed - ' . $queryError->getMessage());
-    renderReportError(500, 'تعذّر التحقق من حالة التقرير.');
-}
+if ($usesSettingsTable) {
+    try {
+        $db = db();
+    } catch (Throwable $connectionError) {
+        error_log('Report viewer: DB connection failed - ' . $connectionError->getMessage());
+        renderReportError(500, 'حدث خطأ في الاتصال بقاعدة البيانات.');
+    }
 
-if (empty($row) || empty($row['value'])) {
-    renderReportError(404, 'لم يتم إنشاء تقرير لهذا اليوم بعد.');
-}
+    $row = null;
+    try {
+        $row = $db->queryOne(
+            "SELECT value FROM system_settings WHERE `key` = ? LIMIT 1",
+            [$settingKey]
+        );
+    } catch (Throwable $queryError) {
+        error_log('Report viewer: status fetch failed - ' . $queryError->getMessage());
+        renderReportError(500, 'تعذّر التحقق من حالة التقرير.');
+    }
 
-$data = json_decode((string)$row['value'], true);
-if (!is_array($data)) {
-    renderReportError(500, 'تنسيق بيانات التقرير غير صالح.');
-}
+    if (empty($row) || empty($row['value'])) {
+        renderReportError(404, 'لم يتم إنشاء تقرير لهذا اليوم بعد.');
+    }
 
-$storedToken = (string)($data['access_token'] ?? '');
-if ($storedToken === '' || !hash_equals($storedToken, $token)) {
-    renderReportError(403, 'المعرف الآمن غير صحيح أو انتهت صلاحيته.');
-}
+    $data = json_decode((string)$row['value'], true);
+    if (!is_array($data)) {
+        renderReportError(500, 'تنسيق بيانات التقرير غير صالح.');
+    }
 
-$relativePath = (string)($data['report_path'] ?? '');
-if ($relativePath === '') {
-    renderReportError(404, 'مسار ملف التقرير غير متاح.');
-}
+    $storedToken = (string)($data['access_token'] ?? '');
+    if ($storedToken === '' || !hash_equals($storedToken, $token)) {
+        renderReportError(403, 'المعرف الآمن غير صحيح أو انتهت صلاحيته.');
+    }
 
-if (preg_match('#\.\.[/\\\\]#', $relativePath)) {
-    renderReportError(403, 'مسار الملف غير آمن.');
+    $relativePath = (string)($data['report_path'] ?? '');
+    if ($relativePath === '') {
+        renderReportError(404, 'مسار ملف التقرير غير متاح.');
+    }
+
+    if (preg_match('#\.\.[/\\\\]#', $relativePath)) {
+        renderReportError(403, 'مسار الملف غير آمن.');
+    }
+} else {
+    $fileParam = (string)($_GET['file'] ?? '');
+    if ($fileParam === '') {
+        renderReportError(400, 'مسار الملف غير محدد.');
+    }
+
+    $relativePath = str_replace('\\', '/', $fileParam);
+    $relativePath = ltrim($relativePath, '/');
+
+    if ($relativePath === '') {
+        renderReportError(404, 'مسار الملف غير صالح.');
+    }
+
+    if (preg_match('#\.\.[/\\\\]#', $relativePath)) {
+        renderReportError(403, 'مسار الملف غير آمن.');
+    }
+
+    $allowedPrefixes = ['exports/', 'consumption/'];
+    $isAllowed = false;
+    foreach ($allowedPrefixes as $prefix) {
+        if (str_starts_with($relativePath, $prefix)) {
+            $isAllowed = true;
+            break;
+        }
+    }
+    if (!$isAllowed) {
+        renderReportError(403, 'المسار المطلوب غير مسموح به.');
+    }
+
+    $fileName = basename($relativePath);
+    if ($fileName === '' || strpos($fileName, $token) === false) {
+        renderReportError(403, 'المعرف الآمن غير صالح لهذا الملف.');
+    }
 }
 
 $normalized = str_replace('\\', '/', $relativePath);
 $normalized = ltrim($normalized, '/');
-
-$reportsBaseDir = null;
-if (defined('REPORTS_PRIVATE_PATH')) {
-    $reportsBaseDir = rtrim(str_replace('\\', '/', REPORTS_PRIVATE_PATH), '/');
-} elseif (defined('REPORTS_PATH')) {
-    $reportsBaseDir = rtrim(str_replace('\\', '/', REPORTS_PATH), '/');
-} else {
-    $reportsBaseDir = str_replace('\\', '/', BASE_PATH . '/reports');
-}
 
 $fullPath = $reportsBaseDir . '/' . $normalized;
 if (!is_file($fullPath)) {

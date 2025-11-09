@@ -138,13 +138,11 @@ async function generatePDFReport(type, filters = {}, evt) {
         }
         
         if (data.success) {
-            // عرض التقرير مباشرة (HTML للطباعة)
+            window.__lastGeneratedReport = data;
             if (data.file_path) {
                 if (data.is_html) {
-                    // فتح في نافذة جديدة للطباعة
                     window.open(data.file_path, '_blank');
                 } else {
-                    // تحميل الملف
                     window.location.href = data.file_path;
                 }
             } else {
@@ -272,10 +270,13 @@ async function generateExcelReport(type, filters = {}, evt) {
 /**
  * إرسال تقرير إلى Telegram
  */
-async function sendReportToTelegram(filePath, type, reportName) {
+async function sendReportToTelegram(reportInfo, type, reportName) {
     try {
         // الحصول على المسار الصحيح للـ API
         const apiPath = getRelativeUrl('api/generate_report.php');
+        const payload = typeof reportInfo === 'object' && reportInfo !== null
+            ? reportInfo
+            : { file_path: reportInfo };
         
         const response = await fetch(apiPath, {
             method: 'POST',
@@ -284,9 +285,9 @@ async function sendReportToTelegram(filePath, type, reportName) {
             },
             body: new URLSearchParams({
                 action: 'send_telegram',
-                file_path: filePath,
                 type: type,
-                report_name: reportName
+                report_name: reportName,
+                payload: JSON.stringify(payload)
             })
         });
         
