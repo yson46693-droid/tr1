@@ -18,14 +18,33 @@ $currentUser = getCurrentUser();
 $db = db();
 $page = $_GET['page'] ?? 'dashboard';
 
-// معالجة AJAX قبل أي إخراج HTML - خاصة لصفحة مخزن أدوات التعبئة
+$isAjaxRequest = (
+    (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') ||
+    (!empty($_POST['is_ajax'])) ||
+    (isset($_SERVER['HTTP_ACCEPT']) && stripos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false)
+);
+
+if ($isAjaxRequest) {
+    $ajaxModulePath = null;
+
+    if ($page === 'packaging_warehouse' && isset($_GET['ajax']) && $_GET['ajax'] == '1' && isset($_GET['material_id'])) {
+        $ajaxModulePath = __DIR__ . '/../modules/production/packaging_warehouse.php';
+    } elseif ($page === 'my_salary' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $ajaxModulePath = __DIR__ . '/../modules/user/my_salary.php';
+    }
+
+    if ($ajaxModulePath && file_exists($ajaxModulePath)) {
+        include $ajaxModulePath;
+        exit;
+    }
+}
+
+// معالجة AJAX القديمة لمخزن أدوات التعبئة (للتوافق)
 if ($page === 'packaging_warehouse' && isset($_GET['ajax']) && $_GET['ajax'] == '1' && isset($_GET['material_id'])) {
-    // تحميل ملف packaging_warehouse.php مباشرة للتعامل مع AJAX
     $modulePath = __DIR__ . '/../modules/production/packaging_warehouse.php';
     if (file_exists($modulePath)) {
-        // الملف نفسه سيتعامل مع AJAX ويخرج JSON
         include $modulePath;
-        exit; // إيقاف التنفيذ بعد معالجة AJAX
+        exit;
     }
 }
 

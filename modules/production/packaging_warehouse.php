@@ -1514,7 +1514,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
         <?php else: ?>
             <!-- عرض الجدول على الشاشات الكبيرة -->
             <div class="table-responsive d-none d-md-block">
-                <table class="table table-striped table-sm" style="font-size: 0.875rem;">
+                <table class="table table-striped table-sm packaging-table" style="font-size: 0.875rem;">
                     <thead>
                         <tr>
                             <th style="width: 40px; padding: 0.5rem 0.25rem;">#</th>
@@ -2465,6 +2465,20 @@ document.addEventListener('DOMContentLoaded', function () {
 .table-sm tbody tr {
     height: auto;
     min-height: 45px;
+}
+
+/* تعطيل تأثير hover في جدول أدوات التعبئة */
+.packaging-table tbody tr {
+    transition: none !important;
+}
+
+.packaging-table tbody tr:hover {
+    background-color: inherit !important;
+    transform: none !important;
+}
+
+.packaging-table.table-striped tbody tr:nth-of-type(odd):hover {
+    background-color: var(--bg-secondary, #f8f9fa) !important;
 }
 
 /* تحسين المسافة بين العناصر داخل الخلايا */
