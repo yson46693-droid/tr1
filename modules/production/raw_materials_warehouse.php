@@ -523,12 +523,19 @@ $packagingMaterials = $db->query(
 // المواد المتاحة للاستخدام في القوالب (حاليًا المكسرات فقط مع استبعاد الخلطات الجاهزة)
 $availableNutsForTemplates = [];
 try {
-    $availableNutsForTemplates = $db->query(
-        "SELECT ns.nut_type, ns.quantity, s.name AS supplier_name
+$availableNutsForTemplates = $db->query(
+    "SELECT ns.nut_type, ns.quantity, s.name AS supplier_name
          FROM nuts_stock ns
          INNER JOIN suppliers s ON ns.supplier_id = s.id
          WHERE ns.quantity > 0
          ORDER BY ns.nut_type, s.name"
+    );
+$availableMixedNutsForTemplates = $db->query(
+    "SELECT mn.batch_name, mn.total_quantity, s.name AS supplier_name
+         FROM mixed_nuts mn
+         INNER JOIN suppliers s ON mn.supplier_id = s.id
+         WHERE mn.total_quantity > 0
+         ORDER BY mn.batch_name, s.name"
     );
 } catch (Exception $e) {
     error_log('Failed to load nuts stock for templates: ' . $e->getMessage());
@@ -539,11 +546,6 @@ $nutMaterialAggregates = [];
 foreach ($availableNutsForTemplates as $nutRow) {
     $nutType = trim((string)($nutRow['nut_type'] ?? ''));
     if ($nutType === '') {
-        continue;
-    }
-
-    // استبعاد أي عناصر تحمل تسمية "مشكلة" لأنها خلطة جاهزة وليست مادة خام
-    if (mb_stripos($nutType, 'مشكلة') !== false) {
         continue;
     }
 
@@ -560,6 +562,29 @@ foreach ($availableNutsForTemplates as $nutRow) {
     $supplierName = trim((string)($nutRow['supplier_name'] ?? ''));
     if ($supplierName !== '' && !in_array($supplierName, $nutMaterialAggregates[$nutType]['suppliers'], true)) {
         $nutMaterialAggregates[$nutType]['suppliers'][] = $supplierName;
+    }
+}
+
+foreach ($availableMixedNutsForTemplates as $mixedRow) {
+    $mixName = trim((string)($mixedRow['batch_name'] ?? ''));
+    if ($mixName === '') {
+        continue;
+    }
+
+    $label = sprintf('%s (خلطة)', $mixName);
+    if (!isset($nutMaterialAggregates[$label])) {
+        $nutMaterialAggregates[$label] = [
+            'value' => $label,
+            'quantity' => 0.0,
+            'suppliers' => [],
+        ];
+    }
+
+    $nutMaterialAggregates[$label]['quantity'] += (float)($mixedRow['total_quantity'] ?? 0);
+
+    $supplierName = trim((string)($mixedRow['supplier_name'] ?? ''));
+    if ($supplierName !== '' && !in_array($supplierName, $nutMaterialAggregates[$label]['suppliers'], true)) {
+        $nutMaterialAggregates[$label]['suppliers'][] = $supplierName;
     }
 }
 
@@ -4100,7 +4125,7 @@ const honeyVarietyOptionsMarkup = <?php echo json_encode($honeyVarietyOptionsMar
 const materialOptions = <?php echo json_encode([
     'nuts' => $nutMaterialOptions,
     'derivatives' => $derivativeMaterialOptions,
-], JSON_UNESCAPED_UNICODE); ?>;
+], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
 function addMaterialRow() {
     materialRowCount++;
     const container = document.getElementById('materialsContainer');
