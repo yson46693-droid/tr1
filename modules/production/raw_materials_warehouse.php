@@ -1279,6 +1279,7 @@ if (empty($unifiedTemplatesCheck)) {
               `status` enum('active','inactive') DEFAULT 'active',
               `main_supplier_id` int(11) DEFAULT NULL,
               `notes` text DEFAULT NULL COMMENT 'ملاحظات القالب',
+              `form_payload` longtext DEFAULT NULL COMMENT 'JSON يحتوي جميع مدخلات النموذج',
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
               `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
               PRIMARY KEY (`id`),
@@ -1335,6 +1336,18 @@ try {
     }
 } catch (Exception $e) {
     error_log("Error adding notes column to unified_product_templates: " . $e->getMessage());
+}
+
+try {
+    $formPayloadColumnCheck = $db->queryOne("SHOW COLUMNS FROM unified_product_templates LIKE 'form_payload'");
+    if (empty($formPayloadColumnCheck)) {
+        $db->execute("
+            ALTER TABLE `unified_product_templates`
+            ADD COLUMN `form_payload` LONGTEXT DEFAULT NULL COMMENT 'JSON يحتوي جميع مدخلات النموذج' AFTER `notes`
+        ");
+    }
+} catch (Exception $e) {
+    error_log("Error adding form_payload column to unified_product_templates: " . $e->getMessage());
 }
 
 // جدول المواد الخام للقوالب
@@ -2149,6 +2162,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
+            $rawMaterialsPayload = array_map(function ($material) {
+                return [
+                    'type' => $material['type'],
+                    'name' => $material['name'],
+                    'supplier_id' => $material['supplier_id'],
+                    'honey_variety' => $material['honey_variety'],
+                    'quantity' => $material['quantity'],
+                    'unit' => $material['unit']
+                ];
+            }, $rawMaterials);
+
+            $packagingPayload = array_map(function ($packaging) {
+                return [
+                    'packaging_material_id' => $packaging['id'],
+                    'quantity_per_unit' => $packaging['quantity']
+                ];
+            }, $packagingItems);
+
+            $templateDetailsPayload = [
+                'product_name' => $productName,
+                'status' => $templateStatus,
+                'main_supplier_id' => $mainSupplierId,
+                'notes' => $templateNotes,
+                'raw_materials' => $rawMaterialsPayload,
+                'packaging' => $packagingPayload,
+                'submitted_at' => date('c'),
+                'submitted_by' => $currentUser['id']
+            ];
+
+            $templatePayloadJson = json_encode($templateDetailsPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if ($templatePayloadJson === false) {
+                $templatePayloadJson = null;
+            }
+
             $normalizedProductName = function_exists('mb_strtolower')
                 ? mb_strtolower($productName, 'UTF-8')
                 : strtolower($productName);
@@ -2178,13 +2225,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     // إنشاء القالب
                     $result = $db->execute(
-                        "INSERT INTO unified_product_templates (product_name, created_by, status, main_supplier_id, notes) VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO unified_product_templates (product_name, created_by, status, main_supplier_id, notes, form_payload) VALUES (?, ?, ?, ?, ?, ?)",
                         [
                             $productName,
                             $currentUser['id'],
                             $templateStatus,
                             $mainSupplierId,
-                            $templateNotes !== '' ? $templateNotes : null
+                            $templateNotes !== '' ? $templateNotes : null,
+                            $templatePayloadJson
                         ]
                     );
                     $templateId = $result['insert_id'];

@@ -22,6 +22,7 @@ $error = '';
 $success = '';
 $isManager = $currentUser['role'] === 'manager';
 $isProduction = $currentUser['role'] === 'production';
+$tasksRetentionLimit = getTasksRetentionLimit();
 
 // التحقق من وجود جدول tasks وإنشاؤه/تحديثه إذا لم يكن موجوداً
 $tableCheck = $db->queryOne("SHOW TABLES LIKE 'tasks'");
@@ -195,7 +196,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     $sql = "INSERT INTO tasks (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $placeholders) . ")";
                     $result = $db->execute($sql, $values);
-                    
+
+                    enforceTasksRetentionLimit($db, $tasksRetentionLimit);
+
                     logAudit($currentUser['id'], 'add_task', 'tasks', $result['insert_id'], null, ['title' => $title, 'type' => $taskType]);
                     $success = 'تم إضافة المهمة بنجاح';
                 } catch (Exception $e) {
@@ -473,6 +476,87 @@ $stats = [
     'completed' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status = 'completed'")['total'] ?? 0,
     'overdue' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status != 'completed' AND due_date < CURDATE()")['total'] ?? 0
 ];
+
+if (!function_exists('getTasksRetentionLimit')) {
+    function getTasksRetentionLimit(): int {
+        if (defined('TASKS_RETENTION_MAX_ROWS')) {
+            $value = (int) TASKS_RETENTION_MAX_ROWS;
+            if ($value > 0) {
+                return $value;
+            }
+        }
+        return 100;
+    }
+}
+
+if (!function_exists('enforceTasksRetentionLimit')) {
+    function enforceTasksRetentionLimit($dbInstance = null, int $maxRows = 100) {
+        $maxRows = (int) $maxRows;
+        if ($maxRows < 1) {
+            $maxRows = 100;
+        }
+
+        try {
+            if ($dbInstance === null) {
+                $dbInstance = db();
+            }
+
+            if (!$dbInstance) {
+                return false;
+            }
+
+            $totalRow = $dbInstance->queryOne("SELECT COUNT(*) AS total FROM tasks");
+            $total = isset($totalRow['total']) ? (int) $totalRow['total'] : 0;
+
+            if ($total <= $maxRows) {
+                return true;
+            }
+
+            $toDelete = $total - $maxRows;
+            $batchSize = 100;
+
+            while ($toDelete > 0) {
+                $currentBatch = min($batchSize, $toDelete);
+
+                $oldest = $dbInstance->query(
+                    "SELECT id FROM tasks ORDER BY created_at ASC, id ASC LIMIT ?",
+                    [$currentBatch]
+                );
+
+                if (empty($oldest)) {
+                    break;
+                }
+
+                $ids = array_map('intval', array_column($oldest, 'id'));
+                $ids = array_filter($ids, static function ($id) {
+                    return $id > 0;
+                });
+
+                if (empty($ids)) {
+                    break;
+                }
+
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $dbInstance->execute(
+                    "DELETE FROM tasks WHERE id IN ($placeholders)",
+                    $ids
+                );
+
+                $deleted = count($ids);
+                $toDelete -= $deleted;
+
+                if ($deleted < $currentBatch) {
+                    break;
+                }
+            }
+
+            return true;
+        } catch (Throwable $e) {
+            error_log('Tasks retention enforce error: ' . $e->getMessage());
+            return false;
+        }
+    }
+}
 ?>
 
 <div class="container-fluid">
