@@ -10,6 +10,7 @@ require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/audit_log.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/approval_system.php';
+require_once __DIR__ . '/../includes/table_styles.php';
 
 requireRole('accountant');
 
@@ -132,8 +133,8 @@ $pageTitle = isset($lang['accountant_dashboard']) ? $lang['accountant_dashboard'
                         <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>المعاملات المالية (<?php echo $totalTrans; ?>)</h5>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table align-middle">
                                 <thead>
                                     <tr>
                                         <th>النوع</th>
@@ -332,8 +333,8 @@ $pageTitle = isset($lang['accountant_dashboard']) ? $lang['accountant_dashboard'
                         <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>المعاملات المالية (<?php echo $totalTrans; ?>)</h5>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table align-middle">
                                 <thead>
                                     <tr>
                                         <th>النوع</th>

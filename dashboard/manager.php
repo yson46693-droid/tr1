@@ -364,8 +364,8 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                         <h5 class="mb-0">سجل التدقيق (<?php echo $totalLogs; ?> سجل)</h5>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table align-middle">
                                 <thead>
                                     <tr>
                                         <th>المستخدم</th>

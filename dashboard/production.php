@@ -11,6 +11,7 @@ require_once __DIR__ . '/../includes/activity_summary.php';
 require_once __DIR__ . '/../includes/notifications.php';
 require_once __DIR__ . '/../includes/path_helper.php';
 require_once __DIR__ . '/../includes/production_helper.php';
+require_once __DIR__ . '/../includes/table_styles.php';
 
 requireRole('production');
 
@@ -724,8 +725,8 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                         </a>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-striped table-hover">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table align-middle">
                                 <thead>
                                     <tr>
                                         <th><?php echo isset($lang['product']) ? $lang['product'] : 'المنتج'; ?></th>
