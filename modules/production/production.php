@@ -2346,8 +2346,10 @@ $lang = isset($translations) ? $translations : [];
 </div>
 </section>
 
-<div id="productionReportsSection" class="d-none">
-    <div class="card shadow-sm mb-4">
+<section id="productionReportsSection" class="production-section d-none">
+    <div class="production-report-layout">
+        <section class="production-report-column" aria-label="تقارير اليوم">
+            <div class="card production-report-card shadow-sm mb-4">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                 <div>
@@ -2398,7 +2400,7 @@ $lang = isset($translations) ? $translations : [];
         </div>
     </div>
 
-    <div class="card shadow-sm mb-4">
+    <div class="card production-report-card shadow-sm mb-4">
         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
             <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة المستهلكة اليوم</span>
         </div>
@@ -2407,7 +2409,7 @@ $lang = isset($translations) ? $translations : [];
         </div>
     </div>
 
-    <div class="card shadow-sm mb-5">
+    <div class="card production-report-card shadow-sm mb-5">
         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
             <span><i class="bi bi-droplet-half me-2"></i>المواد الخام المستهلكة اليوم</span>
         </div>
@@ -2415,8 +2417,9 @@ $lang = isset($translations) ? $translations : [];
             <?php productionPageRenderConsumptionTable($productionReportsToday['raw']['items'] ?? [], true); ?>
         </div>
     </div>
-
-    <div class="card shadow-sm mb-4">
+        </section>
+        <section class="production-report-column" aria-label="تقارير الشهر">
+            <div class="card production-report-card shadow-sm mb-4">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                 <div>
@@ -2467,7 +2470,7 @@ $lang = isset($translations) ? $translations : [];
         </div>
     </div>
 
-    <div class="card shadow-sm mb-4">
+    <div class="card production-report-card shadow-sm mb-4">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
             <span><i class="bi bi-box-seam me-2"></i>أدوات التعبئة خلال الشهر</span>
         </div>
@@ -2476,7 +2479,7 @@ $lang = isset($translations) ? $translations : [];
         </div>
     </div>
 
-    <div class="card shadow-sm">
+    <div class="card production-report-card shadow-sm">
         <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
             <span><i class="bi bi-droplet-half me-2"></i>المواد الخام خلال الشهر</span>
         </div>
@@ -2497,6 +2500,9 @@ $lang = isset($translations) ? $translations : [];
             <?php productionPageRenderConsumptionTable($productionReportsMonth['raw']['items'] ?? [], true); ?>
         </div>
     </div>
+        </section>
+    </div>
+</section>
 </div>
 
 <!-- Modal إنشاء إنتاج من قالب -->

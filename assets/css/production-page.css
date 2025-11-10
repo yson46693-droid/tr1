@@ -384,6 +384,27 @@
     box-shadow: 0 12px 26px rgba(37, 99, 235, 0.35) !important;
 }
 
+.production-page {
+    display: flex;
+    flex-direction: column;
+    gap: 1.75rem;
+}
+
+.production-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 1rem;
+    padding: 0.5rem 0;
+}
+
+.production-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
 #productionReportsSection {
     display: block;
 }
@@ -474,12 +495,18 @@
     .production-report-layout {
         grid-template-columns: 1fr;
     }
+    .production-page-header {
+        justify-content: center;
+    }
     .production-report-card .card-body {
         padding: 1.25rem;
     }
 }
 
 @media (max-width: 576px) {
+    .production-page {
+        gap: 1.5rem;
+    }
     .production-report-card .card-body {
         padding: 1rem;
     }
@@ -557,8 +584,8 @@
 }
 
 .table thead th {
-    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%) !important;
-    color: white !important;
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
     border: none !important;
     font-weight: 600 !important;
     padding: 1rem !important;
