@@ -712,21 +712,72 @@ function batchCreationCreate(int $templateId, int $units): array
             $workersStmt->execute([$today]);
             $workers = $workersStmt->fetchAll();
         } elseif (batchCreationTableExists($pdo, 'attendance_records') && batchCreationTableExists($pdo, 'users')) {
-            $dateColumn = batchCreationColumnExists($pdo, 'attendance_records', 'attendance_date')
-                ? 'attendance_date'
-                : (batchCreationColumnExists($pdo, 'attendance_records', 'date') ? 'date' : null);
-            $userColumn = batchCreationColumnExists($pdo, 'attendance_records', 'user_id') ? 'user_id' : null;
-            $statusColumn = batchCreationColumnExists($pdo, 'attendance_records', 'status') ? 'status' : null;
+            $userColumn = batchCreationColumnExists($pdo, 'attendance_records', 'user_id')
+                ? 'user_id'
+                : (batchCreationColumnExists($pdo, 'attendance_records', 'employee_id') ? 'employee_id' : null);
 
-            if ($dateColumn !== null && $userColumn !== null && $statusColumn !== null) {
-                $workersStmt = $pdo->prepare("
-                    SELECT u.id, u.full_name AS name
+            if ($userColumn !== null) {
+                $candidateDateColumns = ['attendance_date', 'date', 'check_in_time', 'checked_in_at', 'created_at'];
+                $dateColumn = null;
+                $dateColumnIsDateTime = false;
+                foreach ($candidateDateColumns as $candidate) {
+                    if (batchCreationColumnExists($pdo, 'attendance_records', $candidate)) {
+                        $dateColumn = $candidate;
+                        $dateColumnIsDateTime = in_array($candidate, ['check_in_time', 'checked_in_at', 'created_at'], true);
+                        break;
+                    }
+                }
+
+                $candidateStatusColumns = ['status', 'attendance_status', 'state'];
+                $statusColumn = null;
+                foreach ($candidateStatusColumns as $candidate) {
+                    if (batchCreationColumnExists($pdo, 'attendance_records', $candidate)) {
+                        $statusColumn = $candidate;
+                        break;
+                    }
+                }
+
+                $candidateNameColumns = ['full_name', 'name', 'username'];
+                $userNameColumn = null;
+                foreach ($candidateNameColumns as $candidate) {
+                    if (batchCreationColumnExists($pdo, 'users', $candidate)) {
+                        $userNameColumn = $candidate;
+                        break;
+                    }
+                }
+                if ($userNameColumn === null) {
+                    $userNameColumn = 'id';
+                }
+
+                $conditions = [];
+                $params = [];
+
+                if ($dateColumn !== null) {
+                    if ($dateColumnIsDateTime) {
+                        $conditions[] = "DATE(ar.{$dateColumn}) = ?";
+                    } else {
+                        $conditions[] = "ar.{$dateColumn} = ?";
+                    }
+                    $params[] = $today;
+                }
+
+                if ($statusColumn !== null) {
+                    $conditions[] = "ar.{$statusColumn} = 'present'";
+                }
+
+                $sql = "
+                    SELECT u.id, u.{$userNameColumn} AS name
                     FROM attendance_records ar
                     JOIN users u ON ar.{$userColumn} = u.id
-                    WHERE ar.{$dateColumn} = ? AND ar.{$statusColumn} = 'present'
-                ");
-                $workersStmt->execute([$today]);
-                $workers = $workersStmt->fetchAll();
+                ";
+
+                if (!empty($conditions)) {
+                    $sql .= ' WHERE ' . implode(' AND ', $conditions);
+                }
+
+                $workersStmt = $pdo->prepare($sql);
+                $workersStmt->execute($params);
+                $workers = $workersStmt->fetchAll(PDO::FETCH_ASSOC);
             }
         }
 
