@@ -89,6 +89,39 @@ class SimpleWebAuthn {
     }
 
     /**
+     * محاولة تخمين اسم الجهاز من الـ User-Agent
+     */
+    detectDeviceName() {
+        const ua = navigator.userAgent || '';
+
+        if (/iPhone/i.test(ua)) {
+            return 'iPhone';
+        }
+        if (/iPad/i.test(ua)) {
+            return 'iPad';
+        }
+        if (/Android/i.test(ua)) {
+            const match = ua.match(/Android\s+([\d\.]+)/i);
+            return match ? `Android ${match[1]}` : 'Android Device';
+        }
+        if (/Macintosh/i.test(ua)) {
+            return 'Mac';
+        }
+        if (/Windows/i.test(ua)) {
+            return 'Windows';
+        }
+
+        if (/Chrome/i.test(ua)) {
+            return 'Chrome Browser';
+        }
+        if (/Safari/i.test(ua)) {
+            return 'Safari Browser';
+        }
+
+        return 'Unknown Device';
+    }
+
+    /**
      * تسجيل بصمة جديدة
      */
     async register(deviceName = null) {
@@ -103,13 +136,11 @@ class SimpleWebAuthn {
                 throw new Error('WebAuthn يتطلب HTTPS. الموقع الحالي: ' + window.location.protocol);
             }
 
-            // طلب اسم الجهاز إذا لم يكن محدداً
-            if (!deviceName) {
-                deviceName = prompt('أدخل اسم الجهاز (مثال: iPhone 13, Chrome Browser, Windows Hello):');
-                if (!deviceName || deviceName.trim() === '') {
-                    return { success: false, message: 'يجب إدخال اسم الجهاز' };
-                }
+            // الحصول على اسم الجهاز بشكل تلقائي إن لم يُرسل من الواجهة
+            if (!deviceName || deviceName.trim() === '') {
+                deviceName = this.detectDeviceName();
             }
+            deviceName = deviceName.trim();
 
             // 1. الحصول على challenge من الخادم
             const challengeResponse = await fetch(this.apiBase, {
