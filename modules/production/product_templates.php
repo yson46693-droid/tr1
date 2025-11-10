@@ -3,7 +3,7 @@
  * صفحة قوالب المنتجات - نموذج مبسط
  */
 
-if (!defined('ACCESS_ALLOWED')) {
+if (defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
