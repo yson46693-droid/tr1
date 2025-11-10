@@ -238,26 +238,13 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
     if ($existing) {
         $notificationId = (int) ($existing['id'] ?? 0);
         $isUnread = isset($existing['read']) ? ((int) $existing['read'] === 0) : true;
-        $shouldReactivate = false;
+        $lastCreatedAt = null;
 
-        if (!$isUnread) {
-            $cooldownMinutes = 120;
-            $lastCreatedAt = null;
-
-            if (!empty($existing['created_at'])) {
-                $lastCreatedAt = DateTime::createFromFormat('Y-m-d H:i:s', $existing['created_at']);
-            }
-
-            if ($lastCreatedAt instanceof DateTime) {
-                $minutesSince = floor((time() - $lastCreatedAt->getTimestamp()) / 60);
-                if ($minutesSince >= $cooldownMinutes) {
-                    $shouldReactivate = true;
-                }
-            } else {
-                $shouldReactivate = true;
-            }
+        if (!empty($existing['created_at'])) {
+            $lastCreatedAt = DateTime::createFromFormat('Y-m-d H:i:s', $existing['created_at']);
         }
 
+        $shouldReactivate = shouldReactivateAttendanceNotification($kind, $isUnread, $lastCreatedAt, $startTime ?? null, $endTime ?? null);
         $setParts = ['title = ?', 'message = ?', 'link = ?'];
         $params = [$title, $message, $link];
 
@@ -277,6 +264,62 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
     }
 
     return createNotification($userId, $title, $message, $type, $link, false);
+}
+
+/**
+ * تحديد هل يجب إعادة تفعيل إشعار الحضور/الانصراف
+ */
+function shouldReactivateAttendanceNotification(
+    string $kind,
+    bool $isUnread,
+    ?DateTime $lastCreatedAt,
+    ?DateTime $startTime,
+    ?DateTime $endTime
+): bool {
+    if ($isUnread) {
+        return false;
+    }
+
+    $now = new DateTime('now');
+    $cooldownMinutes = 120;
+    $minutesSinceLast = null;
+
+    if ($lastCreatedAt instanceof DateTime) {
+        $minutesSinceLast = floor(($now->getTimestamp() - $lastCreatedAt->getTimestamp()) / 60);
+        if ($minutesSinceLast < $cooldownMinutes) {
+            return false;
+        }
+    }
+
+    if ($kind === 'checkin') {
+        if (!$startTime instanceof DateTime || $now < (clone $startTime)->modify('-60 minutes')) {
+            return false;
+        }
+        if ($minutesSinceLast === null) {
+            return true;
+        }
+        return $minutesSinceLast >= $cooldownMinutes;
+    }
+
+    if ($kind === 'checkout') {
+        if (!$endTime instanceof DateTime) {
+            return false;
+        }
+
+        $windowStart = (clone $endTime)->modify('-30 minutes');
+        $windowEnd = (clone $endTime)->modify('+30 minutes');
+
+        if ($now < $windowStart || $now > $windowEnd) {
+            return false;
+        }
+
+        if ($minutesSinceLast === null) {
+            return true;
+        }
+        return $minutesSinceLast >= $cooldownMinutes;
+    }
+
+    return false;
 }
 
 /**

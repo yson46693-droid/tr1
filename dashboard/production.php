@@ -302,6 +302,26 @@ if ($isTemplateAjax) {
     }
 }
 
+$isPackagingPost = (
+    $page === 'packaging_warehouse'
+    && $_SERVER['REQUEST_METHOD'] === 'POST'
+    && isset($_POST['action'])
+);
+
+if ($isPackagingPost) {
+    $modulePath = __DIR__ . '/../modules/production/packaging_warehouse.php';
+    if (file_exists($modulePath)) {
+        include $modulePath;
+    } else {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'success' => false,
+            'message' => 'صفحة مخزن أدوات التعبئة غير متاحة حالياً.'
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
 if ($page === 'production') {
     $pageStylesheets[] = 'assets/css/production-page.css';
