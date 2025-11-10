@@ -78,6 +78,226 @@ function batchCreationColumnExists(PDO $pdo, string $tableName, string $columnNa
 }
 
 /**
+ * Attempt to consume quantity from the honey stock table.
+ *
+ * @throws RuntimeException
+ */
+function batchCreationConsumeHoneyStock(
+    PDO $pdo,
+    string $quantityColumn,
+    float $quantityRequired,
+    ?int $supplierId,
+    ?string $honeyVariety,
+    string $materialName,
+    string $unit
+): void {
+    if (!batchCreationTableExists($pdo, 'honey_stock')) {
+        throw new RuntimeException('جدول مخزون العسل غير موجود لتغطية المادة: ' . $materialName);
+    }
+
+    if (!batchCreationColumnExists($pdo, 'honey_stock', $quantityColumn)) {
+        throw new RuntimeException('عمود المخزون غير موجود في جدول العسل للمادة: ' . $materialName);
+    }
+
+    $attempts = [
+        ['supplier' => $supplierId, 'variety' => $honeyVariety],
+        ['supplier' => $supplierId, 'variety' => null],
+        ['supplier' => null, 'variety' => null],
+    ];
+
+    $remaining = $quantityRequired;
+    $updateStmt = $pdo->prepare("UPDATE honey_stock SET {$quantityColumn} = GREATEST({$quantityColumn} - ?, 0) WHERE id = ?");
+
+    foreach ($attempts as $attempt) {
+        if ($remaining <= 0) {
+            break;
+        }
+
+        $sql = "SELECT id, {$quantityColumn} AS available FROM honey_stock WHERE {$quantityColumn} > 0";
+        $params = [];
+
+        if ($attempt['supplier']) {
+            $sql .= " AND supplier_id = ?";
+            $params[] = $attempt['supplier'];
+        }
+
+        if ($attempt['variety'] !== null && $attempt['variety'] !== '') {
+            if (batchCreationColumnExists($pdo, 'honey_stock', 'honey_variety')) {
+                $sql .= " AND honey_variety = ?";
+                $params[] = $attempt['variety'];
+            }
+        }
+
+        $sql .= " ORDER BY {$quantityColumn} DESC";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($rows)) {
+            continue;
+        }
+
+        foreach ($rows as $row) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $available = (float)($row['available'] ?? 0);
+            if ($available <= 0) {
+                continue;
+            }
+
+            $deduct = min($available, $remaining);
+            $updateStmt->execute([$deduct, $row['id']]);
+            $remaining -= $deduct;
+        }
+    }
+
+    if ($remaining > 0.0001) {
+        throw new RuntimeException(
+            sprintf(
+                'المخزون غير كاف للمادة %s. الكمية المطلوبة %.3f %s، المتبقي %.3f %s.',
+                $materialName,
+                $quantityRequired,
+                $unit,
+                $remaining,
+                $unit
+            )
+        );
+    }
+}
+
+/**
+ * Attempt to consume quantity from a simple stock table (olive oil, beeswax, derivatives, nuts, ...).
+ *
+ * @throws RuntimeException
+ */
+function batchCreationConsumeSimpleStock(
+    PDO $pdo,
+    string $tableName,
+    string $quantityColumn,
+    float $quantityRequired,
+    ?int $supplierId,
+    string $materialName,
+    string $unit
+): void {
+    if (!batchCreationTableExists($pdo, $tableName)) {
+        throw new RuntimeException('جدول المخزون ' . $tableName . ' غير موجود للمادة: ' . $materialName);
+    }
+
+    if (!batchCreationColumnExists($pdo, $tableName, $quantityColumn)) {
+        throw new RuntimeException('عمود المخزون غير موجود في جدول ' . $tableName . ' للمادة: ' . $materialName);
+    }
+
+    $supplierColumnExists = batchCreationColumnExists($pdo, $tableName, 'supplier_id');
+
+    $attemptSuppliers = [];
+    if ($supplierColumnExists && $supplierId) {
+        $attemptSuppliers[] = $supplierId;
+    }
+    $attemptSuppliers[] = null; // fallback without supplier filter
+
+    $remaining = $quantityRequired;
+    $updateStmt = $pdo->prepare("UPDATE {$tableName} SET {$quantityColumn} = GREATEST({$quantityColumn} - ?, 0) WHERE id = ?");
+
+    foreach ($attemptSuppliers as $attemptSupplier) {
+        if ($remaining <= 0) {
+            break;
+        }
+
+        $sql = "SELECT id, {$quantityColumn} AS available FROM {$tableName} WHERE {$quantityColumn} > 0";
+        $params = [];
+
+        if ($supplierColumnExists && $attemptSupplier) {
+            $sql .= " AND supplier_id = ?";
+            $params[] = $attemptSupplier;
+        }
+
+        $sql .= " ORDER BY {$quantityColumn} DESC";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($rows)) {
+            continue;
+        }
+
+        foreach ($rows as $row) {
+            if ($remaining <= 0) {
+                break;
+            }
+
+            $available = (float)($row['available'] ?? 0);
+            if ($available <= 0) {
+                continue;
+            }
+
+            $deduct = min($available, $remaining);
+            $updateStmt->execute([$deduct, $row['id']]);
+            $remaining -= $deduct;
+        }
+    }
+
+    if ($remaining > 0.0001) {
+        throw new RuntimeException(
+            sprintf(
+                'المخزون غير كاف للمادة %s. الكمية المطلوبة %.3f %s، المتبقي %.3f %s.',
+                $materialName,
+                $quantityRequired,
+                $unit,
+                $remaining,
+                $unit
+            )
+        );
+    }
+}
+
+/**
+ * Deduct stock for a specific material type using the specialised stock tables.
+ *
+ * @throws RuntimeException
+ */
+function batchCreationDeductTypedStock(PDO $pdo, array $material, float $unitsMultiplier): void
+{
+    $quantityPerUnit = (float)($material['quantity_per_unit'] ?? 0);
+    if ($quantityPerUnit <= 0 || $unitsMultiplier <= 0) {
+        return;
+    }
+
+    $totalRequired = $quantityPerUnit * $unitsMultiplier;
+    $materialType = (string)($material['material_type'] ?? 'other');
+    $materialName = trim((string)($material['material_name'] ?? 'مادة خام'));
+    $supplierId = isset($material['supplier_id']) ? (int)$material['supplier_id'] : null;
+    $unit = $material['unit'] ?? 'وحدة';
+    $honeyVariety = $material['honey_variety'] ?? null;
+
+    switch ($materialType) {
+        case 'honey_raw':
+            batchCreationConsumeHoneyStock($pdo, 'raw_honey_quantity', $totalRequired, $supplierId, $honeyVariety, $materialName, $unit);
+            break;
+        case 'honey_filtered':
+        case 'honey':
+        case 'honey_main':
+            batchCreationConsumeHoneyStock($pdo, 'filtered_honey_quantity', $totalRequired, $supplierId, $honeyVariety, $materialName, $unit);
+            break;
+        case 'olive_oil':
+            batchCreationConsumeSimpleStock($pdo, 'olive_oil_stock', 'quantity', $totalRequired, $supplierId, $materialName, $unit);
+            break;
+        case 'beeswax':
+            batchCreationConsumeSimpleStock($pdo, 'beeswax_stock', 'weight', $totalRequired, $supplierId, $materialName, $unit);
+            break;
+        case 'derivatives':
+            batchCreationConsumeSimpleStock($pdo, 'derivatives_stock', 'weight', $totalRequired, $supplierId, $materialName, $unit);
+            break;
+        case 'nuts':
+            batchCreationConsumeSimpleStock($pdo, 'nuts_stock', 'quantity', $totalRequired, $supplierId, $materialName, $unit);
+            break;
+        default:
+            throw new RuntimeException('لا يوجد إعداد مخزون مرتبط بالمادة: ' . $materialName . ' (النوع: ' . $materialType . ')');
+    }
+}
+
+/**
  * التأكد من وجود الجداول المطلوبة للتشغيل.
  */
 function batchCreationEnsureTables(PDO $pdo): void
@@ -224,6 +444,7 @@ function batchCreationCreate(int $templateId, int $units): array
             SELECT 
                 t.id,
                 t.product_id,
+                t.details_json,
                 COALESCE(t.product_name, p.name) AS product_name,
                 COALESCE(p.id, t.product_id)     AS resolved_product_id
             FROM product_templates t
@@ -245,6 +466,30 @@ function batchCreationCreate(int $templateId, int $units): array
             throw new RuntimeException('المنتج المرتبط بالقالب غير محدد');
         }
 
+        $templateDetailsMap = [];
+        if (!empty($template['details_json'])) {
+            $decodedDetails = json_decode((string)$template['details_json'], true);
+            if (json_last_error() === JSON_ERROR_NONE && !empty($decodedDetails['raw_materials']) && is_array($decodedDetails['raw_materials'])) {
+                foreach ($decodedDetails['raw_materials'] as $detailEntry) {
+                    if (!is_array($detailEntry)) {
+                        continue;
+                    }
+                    $detailName = '';
+                    if (!empty($detailEntry['name'])) {
+                        $detailName = (string)$detailEntry['name'];
+                    } elseif (!empty($detailEntry['material_name'])) {
+                        $detailName = (string)$detailEntry['material_name'];
+                    }
+                    $normalizedName = $detailName !== ''
+                        ? (function_exists('mb_strtolower') ? mb_strtolower(trim($detailName), 'UTF-8') : strtolower(trim($detailName)))
+                        : '';
+                    if ($normalizedName !== '') {
+                        $templateDetailsMap[$normalizedName] = $detailEntry;
+                    }
+                }
+            }
+        }
+
         // تجهيز الجداول المرتبطة بالمواد الخام
         $templateMaterialsTable = batchCreationTableExists($pdo, 'template_materials')
             ? 'template_materials'
@@ -255,25 +500,68 @@ function batchCreationCreate(int $templateId, int $units): array
         }
 
         $rawInventoryTable = batchCreationTableExists($pdo, 'raw_materials') ? 'raw_materials' : null;
-        $canUpdateRawStock = $rawInventoryTable !== null;
-
-        $materialIdColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'raw_material_id')
-            ? 'raw_material_id'
-            : (batchCreationColumnExists($pdo, $templateMaterialsTable, 'material_id') ? 'material_id' : null);
-
-        if ($materialIdColumn === null) {
-            throw new RuntimeException('لم يتم العثور على عمود معرف المادة الخام في جدول القوالب');
-        }
-
-        $materialNameColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'material_name')
-            ? 'material_name'
-            : null;
+        $canUpdateRawStock = $rawInventoryTable !== null && $templateMaterialsTable === 'template_materials';
 
         $materials = [];
-        $rawStockColumn = null;
-        $rawUnitColumn = null;
+        $materialsForStockDeduction = [];
 
-        if ($canUpdateRawStock) {
+        if ($templateMaterialsTable === 'product_template_materials') {
+            $materialsStmt = $pdo->prepare("
+                SELECT id, material_type, material_name, material_id, quantity_per_unit, unit, notes
+                FROM product_template_materials
+                WHERE template_id = ?
+            ");
+            $materialsStmt->execute([$templateId]);
+            $productTemplateMaterials = $materialsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($productTemplateMaterials)) {
+                throw new RuntimeException('القالب لا يحتوي على مواد خام');
+            }
+
+            foreach ($productTemplateMaterials as $materialRow) {
+                $materialName = trim((string)($materialRow['material_name'] ?? ''));
+                $normalizedName = $materialName !== ''
+                    ? (function_exists('mb_strtolower') ? mb_strtolower($materialName, 'UTF-8') : strtolower($materialName))
+                    : '';
+                $detailEntry = ($normalizedName !== '' && isset($templateDetailsMap[$normalizedName]))
+                    ? $templateDetailsMap[$normalizedName]
+                    : [];
+
+                $materialType = isset($detailEntry['type']) ? (string)$detailEntry['type'] : (string)($materialRow['material_type'] ?? 'other');
+                if ($materialType === 'honey') {
+                    $materialType = 'honey_filtered';
+                } elseif ($materialType === 'honey_main') {
+                    $materialType = 'honey_filtered';
+                }
+
+                $quantityPerUnit = isset($materialRow['quantity_per_unit'])
+                    ? (float)$materialRow['quantity_per_unit']
+                    : (isset($detailEntry['quantity']) ? (float)$detailEntry['quantity'] : 0.0);
+
+                $materialsForStockDeduction[] = [
+                    'material_type'    => $materialType,
+                    'material_name'    => $materialName !== '' ? $materialName : ($detailEntry['name'] ?? $detailEntry['material_name'] ?? 'مادة خام'),
+                    'supplier_id'      => isset($detailEntry['supplier_id'])
+                        ? (int)$detailEntry['supplier_id']
+                        : (!empty($materialRow['material_id']) ? (int)$materialRow['material_id'] : null),
+                    'quantity_per_unit'=> $quantityPerUnit,
+                    'unit'             => $detailEntry['unit'] ?? ($materialRow['unit'] ?? 'كجم'),
+                    'honey_variety'    => $detailEntry['honey_variety'] ?? null,
+                ];
+            }
+        } else {
+            $materialIdColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'raw_material_id')
+                ? 'raw_material_id'
+                : (batchCreationColumnExists($pdo, $templateMaterialsTable, 'material_id') ? 'material_id' : null);
+
+            if ($materialIdColumn === null) {
+                throw new RuntimeException('لم يتم العثور على عمود معرف المادة الخام في جدول القوالب');
+            }
+
+            $materialNameColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'material_name')
+                ? 'material_name'
+                : null;
+
             $rawStockColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'stock')
                 ? 'stock'
                 : (batchCreationColumnExists($pdo, $rawInventoryTable, 'quantity') ? 'quantity' : null);
@@ -305,6 +593,10 @@ function batchCreationCreate(int $templateId, int $units): array
             ));
             $materialsStmt->execute([$templateId]);
             $materials = $materialsStmt->fetchAll();
+        }
+
+        if (empty($materials) && empty($materialsForStockDeduction)) {
+            throw new RuntimeException('القالب لا يحتوي على مواد خام صالحة للإنتاج');
         }
 
         // تجهيز جداول أدوات التعبئة
@@ -365,20 +657,22 @@ function batchCreationCreate(int $templateId, int $units): array
         $packagingStmt->execute([$templateId]);
         $packaging = $packagingStmt->fetchAll();
 
-        // التحقق من توفر المخزون
-        foreach ($materials as $material) {
-            $requiredQty = (float) $material['quantity_per_unit'] * $units;
-            $available   = (float) ($material['available_stock'] ?? 0);
+        // التحقق من توفر المخزون في حالة وجود جدول مخزون عام
+        if ($canUpdateRawStock && !empty($materials)) {
+            foreach ($materials as $material) {
+                $requiredQty = (float) $material['quantity_per_unit'] * $units;
+                $available   = (float) ($material['available_stock'] ?? 0);
 
-            if ($requiredQty > $available) {
-                throw new RuntimeException(
-                    sprintf(
-                        'المخزون غير كافٍ للمادة الخام "%s" (المتاح: %s، المطلوب: %s)',
-                        $material['raw_name'],
-                        number_format($available, 3),
-                        number_format($requiredQty, 3)
-                    )
-                );
+                if ($requiredQty > $available) {
+                    throw new RuntimeException(
+                        sprintf(
+                            'المخزون غير كافٍ للمادة الخام "%s" (المتاح: %s، المطلوب: %s)',
+                            $material['raw_name'],
+                            number_format($available, 3),
+                            number_format($requiredQty, 3)
+                        )
+                    );
+                }
             }
         }
 
@@ -395,6 +689,12 @@ function batchCreationCreate(int $templateId, int $units): array
                         number_format($requiredQty, 3)
                     )
                 );
+            }
+        }
+
+        if (!$canUpdateRawStock && !empty($materialsForStockDeduction)) {
+            foreach ($materialsForStockDeduction as $stockMaterial) {
+                batchCreationDeductTypedStock($pdo, $stockMaterial, (float)$units);
             }
         }
 
