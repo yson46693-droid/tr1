@@ -467,14 +467,44 @@ $users = $db->query("SELECT id, full_name, role FROM users WHERE status = 'activ
 $products = $db->query("SELECT id, name FROM products WHERE status = 'active' ORDER BY name");
 
 // إحصائيات
-$statsWhere = $isProduction ? "WHERE assigned_to = " . $currentUser['id'] : "";
+$statsFilters = [];
+$statsParams = [];
+
+if ($isProduction) {
+    $statsFilters[] = 'assigned_to = ?';
+    $statsParams[] = $currentUser['id'];
+}
+
+$buildStatsQuery = function(string $extraCondition = '', array $extraParams = []) use ($db, $statsFilters, $statsParams) {
+    $conditions = $statsFilters;
+    $params = $statsParams;
+
+    if ($extraCondition !== '') {
+        $conditions[] = $extraCondition;
+    }
+
+    if (!empty($extraParams)) {
+        $params = array_merge($params, $extraParams);
+    }
+
+    $whereClause = '';
+    if (!empty($conditions)) {
+        $whereClause = 'WHERE ' . implode(' AND ', $conditions);
+    }
+
+    $sql = "SELECT COUNT(*) as total FROM tasks $whereClause";
+    $result = $db->queryOne($sql, $params);
+
+    return isset($result['total']) ? (int) $result['total'] : 0;
+};
+
 $stats = [
-    'total' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere")['total'] ?? 0,
-    'pending' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status = 'pending'")['total'] ?? 0,
-    'received' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status = 'received'")['total'] ?? 0,
-    'in_progress' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status = 'in_progress'")['total'] ?? 0,
-    'completed' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status = 'completed'")['total'] ?? 0,
-    'overdue' => $db->queryOne("SELECT COUNT(*) as total FROM tasks $statsWhere AND status != 'completed' AND due_date < CURDATE()")['total'] ?? 0
+    'total' => $buildStatsQuery(),
+    'pending' => $buildStatsQuery("status = 'pending'"),
+    'received' => $buildStatsQuery("status = 'received'"),
+    'in_progress' => $buildStatsQuery("status = 'in_progress'"),
+    'completed' => $buildStatsQuery("status = 'completed'"),
+    'overdue' => $buildStatsQuery("status != 'completed' AND due_date < CURDATE()")
 ];
 
 if (!function_exists('getTasksRetentionLimit')) {
