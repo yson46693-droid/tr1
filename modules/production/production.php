@@ -1187,21 +1187,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 
                 // 4. الملاحظات: توليد ملاحظات تلقائية تذكر الموردين
-                $batchNotes = trim($_POST['batch_notes'] ?? '');
-                if (empty($batchNotes)) {
-                    $notesParts = ['تم إنشاؤه من قالب: ' . $template['product_name']];
-                    
-                    // إضافة جميع الموردين إلى الملاحظات
-                    if (!empty($allSuppliers)) {
-                        $supplierNames = [];
-                        foreach ($allSuppliers as $supplier) {
-                            $supplierNames[] = $supplier['name'] . ' (' . $supplier['material'] . ')';
-                        }
-                        $notesParts[] = 'الموردون: ' . implode(', ', $supplierNames);
+                $batchNotes = '';
+                $notesParts = ['تم إنشاؤه من قالب: ' . $template['product_name']];
+                
+                // إضافة جميع الموردين إلى الملاحظات
+                if (!empty($allSuppliers)) {
+                    $supplierNames = [];
+                    foreach ($allSuppliers as $supplier) {
+                        $supplierNames[] = $supplier['name'] . ' (' . $supplier['material'] . ')';
                     }
-                    
-                    $batchNotes = implode(' | ', $notesParts);
+                    $notesParts[] = 'الموردون: ' . implode(', ', $supplierNames);
                 }
+                
+                $batchNotes = implode(' | ', $notesParts);
                 
                 // إنشاء سجل إنتاج واحد للتشغيلة
                 $columns = ['product_id', 'quantity'];
@@ -1742,7 +1740,7 @@ if (!empty($unifiedTemplatesCheck)) {
         }
 
         // جلب أدوات التعبئة المرتبطة بالقالب
-        $packagingItems = [];
+        $packagingDetails = [];
         if (!empty($templatePackagingCheck)) {
             try {
                 $packagingItems = $db->query(
@@ -1754,20 +1752,26 @@ if (!empty($unifiedTemplatesCheck)) {
                      WHERE tp.template_id = ?",
                     [$template['id']]
                 );
+
+                foreach ($packagingItems as $item) {
+                    $quantity = isset($item['quantity_per_unit']) ? (float)$item['quantity_per_unit'] : 0.0;
+                    if ($quantity <= 0) {
+                        continue;
+                    }
+
+                    $packagingDetails[] = [
+                        'name' => $item['packaging_name'] ?? 'مادة تعبئة',
+                        'quantity_per_unit' => $quantity,
+                        'unit' => $item['packaging_unit'] ?? 'وحدة'
+                    ];
+                }
             } catch (Exception $e) {
                 error_log("Fetching template packaging failed for template {$template['id']}: " . $e->getMessage());
-                $packagingItems = [];
             }
         }
 
-        $template['packaging_count'] = count($packagingItems);
-        $template['packaging_details'] = array_map(static function ($item) {
-            return [
-                'name' => $item['packaging_name'] ?? 'مادة تعبئة',
-                'quantity_per_unit' => (float)($item['quantity_per_unit'] ?? 0),
-                'unit' => $item['packaging_unit'] ?? 'وحدة'
-            ];
-        }, $packagingItems);
+        $template['packaging_details'] = $packagingDetails;
+        $template['packaging_count'] = count($packagingDetails);
     }
     
     // تصفية القوالب: تجاهل القوالب التي لا تحتوي على مواد
