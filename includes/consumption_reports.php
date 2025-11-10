@@ -169,6 +169,47 @@ function getConsumptionSummary($dateFrom, $dateTo)
         $rows = [];
     }
     $packagingMap = consumptionGetPackagingMap();
+    $packagingMaterialsMeta = [];
+    try {
+        $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
+        if (!empty($packagingTableCheck)) {
+            $packagingMetaRows = $db->query("SELECT id, name, unit FROM packaging_materials");
+            foreach ($packagingMetaRows as $metaRow) {
+                $packagingId = (int)($metaRow['id'] ?? 0);
+                if ($packagingId <= 0) {
+                    continue;
+                }
+                $packagingMaterialsMeta[$packagingId] = [
+                    'name' => trim((string)($metaRow['name'] ?? '')),
+                    'unit' => trim((string)($metaRow['unit'] ?? ''))
+                ];
+            }
+        }
+    } catch (Exception $packagingMetaError) {
+        $packagingMaterialsMeta = [];
+        error_log('Consumption summary packaging meta error: ' . $packagingMetaError->getMessage());
+    }
+    $rawMaterialsMeta = [];
+    try {
+        $rawTableCheck = $db->queryOne("SHOW TABLES LIKE 'raw_materials'");
+        if (!empty($rawTableCheck)) {
+            $rawMetaRows = $db->query("SELECT id, name, unit, material_type FROM raw_materials");
+            foreach ($rawMetaRows as $metaRow) {
+                $rawId = (int)($metaRow['id'] ?? 0);
+                if ($rawId <= 0) {
+                    continue;
+                }
+                $rawMaterialsMeta[$rawId] = [
+                    'name' => trim((string)($metaRow['name'] ?? '')),
+                    'unit' => trim((string)($metaRow['unit'] ?? '')),
+                    'material_type' => trim((string)($metaRow['material_type'] ?? ''))
+                ];
+            }
+        }
+    } catch (Exception $rawMetaError) {
+        $rawMaterialsMeta = [];
+        error_log('Consumption summary raw meta error: ' . $rawMetaError->getMessage());
+    }
     $summary = [
         'date_from' => $from,
         'date_to' => $to,
@@ -261,6 +302,226 @@ function getConsumptionSummary($dateFrom, $dateTo)
             $packagingIndex[$key] = $idx;
         }
     }
+    $rawIndex = [];
+    foreach ($summary['raw']['items'] as $idx => $item) {
+        $rawKey = mb_strtolower(($item['name'] ?? '') . '|' . ($item['unit'] ?? ''));
+        if ($rawKey !== '|') {
+            $rawIndex[$rawKey] = $idx;
+        }
+    }
+    try {
+        $batchPackagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'batch_packaging'");
+        $batchesTableCheck = $db->queryOne("SHOW TABLES LIKE 'batches'");
+        if (!empty($batchPackagingTableCheck) && !empty($batchesTableCheck)) {
+            $batchPackagingColumns = consumptionGetTableColumns('batch_packaging');
+            $hasPackNameColumn = isset($batchPackagingColumns['packaging_name']);
+            $hasPackUnitColumn = isset($batchPackagingColumns['unit']);
+
+            $selectParts = [
+                'bp.packaging_material_id',
+                'SUM(bp.quantity_used) AS total_used',
+                'COUNT(DISTINCT bp.batch_id) AS batch_count'
+            ];
+            if ($hasPackNameColumn) {
+                $selectParts[] = 'bp.packaging_name';
+            } else {
+                $selectParts[] = 'NULL AS packaging_name';
+            }
+            if ($hasPackUnitColumn) {
+                $selectParts[] = 'bp.unit';
+            } else {
+                $selectParts[] = 'NULL AS unit';
+            }
+            $groupParts = ['bp.packaging_material_id'];
+            if ($hasPackNameColumn) {
+                $groupParts[] = 'bp.packaging_name';
+            }
+            if ($hasPackUnitColumn) {
+                $groupParts[] = 'bp.unit';
+            }
+            $batchPackagingSql = "
+                SELECT " . implode(', ', $selectParts) . "
+                FROM batch_packaging bp
+                INNER JOIN batches b ON b.id = bp.batch_id
+                WHERE DATE(COALESCE(b.production_date, DATE(b.created_at))) BETWEEN ? AND ?
+                  AND (b.status IS NULL OR b.status <> 'cancelled')
+                GROUP BY " . implode(', ', $groupParts);
+
+            $batchPackagingRows = $db->query($batchPackagingSql, [$from, $to]);
+            foreach ($batchPackagingRows as $packRow) {
+                $materialId = (int)($packRow['packaging_material_id'] ?? 0);
+                $name = $hasPackNameColumn ? trim((string)($packRow['packaging_name'] ?? '')) : '';
+                $unit = $hasPackUnitColumn ? trim((string)($packRow['unit'] ?? '')) : '';
+                if ($materialId > 0 && isset($packagingMaterialsMeta[$materialId])) {
+                    $meta = $packagingMaterialsMeta[$materialId];
+                    if ($name === '') {
+                        $name = $meta['name'];
+                    }
+                    if ($unit === '' && $meta['unit'] !== '') {
+                        $unit = $meta['unit'];
+                    }
+                }
+                if ($name === '') {
+                    $name = $materialId > 0 ? ('أداة #' . $materialId) : 'أداة تعبئة';
+                }
+                $quantityUsed = consumptionFormatNumber($packRow['total_used'] ?? 0);
+                if ($quantityUsed <= 0) {
+                    continue;
+                }
+
+                $key = mb_strtolower($name);
+                if (isset($packagingIndex[$key])) {
+                    $targetIdx = $packagingIndex[$key];
+                    $summary['packaging']['items'][$targetIdx]['total_out'] += $quantityUsed;
+                    $summary['packaging']['items'][$targetIdx]['net'] = consumptionFormatNumber(
+                        $summary['packaging']['items'][$targetIdx]['total_out'] - $summary['packaging']['items'][$targetIdx]['total_in']
+                    );
+                    $summary['packaging']['items'][$targetIdx]['movements'] += (int)($packRow['batch_count'] ?? 0);
+                    if ($unit !== '' && empty($summary['packaging']['items'][$targetIdx]['unit'])) {
+                        $summary['packaging']['items'][$targetIdx]['unit'] = $unit;
+                    }
+                } else {
+                    $summary['packaging']['items'][] = [
+                        'name' => $name,
+                        'sub_category' => 'الإنتاج',
+                        'total_out' => $quantityUsed,
+                        'total_in' => 0.0,
+                        'net' => $quantityUsed,
+                        'movements' => (int)($packRow['batch_count'] ?? 0),
+                        'unit' => $unit
+                    ];
+                    $packagingIndex[$key] = count($summary['packaging']['items']) - 1;
+                }
+
+                $summary['packaging']['total_out'] += $quantityUsed;
+            }
+        }
+    } catch (Exception $batchPackagingError) {
+        error_log('Consumption batch packaging aggregation error: ' . $batchPackagingError->getMessage());
+    }
+    try {
+        $batchRawTableCheck = $db->queryOne("SHOW TABLES LIKE 'batch_raw_materials'");
+        $batchesTableCheck = isset($batchesTableCheck) ? $batchesTableCheck : $db->queryOne("SHOW TABLES LIKE 'batches'");
+        if (!empty($batchRawTableCheck) && !empty($batchesTableCheck)) {
+            $batchRawColumns = consumptionGetTableColumns('batch_raw_materials');
+            $hasRawNameColumn = isset($batchRawColumns['material_name']);
+            $hasRawUnitColumn = isset($batchRawColumns['unit']);
+
+            $selectParts = [
+                'brm.raw_material_id',
+                'SUM(brm.quantity_used) AS total_used',
+                'COUNT(DISTINCT brm.batch_id) AS batch_count'
+            ];
+            if ($hasRawNameColumn) {
+                $selectParts[] = 'brm.material_name';
+            } else {
+                $selectParts[] = 'NULL AS material_name';
+            }
+            if ($hasRawUnitColumn) {
+                $selectParts[] = 'brm.unit';
+            } else {
+                $selectParts[] = 'NULL AS unit';
+            }
+            $groupParts = ['brm.raw_material_id'];
+            if ($hasRawNameColumn) {
+                $groupParts[] = 'brm.material_name';
+            }
+            if ($hasRawUnitColumn) {
+                $groupParts[] = 'brm.unit';
+            }
+
+            $batchRawSql = "
+                SELECT " . implode(', ', $selectParts) . "
+                FROM batch_raw_materials brm
+                INNER JOIN batches b ON b.id = brm.batch_id
+                WHERE DATE(COALESCE(b.production_date, DATE(b.created_at))) BETWEEN ? AND ?
+                  AND (b.status IS NULL OR b.status <> 'cancelled')
+                GROUP BY " . implode(', ', $groupParts);
+
+            $batchRawRows = $db->query($batchRawSql, [$from, $to]);
+            foreach ($batchRawRows as $rawRow) {
+                $materialId = (int)($rawRow['raw_material_id'] ?? 0);
+                $name = $hasRawNameColumn ? trim((string)($rawRow['material_name'] ?? '')) : '';
+                $unit = $hasRawUnitColumn ? trim((string)($rawRow['unit'] ?? '')) : '';
+                $materialType = '';
+
+                if ($materialId > 0 && isset($rawMaterialsMeta[$materialId])) {
+                    $meta = $rawMaterialsMeta[$materialId];
+                    if ($name === '') {
+                        $name = $meta['name'];
+                    }
+                    if ($unit === '' && $meta['unit'] !== '') {
+                        $unit = $meta['unit'];
+                    }
+                    $materialType = $meta['material_type'];
+                }
+
+                if ($name === '') {
+                    $name = $materialId > 0 ? ('مادة خام #' . $materialId) : 'مادة خام';
+                }
+
+                $quantityUsed = consumptionFormatNumber($rawRow['total_used'] ?? 0);
+                if ($quantityUsed <= 0) {
+                    continue;
+                }
+
+                $classificationInput = [
+                    'product_id' => $materialId,
+                    'name' => $name,
+                    'category' => '',
+                    'type' => '',
+                    'specifications' => '',
+                    'material_type' => $materialType
+                ];
+                $classification = consumptionClassifyProduct($classificationInput, $packagingMap);
+                if (!$classification || $classification[0] !== 'raw') {
+                    $classification = ['raw', 'other', 'مواد خام أخرى'];
+                }
+                [, $subKey, $subLabel] = $classification;
+
+                $unitKey = $unit !== '' ? $unit : '';
+                $rawItemKey = mb_strtolower($name . '|' . $unitKey);
+                if (isset($rawIndex[$rawItemKey])) {
+                    $targetIdx = $rawIndex[$rawItemKey];
+                    $summary['raw']['items'][$targetIdx]['total_out'] += $quantityUsed;
+                    $summary['raw']['items'][$targetIdx]['net'] = consumptionFormatNumber(
+                        $summary['raw']['items'][$targetIdx]['total_out'] - $summary['raw']['items'][$targetIdx]['total_in']
+                    );
+                    $summary['raw']['items'][$targetIdx]['movements'] += (int)($rawRow['batch_count'] ?? 0);
+                    if ($subLabel && empty($summary['raw']['items'][$targetIdx]['sub_category'])) {
+                        $summary['raw']['items'][$targetIdx]['sub_category'] = $subLabel;
+                    }
+                    if ($unit !== '' && empty($summary['raw']['items'][$targetIdx]['unit'])) {
+                        $summary['raw']['items'][$targetIdx]['unit'] = $unit;
+                    }
+                } else {
+                    $summary['raw']['items'][] = [
+                        'name' => $name,
+                        'sub_category' => $subLabel,
+                        'total_out' => $quantityUsed,
+                        'total_in' => 0.0,
+                        'net' => $quantityUsed,
+                        'movements' => (int)($rawRow['batch_count'] ?? 0),
+                        'unit' => $unit
+                    ];
+                    $rawIndex[$rawItemKey] = count($summary['raw']['items']) - 1;
+                }
+
+                $summary['raw']['total_out'] += $quantityUsed;
+                if (!isset($summary['raw']['sub_totals'][$subKey])) {
+                    $summary['raw']['sub_totals'][$subKey] = [
+                        'label' => $subLabel,
+                        'total_out' => 0,
+                        'total_in' => 0,
+                        'net' => 0
+                    ];
+                }
+                $summary['raw']['sub_totals'][$subKey]['total_out'] += $quantityUsed;
+            }
+        }
+    } catch (Exception $batchRawError) {
+        error_log('Consumption batch raw aggregation error: ' . $batchRawError->getMessage());
+    }
     try {
         $usageTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_usage_logs'");
         if (!empty($usageTableCheck)) {
@@ -280,7 +541,7 @@ function getConsumptionSummary($dateFrom, $dateTo)
 
             foreach ($usageLogs as $log) {
                 $sourceTable = $log['source_table'] ?? 'packaging_materials';
-                if ($sourceTable !== 'packaging_materials') {
+                if (!in_array($sourceTable, ['packaging_materials', 'products'], true)) {
                     continue;
                 }
                 $usageName = trim((string)($log['usage_name'] ?? ''));
