@@ -138,6 +138,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'تعذر إنشاء موعد التحصيل، يرجى المحاولة مرة أخرى.';
             }
         }
+    } elseif ($action === 'update_schedule') {
+        $scheduleId = intval($_POST['schedule_id'] ?? 0);
+        $amount = isset($_POST['amount']) ? floatval($_POST['amount']) : 0;
+        $dueDate = $_POST['due_date'] ?? '';
+
+        $dueDateObj = DateTime::createFromFormat('Y-m-d', $dueDate);
+
+        if ($scheduleId <= 0) {
+            $error = 'معرف الجدول غير صالح.';
+        } elseif ($amount <= 0) {
+            $error = 'يجب إدخال مبلغ تحصيل أكبر من صفر.';
+        } elseif (!$dueDateObj) {
+            $error = 'يرجى إدخال تاريخ استحقاق صحيح.';
+        } else {
+            try {
+                $schedule = $db->queryOne(
+                    "SELECT * FROM payment_schedules WHERE id = ? AND sales_rep_id = ?",
+                    [$scheduleId, $currentUser['id']]
+                );
+
+                if (!$schedule) {
+                    $error = 'لا يمكنك تعديل هذا الجدول.';
+                } elseif ($schedule['status'] === 'paid' || $schedule['status'] === 'cancelled') {
+                    $error = 'لا يمكن تعديل جدول مدفوع أو ملغى.';
+                } else {
+                    $oldData = [
+                        'amount' => $schedule['amount'],
+                        'due_date' => $schedule['due_date'],
+                        'status' => $schedule['status']
+                    ];
+
+                    $today = new DateTimeImmutable('today');
+                    $newStatus = $schedule['status'];
+                    if ($newStatus !== 'paid' && $newStatus !== 'cancelled') {
+                        $newStatus = ($dueDateObj < $today) ? 'overdue' : 'pending';
+                    }
+
+                    $db->execute(
+                        "UPDATE payment_schedules 
+                         SET amount = ?, due_date = ?, status = ?, reminder_sent = 0, reminder_sent_at = NULL, updated_at = NOW()
+                         WHERE id = ?",
+                        [
+                            $amount,
+                            $dueDateObj->format('Y-m-d'),
+                            $newStatus,
+                            $scheduleId
+                        ]
+                    );
+
+                    logAudit(
+                        $currentUser['id'],
+                        'update_payment_schedule',
+                        'payment_schedule',
+                        $scheduleId,
+                        $oldData,
+                        [
+                            'amount' => $amount,
+                            'due_date' => $dueDateObj->format('Y-m-d'),
+                            'status' => $newStatus
+                        ]
+                    );
+
+                    $success = 'تم تحديث موعد التحصيل بنجاح.';
+                }
+            } catch (Throwable $updateScheduleError) {
+                error_log('Update payment schedule error: ' . $updateScheduleError->getMessage());
+                $error = 'تعذر تحديث موعد التحصيل، يرجى المحاولة مرة أخرى.';
+            }
+        }
     }
 }
 
@@ -536,6 +605,15 @@ if (isset($_GET['id'])) {
                                             <i class="bi bi-eye"></i>
                                         </a>
                                         <?php if ($schedule['status'] !== 'paid' && $schedule['status'] !== 'cancelled'): ?>
+                                        <button class="btn btn-primary"
+                                                data-schedule-id="<?php echo $schedule['id']; ?>"
+                                                data-customer="<?php echo htmlspecialchars($schedule['customer_name'] ?? '-', ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-amount="<?php echo $schedule['amount']; ?>"
+                                                data-due-date="<?php echo htmlspecialchars($schedule['due_date']); ?>"
+                                                onclick="showEditScheduleModal(this)"
+                                                title="تعديل">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
                                         <button class="btn btn-success" 
                                                 onclick="showPaymentModal(<?php echo $schedule['id']; ?>, <?php echo $schedule['amount']; ?>)"
                                                 title="تسجيل دفعة">
@@ -654,6 +732,43 @@ if (isset($_GET['id'])) {
     </div>
 </div>
 
+<!-- Modal تعديل موعد تحصيل -->
+<div class="modal fade" id="editScheduleModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>تعديل موعد التحصيل</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="update_schedule">
+                <input type="hidden" name="schedule_id" id="editScheduleId">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">العميل</label>
+                        <input type="text" class="form-control" id="editScheduleCustomer" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">مبلغ التحصيل <span class="text-danger">*</span></label>
+                        <input type="number" name="amount" class="form-control" step="0.01" min="0.01" id="editScheduleAmount" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">موعد التحصيل <span class="text-danger">*</span></label>
+                        <input type="date" name="due_date" class="form-control" id="editScheduleDueDate" required>
+                    </div>
+                    <div class="alert alert-info mb-0">
+                        تعديل التاريخ سيُحدّث حالة الجدول تلقائياً ليتناسب مع الموعد الجديد.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">حفظ التعديلات</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal تسجيل دفعة -->
 <div class="modal fade" id="paymentModal" tabindex="-1">
     <div class="modal-dialog">
@@ -729,6 +844,35 @@ function showReminderModal(scheduleId) {
     modal.show();
 }
 
+function showEditScheduleModal(button) {
+    if (!button) {
+        return;
+    }
+
+    const scheduleId = button.getAttribute('data-schedule-id') || '';
+    const customer = button.getAttribute('data-customer') || '';
+    const amount = button.getAttribute('data-amount') || '';
+    const dueDate = button.getAttribute('data-due-date') || '';
+
+    const modalEl = document.getElementById('editScheduleModal');
+    if (!modalEl) {
+        return;
+    }
+
+    const idInput = modalEl.querySelector('#editScheduleId');
+    const customerInput = modalEl.querySelector('#editScheduleCustomer');
+    const amountInput = modalEl.querySelector('#editScheduleAmount');
+    const dueDateInput = modalEl.querySelector('#editScheduleDueDate');
+
+    if (idInput) idInput.value = scheduleId;
+    if (customerInput) customerInput.value = customer;
+    if (amountInput) amountInput.value = amount;
+    if (dueDateInput) dueDateInput.value = dueDate;
+
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const addScheduleModal = document.getElementById('addScheduleModal');
     if (addScheduleModal) {
@@ -740,6 +884,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (dueDateInput) {
                     dueDateInput.value = '<?php echo date('Y-m-d'); ?>';
                 }
+            }
+        });
+    }
+
+    const editScheduleModal = document.getElementById('editScheduleModal');
+    if (editScheduleModal) {
+        editScheduleModal.addEventListener('hidden.bs.modal', function () {
+            const form = editScheduleModal.querySelector('form');
+            if (form) {
+                form.reset();
             }
         });
     }

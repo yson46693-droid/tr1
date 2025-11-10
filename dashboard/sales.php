@@ -14,10 +14,23 @@ requireRole('sales');
 
 $currentUser = getCurrentUser();
 $db = db();
-$page = $_GET['page'] ?? 'dashboard';
+$pageParam = $_GET['page'] ?? 'dashboard';
+$page = $pageParam;
+$activeCombinedTab = 'sales';
+
+// تحديد التبويب النشط بناءً على الطلب الأصلي
+if ($pageParam === 'collections') {
+    $activeCombinedTab = 'collections';
+}
+if ($pageParam === 'sales_collections') {
+    $sectionParam = $_GET['section'] ?? '';
+    if ($sectionParam === 'collections') {
+        $activeCombinedTab = 'collections';
+    }
+}
 
 // توحيد مسار صفحات المبيعات والتحصيلات تحت صفحة واحدة
-if (in_array($page, ['sales', 'collections', 'sales_collections'], true)) {
+if (in_array($pageParam, ['sales', 'collections', 'sales_collections'], true)) {
     $page = 'sales_collections';
 }
 
@@ -232,36 +245,105 @@ if ($page === 'sales_collections') {
                 </div>
 
                 <div class="combined-sections">
-                    <section class="combined-section mb-5">
-                        <?php 
-                        $salesModulePath = __DIR__ . '/../modules/sales/sales.php';
-                        if (file_exists($salesModulePath)) {
-                            include $salesModulePath;
-                        } else {
-                        ?>
-                        <div class="empty-state-card">
-                            <div class="empty-state-icon"><i class="bi bi-cart-check"></i></div>
-                            <div class="empty-state-title"><?php echo isset($lang['sales']) ? $lang['sales'] : 'المبيعات'; ?></div>
-                            <div class="empty-state-description"><?php echo isset($lang['sales_page_coming_soon']) ? $lang['sales_page_coming_soon'] : 'صفحة المبيعات - سيتم إضافتها'; ?></div>
-                        </div>
-                        <?php } ?>
-                    </section>
+                    <style>
+                        .combined-tabs .nav-link {
+                            font-weight: 600;
+                            display: flex;
+                            align-items: center;
+                            gap: 0.5rem;
+                            padding: 0.75rem 1.5rem;
+                            box-shadow: 0 2px 6px rgba(14, 30, 37, 0.08);
+                        }
+                        .combined-tabs .nav-link:not(.active) {
+                            background-color: rgba(13, 110, 253, 0.08);
+                            color: inherit;
+                        }
+                        .combined-tabs .nav-link i {
+                            font-size: 1.1rem;
+                        }
+                        .combined-tab-pane {
+                            animation: fadeUp 0.25s ease;
+                        }
+                        @keyframes fadeUp {
+                            from {
+                                opacity: 0;
+                                transform: translateY(10px);
+                            }
+                            to {
+                                opacity: 1;
+                                transform: translateY(0);
+                            }
+                        }
+                        @media (max-width: 576px) {
+                            .combined-tabs {
+                                gap: 0.75rem;
+                            }
+                            .combined-tabs .nav-link {
+                                width: 100%;
+                                justify-content: center;
+                            }
+                        }
+                    </style>
 
-                    <section class="combined-section">
-                        <?php 
-                        $collectionsModulePath = __DIR__ . '/../modules/sales/collections.php';
-                        if (file_exists($collectionsModulePath)) {
-                            include $collectionsModulePath;
-                        } else {
-                        ?>
-                        <div class="empty-state-card">
-                            <div class="empty-state-icon"><i class="bi bi-cash-coin"></i></div>
-                            <div class="empty-state-title"><?php echo isset($lang['collections']) ? $lang['collections'] : 'التحصيلات'; ?></div>
-                            <div class="empty-state-description"><?php echo isset($lang['collections_page_coming_soon']) ? $lang['collections_page_coming_soon'] : 'صفحة التحصيلات - سيتم إضافتها'; ?></div>
+                    <ul class="nav nav-pills combined-tabs mb-4 flex-column flex-sm-row gap-2" id="salesCollectionsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="sales-tab" data-bs-toggle="pill" data-bs-target="#sales-section" type="button" role="tab" aria-controls="sales-section" aria-selected="true">
+                                <i class="bi bi-receipt"></i>
+                                <span><?php echo isset($lang['sales']) ? $lang['sales'] : 'المبيعات'; ?></span>
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="collections-tab" data-bs-toggle="pill" data-bs-target="#collections-section" type="button" role="tab" aria-controls="collections-section" aria-selected="false">
+                                <i class="bi bi-cash-coin"></i>
+                                <span><?php echo isset($lang['collections']) ? $lang['collections'] : 'التحصيلات'; ?></span>
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content combined-tab-content" id="salesCollectionsTabContent">
+                        <div class="tab-pane fade show active combined-tab-pane" id="sales-section" role="tabpanel" aria-labelledby="sales-tab">
+                            <?php 
+                            $salesModulePath = __DIR__ . '/../modules/sales/sales.php';
+                            if (file_exists($salesModulePath)) {
+                                include $salesModulePath;
+                            } else {
+                            ?>
+                            <div class="empty-state-card">
+                                <div class="empty-state-icon"><i class="bi bi-cart-check"></i></div>
+                                <div class="empty-state-title"><?php echo isset($lang['sales']) ? $lang['sales'] : 'المبيعات'; ?></div>
+                                <div class="empty-state-description"><?php echo isset($lang['sales_page_coming_soon']) ? $lang['sales_page_coming_soon'] : 'صفحة المبيعات - سيتم إضافتها'; ?></div>
+                            </div>
+                            <?php } ?>
                         </div>
-                        <?php } ?>
-                    </section>
+
+                        <div class="tab-pane fade combined-tab-pane" id="collections-section" role="tabpanel" aria-labelledby="collections-tab">
+                            <?php 
+                            $collectionsModulePath = __DIR__ . '/../modules/sales/collections.php';
+                            if (file_exists($collectionsModulePath)) {
+                                include $collectionsModulePath;
+                            } else {
+                            ?>
+                            <div class="empty-state-card">
+                                <div class="empty-state-icon"><i class="bi bi-cash-coin"></i></div>
+                                <div class="empty-state-title"><?php echo isset($lang['collections']) ? $lang['collections'] : 'التحصيلات'; ?></div>
+                                <div class="empty-state-description"><?php echo isset($lang['collections_page_coming_soon']) ? $lang['collections_page_coming_soon'] : 'صفحة التحصيلات - سيتم إضافتها'; ?></div>
+                            </div>
+                            <?php } ?>
+                        </div>
+                    </div>
                 </div>
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const defaultTab = '<?php echo $activeCombinedTab === 'collections' ? 'collections' : 'sales'; ?>';
+                        if (defaultTab === 'collections') {
+                            const tabTrigger = document.getElementById('collections-tab');
+                            if (tabTrigger && window.bootstrap && typeof window.bootstrap.Tab === 'function') {
+                                const tab = new bootstrap.Tab(tabTrigger);
+                                tab.show();
+                            }
+                        }
+                    });
+                </script>
                 
             <?php elseif ($page === 'orders'): ?>
                 <!-- صفحة طلبات العملاء -->
