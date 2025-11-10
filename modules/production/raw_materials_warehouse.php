@@ -2298,6 +2298,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $templateId = $result['insert_id'];
 
                     // إضافة المواد الخام
+                    $productTemplateMaterialsTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'product_template_materials'"));
+                    $rawSortOrder = 0;
+
                     foreach ($rawMaterials as $material) {
                         $db->execute(
                             "INSERT INTO product_template_raw_materials (template_id, material_name, quantity_per_unit, unit) 
@@ -2309,7 +2312,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $material['unit']
                             ]
                         );
+
+                        if ($productTemplateMaterialsTableExists) {
+                            $legacyMaterialType = 'other';
+                            if (in_array($material['type'], ['honey_raw', 'honey_filtered'], true)) {
+                                $legacyMaterialType = 'honey';
+                            } elseif (in_array($material['type'], ['nuts', 'derivatives', 'olive_oil', 'beeswax'], true)) {
+                                $legacyMaterialType = 'ingredient';
+                            }
+
+                            $materialNotes = $material['honey_variety'] ?? null;
+                            if ($materialNotes === null && !empty($material['supplier_id'])) {
+                                $supplierRow = $db->queryOne("SELECT name FROM suppliers WHERE id = ?", [$material['supplier_id']]);
+                                if (!empty($supplierRow['name'])) {
+                                    $materialNotes = 'المورد: ' . $supplierRow['name'];
+                                }
+                            }
+
+                            $db->execute(
+                                "INSERT INTO product_template_materials (template_id, material_type, material_name, material_id, quantity_per_unit, unit, is_required, notes, sort_order)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                [
+                                    $templateId,
+                                    $legacyMaterialType,
+                                    $material['name'],
+                                    !empty($material['supplier_id']) ? $material['supplier_id'] : null,
+                                    $material['quantity'],
+                                    $material['unit'],
+                                    1,
+                                    $materialNotes,
+                                    $rawSortOrder++
+                                ]
+                            );
+                        }
                     }
+
+                    $legacyPackagingTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'product_template_packaging'"));
+                    $packagingSortOrder = 0;
 
                     // إضافة أدوات التعبئة
                     foreach ($packagingItems as $packaging) {
@@ -2330,6 +2369,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                              VALUES (?, ?, ?, ?)",
                             [$templateId, $packaging['id'], $packagingName, $packaging['quantity']]
                         );
+
+                        if ($legacyPackagingTableExists) {
+                            $packagingUnit = 'قطعة';
+                            if (!empty($packagingRow['unit'])) {
+                                $packagingUnit = $packagingRow['unit'];
+                            }
+
+                            $db->execute(
+                                "UPDATE product_template_packaging 
+                                 SET unit = IFNULL(unit, ?), is_required = 1, sort_order = ? 
+                                 WHERE template_id = ? AND packaging_material_id = ?",
+                                [$packagingUnit, $packagingSortOrder++, $templateId, $packaging['id']]
+                            );
+                        }
                     }
 
                     $db->commit();
