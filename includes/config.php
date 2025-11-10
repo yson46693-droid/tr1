@@ -445,6 +445,9 @@ if (!defined('ENABLE_DAILY_PACKAGING_ALERT')) {
 if (!defined('ENABLE_DAILY_CONSUMPTION_REPORT')) {
     define('ENABLE_DAILY_CONSUMPTION_REPORT', false);
 }
+if (!defined('ENABLE_PAGE_LOADER')) {
+    define('ENABLE_PAGE_LOADER', false);
+}
 if (!defined('ENABLE_DAILY_BACKUP_DELIVERY')) {
     define('ENABLE_DAILY_BACKUP_DELIVERY', true);
 }
