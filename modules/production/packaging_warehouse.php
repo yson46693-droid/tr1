@@ -1894,7 +1894,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                                 onclick="usePackagingMaterial(this)"
                                                 title="استخدام وحدة واحدة"
                                                 style="padding: 0.2rem 0.4rem; font-size: 0.75rem;"
-                                                <?php echo $useButtonDisabled ? 'disabled' : ''; ?>
+                                                <?php echo $useButtonDisabled ? ' disabled' : ''; ?>
                                                 aria-label="استخدام الأداة">
                                                 <span class="visually-hidden">استخدام</span>
                                                 <i class="bi bi-check2-circle" aria-hidden="true"></i>
@@ -2023,7 +2023,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                         data-quantity-target="<?php echo htmlspecialchars($mobileQuantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
                                         data-use-quantity="1"
                                         onclick="usePackagingMaterial(this)"
-                                        <?php echo $useButtonDisabled ? 'disabled' : ''; ?>>
+                                        <?php echo $useButtonDisabled ? ' disabled' : ''; ?>>
                                         <i class="bi bi-check2-circle me-2" aria-hidden="true"></i>
                                         <span>استخدام</span>
                                     </button>
