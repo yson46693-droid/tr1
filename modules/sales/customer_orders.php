@@ -19,6 +19,9 @@ $currentUser = getCurrentUser();
 $db = db();
 $error = '';
 $success = '';
+$userRole = $currentUser['role'] ?? '';
+$isSalesUser = $userRole === 'sales';
+$isManagerOrAccountant = in_array($userRole, ['manager', 'accountant'], true);
 
 // Pagination
 $pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
@@ -32,7 +35,8 @@ $filters = [
     'status' => $_GET['status'] ?? '',
     'priority' => $_GET['priority'] ?? '',
     'date_from' => $_GET['date_from'] ?? '',
-    'date_to' => $_GET['date_to'] ?? ''
+    'date_to' => $_GET['date_to'] ?? '',
+    'sales_rep_id' => isset($_GET['sales_rep_id']) ? intval($_GET['sales_rep_id']) : ''
 ];
 
 $filters = array_filter($filters, function($value) {
@@ -145,6 +149,191 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $success = 'تم إنشاء الطلب بنجاح: ' . $orderNumber;
         }
+    } elseif ($action === 'send_sales_order' && $isManagerOrAccountant) {
+        $customerName = trim($_POST['customer_name'] ?? '');
+        $customerPhone = trim($_POST['customer_phone'] ?? '');
+        $customerAddress = trim($_POST['customer_address'] ?? '');
+        $salesRepId = isset($_POST['sales_rep_id']) ? intval($_POST['sales_rep_id']) : 0;
+        $productId = isset($_POST['product_id']) ? intval($_POST['product_id']) : 0;
+        $packageCount = isset($_POST['package_count']) ? floatval($_POST['package_count']) : 0;
+        $orderDateRaw = $_POST['order_date'] ?? date('Y-m-d');
+        $deliveryDateRaw = $_POST['delivery_date'] ?? null;
+        $totalAmount = isset($_POST['total_amount']) ? cleanFinancialValue($_POST['total_amount']) : 0;
+        $notes = trim($_POST['notes'] ?? '');
+
+        if ($customerName === '' || $salesRepId <= 0 || $productId <= 0 || $packageCount <= 0 || $totalAmount <= 0) {
+            $error = 'يرجى إدخال جميع البيانات المطلوبة لإرسال الطلب للمندوب.';
+        } else {
+            $orderDateObj = DateTime::createFromFormat('Y-m-d', $orderDateRaw);
+            $orderDate = $orderDateObj ? $orderDateObj->format('Y-m-d') : date('Y-m-d');
+
+            $deliveryDate = null;
+            if (!empty($deliveryDateRaw)) {
+                $deliveryDateObj = DateTime::createFromFormat('Y-m-d', $deliveryDateRaw);
+                if ($deliveryDateObj) {
+                    $deliveryDate = $deliveryDateObj->format('Y-m-d');
+                }
+            }
+
+            $salesRep = $db->queryOne(
+                "SELECT id, full_name FROM users WHERE id = ? AND role = 'sales' AND status = 'active'",
+                [$salesRepId]
+            );
+            if (!$salesRep) {
+                $error = 'المندوب المحدد غير متاح.';
+            } else {
+                $product = $db->queryOne(
+                    "SELECT id, name, unit_price FROM products WHERE id = ? AND status = 'active'",
+                    [$productId]
+                );
+
+                if (!$product) {
+                    $error = 'المنتج المحدد غير متاح.';
+                } else {
+                    $transactionStarted = false;
+
+                    try {
+                        $db->beginTransaction();
+                        $transactionStarted = true;
+
+                        $customerId = null;
+                        if ($customerPhone !== '') {
+                            $existingCustomer = $db->queryOne(
+                                "SELECT id, created_by FROM customers WHERE phone = ? LIMIT 1",
+                                [$customerPhone]
+                            );
+                        } else {
+                            $existingCustomer = $db->queryOne(
+                                "SELECT id, created_by FROM customers WHERE name = ? LIMIT 1",
+                                [$customerName]
+                            );
+                        }
+
+                        if ($existingCustomer) {
+                            $customerId = (int)$existingCustomer['id'];
+
+                            $updateFields = [];
+                            $updateParams = [];
+
+                            if ($customerAddress !== '') {
+                                $updateFields[] = "address = ?";
+                                $updateParams[] = $customerAddress;
+                            }
+
+                            if ($customerPhone !== '') {
+                                $updateFields[] = "phone = ?";
+                                $updateParams[] = $customerPhone;
+                            }
+
+                            if ((int)($existingCustomer['created_by'] ?? 0) !== $salesRepId) {
+                                $updateFields[] = "created_by = ?";
+                                $updateParams[] = $salesRepId;
+                            }
+
+                            if (!empty($updateFields)) {
+                                $updateParams[] = $customerId;
+                                $db->execute(
+                                    "UPDATE customers SET " . implode(', ', $updateFields) . " WHERE id = ?",
+                                    $updateParams
+                                );
+                            }
+                        } else {
+                            $db->execute(
+                                "INSERT INTO customers (name, phone, address, balance, status, created_by) 
+                                 VALUES (?, ?, ?, 0, 'active', ?)",
+                                [
+                                    $customerName,
+                                    $customerPhone !== '' ? $customerPhone : null,
+                                    $customerAddress !== '' ? $customerAddress : null,
+                                    $salesRepId
+                                ]
+                            );
+                            $customerId = $db->getLastInsertId();
+                        }
+
+                        if (!$customerId) {
+                            throw new RuntimeException('تعذر تحديد العميل المرتبط بالطلب.');
+                        }
+
+                        $year = date('Y');
+                        $month = date('m');
+                        $lastOrder = $db->queryOne(
+                            "SELECT order_number FROM customer_orders WHERE order_number LIKE ? ORDER BY order_number DESC LIMIT 1",
+                            ["ORD-{$year}{$month}-%"]
+                        );
+
+                        $serial = 1;
+                        if ($lastOrder) {
+                            $parts = explode('-', $lastOrder['order_number']);
+                            $serial = intval($parts[2] ?? 0) + 1;
+                        }
+                        $orderNumber = sprintf("ORD-%s%s-%04d", $year, $month, $serial);
+
+                        $totalAmountValue = (float)$totalAmount;
+                        $discountAmount = 0.0;
+                        $subtotal = $totalAmountValue;
+                        $unitPrice = $packageCount > 0 ? round($totalAmountValue / $packageCount, 2) : $product['unit_price'];
+
+                        $db->execute(
+                            "INSERT INTO customer_orders 
+                                (order_number, customer_id, sales_rep_id, order_date, delivery_date, subtotal, discount_amount, total_amount, priority, notes, created_by, status)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'normal', ?, ?, 'pending')",
+                            [
+                                $orderNumber,
+                                $customerId,
+                                $salesRepId,
+                                $orderDate,
+                                $deliveryDate,
+                                $subtotal,
+                                $discountAmount,
+                                $totalAmountValue,
+                                $notes,
+                                $currentUser['id']
+                            ]
+                        );
+
+                        $orderId = $db->getLastInsertId();
+
+                        $db->execute(
+                            "INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price) 
+                             VALUES (?, ?, ?, ?, ?)",
+                            [
+                                $orderId,
+                                $productId,
+                                $packageCount,
+                                $unitPrice,
+                                $totalAmountValue
+                            ]
+                        );
+
+                        logAudit($currentUser['id'], 'assign_order_to_sales', 'customer_order', $orderId, null, [
+                            'order_number' => $orderNumber,
+                            'sales_rep_id' => $salesRepId,
+                            'total_amount' => $totalAmountValue
+                        ]);
+
+                        createNotification(
+                            $salesRepId,
+                            'طلب عميل جديد',
+                            "تم إرسال طلب جديد رقم {$orderNumber} إليك.",
+                            'info',
+                            "dashboard/sales.php?page=orders&id={$orderId}",
+                            true
+                        );
+
+                        $db->commit();
+                        $transactionStarted = false;
+                        $success = 'تم إرسال الطلب للمندوب بنجاح: ' . $orderNumber;
+                    } catch (Throwable $sendOrderError) {
+                        if ($transactionStarted) {
+                            $db->rollback();
+                        }
+                        error_log('Send order to sales error: ' . $sendOrderError->getMessage());
+                        $error = 'حدث خطأ أثناء إرسال الطلب للمندوب. يرجى المحاولة مرة أخرى.';
+                    }
+                }
+            }
+        }
     } elseif ($action === 'update_status') {
         $orderId = intval($_POST['order_id'] ?? 0);
         $status = $_POST['status'] ?? '';
@@ -167,7 +356,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // إذا كان المستخدم مندوب مبيعات، عرض فقط طلباته
-if ($currentUser['role'] === 'sales') {
+if ($isSalesUser) {
     $filters['sales_rep_id'] = $currentUser['id'];
 }
 
@@ -181,17 +370,16 @@ $sql = "SELECT o.*, c.name as customer_name, u.full_name as sales_rep_name
 $countSql = "SELECT COUNT(*) as total FROM customer_orders WHERE 1=1";
 $params = [];
 
-// إذا كان المستخدم مندوب مبيعات، فلتر حسب sales_rep_id
-if ($currentUser['role'] === 'sales') {
-    $sql .= " AND o.sales_rep_id = ?";
-    $countSql .= " AND sales_rep_id = ?";
-    $params[] = $currentUser['id'];
-}
-
 if (!empty($filters['customer_id'])) {
     $sql .= " AND o.customer_id = ?";
     $countSql .= " AND customer_id = ?";
     $params[] = $filters['customer_id'];
+}
+
+if (!empty($filters['sales_rep_id'])) {
+    $sql .= " AND o.sales_rep_id = ?";
+    $countSql .= " AND sales_rep_id = ?";
+    $params[] = $filters['sales_rep_id'];
 }
 
 if (!empty($filters['order_number'])) {
@@ -236,6 +424,7 @@ $orders = $db->query($sql, $params);
 $customers = $db->query("SELECT id, name FROM customers WHERE status = 'active' ORDER BY name");
 $products = $db->query("SELECT id, name, unit_price FROM products WHERE status = 'active' ORDER BY name");
 $salesReps = $db->query("SELECT id, username, full_name FROM users WHERE role = 'sales' AND status = 'active' ORDER BY username");
+$canSendOrderToRep = !empty($salesReps) && !empty($products);
 
 // طلب محدد للعرض
 $selectedOrder = null;
@@ -263,11 +452,18 @@ if (isset($_GET['id'])) {
     }
 }
 ?>
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-cart-check me-2"></i>إدارة طلبات العملاء</h2>
-    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addOrderModal">
-        <i class="bi bi-plus-circle me-2"></i>إنشاء طلب جديد
-    </button>
+<div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-4 gap-3">
+    <h2 class="mb-0"><i class="bi bi-cart-check me-2"></i>إدارة طلبات العملاء</h2>
+    <div class="d-flex flex-wrap gap-2">
+        <?php if ($isManagerOrAccountant): ?>
+            <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#sendOrderModal" <?php echo $canSendOrderToRep ? '' : 'disabled'; ?>>
+                <i class="bi bi-send-check me-2"></i>إرسال أوردر للمندوب
+            </button>
+        <?php endif; ?>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addOrderModal">
+            <i class="bi bi-plus-circle me-2"></i>إنشاء طلب جديد
+        </button>
+    </div>
 </div>
 
 <?php if ($error): ?>
@@ -456,6 +652,22 @@ if (isset($_GET['id'])) {
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if ($isManagerOrAccountant): ?>
+            <div class="col-md-2">
+                <label class="form-label">المندوب</label>
+                <select class="form-select" name="sales_rep_id">
+                    <option value="">جميع المناديب</option>
+                    <?php 
+                    $selectedRepId = isset($filters['sales_rep_id']) ? intval($filters['sales_rep_id']) : 0;
+                    $repValid = isValidSelectValue($selectedRepId, $salesReps, 'id');
+                    foreach ($salesReps as $rep): ?>
+                        <option value="<?php echo $rep['id']; ?>" <?php echo $repValid && $selectedRepId == $rep['id'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($rep['full_name'] ?? $rep['username']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php endif; ?>
             <div class="col-md-2">
                 <label class="form-label">الحالة</label>
                 <select class="form-select" name="status">
@@ -508,6 +720,9 @@ if (isset($_GET['id'])) {
                         <th>تاريخ الطلب</th>
                         <th>تاريخ التسليم</th>
                         <th>المبلغ الإجمالي</th>
+                        <?php if (!$isSalesUser): ?>
+                            <th>المندوب</th>
+                        <?php endif; ?>
                         <th>الأولوية</th>
                         <th>الحالة</th>
                         <th>الإجراءات</th>
@@ -516,7 +731,7 @@ if (isset($_GET['id'])) {
                 <tbody>
                     <?php if (empty($orders)): ?>
                         <tr>
-                            <td colspan="8" class="text-center text-muted">لا توجد طلبات</td>
+                            <td colspan="<?php echo $isSalesUser ? 8 : 9; ?>" class="text-center text-muted">لا توجد طلبات</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($orders as $order): ?>
@@ -530,6 +745,9 @@ if (isset($_GET['id'])) {
                                 <td><?php echo formatDate($order['order_date']); ?></td>
                                 <td><?php echo $order['delivery_date'] ? formatDate($order['delivery_date']) : '-'; ?></td>
                                 <td><?php echo formatCurrency($order['total_amount']); ?></td>
+                                <?php if (!$isSalesUser): ?>
+                                <td><?php echo htmlspecialchars($order['sales_rep_name'] ?? '-'); ?></td>
+                                <?php endif; ?>
                                 <td>
                                     <span class="badge bg-<?php 
                                         echo $order['priority'] === 'urgent' ? 'danger' : 
@@ -634,6 +852,98 @@ if (isset($_GET['id'])) {
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($isManagerOrAccountant): ?>
+<!-- Modal إرسال أوردر للمندوب -->
+<div class="modal fade" id="sendOrderModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-send-check me-2"></i>إرسال أوردر للمندوب</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="send_sales_order">
+                <div class="modal-body">
+                    <?php if (!$canSendOrderToRep): ?>
+                        <div class="alert alert-warning d-flex align-items-center gap-2 mb-0">
+                            <i class="bi bi-exclamation-triangle-fill fs-4"></i>
+                            <div>لا يمكن إرسال طلب حالياً. تأكد من وجود منتجات نشطة ومناديب مبيعات نشطين.</div>
+                        </div>
+                    <?php else: ?>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">اسم العميل <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" name="customer_name" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">رقم الهاتف</label>
+                                <input type="text" class="form-control" name="customer_phone" placeholder="مثال: 01234567890">
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <label class="form-label">عنوان العميل</label>
+                            <textarea class="form-control" name="customer_address" rows="2" placeholder="اكتب العنوان بالتفصيل"></textarea>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-6">
+                                <label class="form-label">المندوب المستلم <span class="text-danger">*</span></label>
+                                <select class="form-select" name="sales_rep_id" required>
+                                    <option value="">اختر المندوب</option>
+                                    <?php foreach ($salesReps as $rep): ?>
+                                        <option value="<?php echo $rep['id']; ?>">
+                                            <?php echo htmlspecialchars($rep['full_name'] ?? $rep['username']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">المنتج المطلوب <span class="text-danger">*</span></label>
+                                <select class="form-select" name="product_id" required>
+                                    <option value="">اختر المنتج</option>
+                                    <?php foreach ($products as $product): ?>
+                                        <option value="<?php echo $product['id']; ?>">
+                                            <?php echo htmlspecialchars($product['name']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-4">
+                                <label class="form-label">عدد العبوات <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" name="package_count" min="1" step="1" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">تاريخ استلام الطلب <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="order_date" value="<?php echo date('Y-m-d'); ?>" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">تاريخ التسليم للعميل</label>
+                                <input type="date" class="form-control" name="delivery_date">
+                            </div>
+                        </div>
+                        <div class="row g-3 mt-1">
+                            <div class="col-md-6">
+                                <label class="form-label">إجمالي المبلغ <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control" name="total_amount" min="0.01" step="0.01" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">ملاحظات إضافية</label>
+                                <textarea class="form-control" name="notes" rows="2" placeholder="معلومات إضافية للمندوب (اختياري)"></textarea>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary" <?php echo $canSendOrderToRep ? '' : 'disabled'; ?>>إرسال الطلب</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Modal إنشاء طلب -->
 <div class="modal fade" id="addOrderModal" tabindex="-1">

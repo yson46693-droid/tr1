@@ -13,7 +13,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/payment_schedules.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 
-requireRole(['sales', 'accountant', 'manager']);
+requireRole('sales');
 
 $currentUser = getCurrentUser();
 $db = db();
@@ -72,6 +72,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'حدث خطأ في إنشاء التذكير';
             }
         }
+    } elseif ($action === 'create_schedule') {
+        $customerId = intval($_POST['customer_id'] ?? 0);
+        $amount = !empty($_POST['amount']) ? floatval($_POST['amount']) : 0;
+        $dueDate = $_POST['due_date'] ?? '';
+        
+        $dueDateValid = DateTime::createFromFormat('Y-m-d', $dueDate) !== false;
+        
+        if ($customerId <= 0) {
+            $error = 'يجب اختيار عميل صالح.';
+        } elseif ($amount <= 0) {
+            $error = 'يجب إدخال مبلغ تحصيل أكبر من صفر.';
+        } elseif (!$dueDateValid) {
+            $error = 'يرجى إدخال تاريخ استحقاق صحيح.';
+        } else {
+            try {
+                $customer = $db->queryOne(
+                    "SELECT id, name, balance FROM customers 
+                     WHERE id = ? AND created_by = ? AND status = 'active' AND (balance IS NOT NULL AND balance > 0)",
+                    [$customerId, $currentUser['id']]
+                );
+                
+                if (!$customer) {
+                    $error = 'لا يمكنك إنشاء موعد تحصيل لهذا العميل.';
+                } else {
+                    $dueDateObj = DateTime::createFromFormat('Y-m-d', $dueDate);
+                    if ($dueDateObj < new DateTime('today')) {
+                        $error = 'لا يمكن تحديد موعد تحصيل في تاريخ سابق.';
+                    } else {
+                        $insertResult = $db->execute(
+                            "INSERT INTO payment_schedules 
+                                (sale_id, customer_id, sales_rep_id, amount, due_date, installment_number, total_installments, status, created_by, created_at) 
+                             VALUES (NULL, ?, ?, ?, ?, 1, 1, 'pending', ?, NOW())",
+                            [
+                                $customerId,
+                                $currentUser['id'],
+                                $amount,
+                                $dueDate,
+                                $currentUser['id']
+                            ]
+                        );
+                        
+                        $scheduleId = $insertResult['insert_id'] ?? null;
+                        
+                        if ($scheduleId) {
+                            logAudit(
+                                $currentUser['id'],
+                                'create_payment_schedule_manual',
+                                'payment_schedule',
+                                $scheduleId,
+                                null,
+                                [
+                                    'customer_id' => $customerId,
+                                    'amount' => $amount,
+                                    'due_date' => $dueDate
+                                ]
+                            );
+                        }
+                        
+                        $success = 'تم إضافة موعد التحصيل بنجاح.';
+                    }
+                }
+            } catch (Throwable $createScheduleError) {
+                error_log('Create payment schedule error: ' . $createScheduleError->getMessage());
+                $error = 'تعذر إنشاء موعد التحصيل، يرجى المحاولة مرة أخرى.';
+            }
+        }
     }
 }
 
@@ -79,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 updateOverdueSchedules();
 
 // إرسال التذكيرات المعلقة
-$sentReminders = sendPaymentReminders();
+$sentReminders = sendPaymentReminders($currentUser['id']);
 
 // الحصول على البيانات
 $totalSchedules = $db->queryOne(
@@ -90,7 +156,21 @@ $totalSchedules = $totalSchedules['total'] ?? 0;
 $totalPages = ceil($totalSchedules / $perPage);
 $schedules = getPaymentSchedules($filters, $perPage, $offset);
 
-$customers = $db->query("SELECT id, name FROM customers WHERE status = 'active' ORDER BY name");
+$customers = $db->query(
+    "SELECT id, name FROM customers 
+     WHERE status = 'active' AND created_by = ? 
+     ORDER BY name",
+    [$currentUser['id']]
+);
+
+$debtorCustomers = $db->query(
+    "SELECT id, name, balance FROM customers 
+     WHERE status = 'active' AND created_by = ? 
+       AND balance IS NOT NULL AND balance > 0
+     ORDER BY name",
+    [$currentUser['id']]
+);
+$hasDebtorCustomers = !empty($debtorCustomers);
 
 // التحقق من وجود عمود sale_number في جدول sales
 $saleNumberColumnCheck = $db->queryOne("SHOW COLUMNS FROM sales LIKE 'sale_number'");
@@ -178,14 +258,20 @@ if (isset($_GET['id'])) {
     }
 }
 ?>
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-calendar-check me-2"></i>الجداول الزمنية للتحصيل</h2>
-    <?php if ($sentReminders > 0): ?>
-        <div class="alert alert-info mb-0">
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+    <h2 class="mb-0"><i class="bi bi-calendar-check me-2"></i>الجداول الزمنية للتحصيل</h2>
+    <div class="d-flex align-items-center gap-2">
+        <?php if ($sentReminders > 0): ?>
+        <div class="alert alert-info mb-0 py-2 px-3">
             <i class="bi bi-info-circle me-2"></i>
             تم إرسال <?php echo $sentReminders; ?> تذكير
         </div>
-    <?php endif; ?>
+        <?php endif; ?>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addScheduleModal"
+                <?php echo $hasDebtorCustomers ? '' : 'disabled'; ?>>
+            <i class="bi bi-plus-circle me-2"></i>إضافة موعد تحصيل
+        </button>
+    </div>
 </div>
 
 <?php if ($error): ?>
@@ -201,6 +287,13 @@ if (isset($_GET['id'])) {
         <i class="bi bi-check-circle-fill me-2"></i>
         <?php echo htmlspecialchars($success); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if (!$hasDebtorCustomers): ?>
+    <div class="alert alert-warning">
+        <i class="bi bi-info-circle-fill me-2"></i>
+        لا توجد عملاء مدينون حالياً. قم بإضافة عميل أو تحديث رصيد العملاء ليظهر هنا.
     </div>
 <?php endif; ?>
 
@@ -400,14 +493,13 @@ if (isset($_GET['id'])) {
                         <th>تاريخ الاستحقاق</th>
                         <th>القسط</th>
                         <th>الحالة</th>
-                        <th>مندوب المبيعات</th>
                         <th>الإجراءات</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($schedules)): ?>
                         <tr>
-                            <td colspan="7" class="text-center text-muted">لا توجد جداول زمنية</td>
+                            <td colspan="6" class="text-center text-muted">لا توجد جداول زمنية</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($schedules as $schedule): ?>
@@ -437,7 +529,6 @@ if (isset($_GET['id'])) {
                                         ?>
                                     </span>
                                 </td>
-                                <td><?php echo htmlspecialchars($schedule['sales_rep_name'] ?? '-'); ?></td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">
                                         <a href="?page=payment_schedules&id=<?php echo $schedule['id']; ?>" 
@@ -509,6 +600,57 @@ if (isset($_GET['id'])) {
             </ul>
         </nav>
         <?php endif; ?>
+    </div>
+</div>
+
+<!-- Modal إضافة موعد تحصيل -->
+<div class="modal fade" id="addScheduleModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إضافة موعد تحصيل</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="create_schedule">
+                <div class="modal-body">
+                    <?php if ($hasDebtorCustomers): ?>
+                    <div class="mb-3">
+                        <label class="form-label">العميل <span class="text-danger">*</span></label>
+                        <select class="form-select" name="customer_id" required>
+                            <option value="">اختر العميل</option>
+                            <?php foreach ($debtorCustomers as $customer): ?>
+                                <option value="<?php echo (int) $customer['id']; ?>">
+                                    <?php echo htmlspecialchars($customer['name']); ?> - رصيد مستحق: <?php echo formatCurrency($customer['balance']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="text-muted">يتم عرض العملاء المدينين فقط من قائمة عملائي.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">مبلغ التحصيل <span class="text-danger">*</span></label>
+                        <input type="number" name="amount" class="form-control" step="0.01" min="0.01"
+                               value="<?php echo (($_POST['action'] ?? '') === 'create_schedule') ? htmlspecialchars($_POST['amount'] ?? '') : ''; ?>"
+                               required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">موعد التحصيل <span class="text-danger">*</span></label>
+                        <input type="date" name="due_date" class="form-control"
+                               value="<?php echo (($_POST['action'] ?? '') === 'create_schedule') ? htmlspecialchars($_POST['due_date'] ?? '') : date('Y-m-d'); ?>"
+                               required>
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-warning mb-0">
+                        لا يوجد عملاء مدينون لإضافة موعد تحصيل. يرجى إضافة عميل مدين أولاً.
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary" <?php echo $hasDebtorCustomers ? '' : 'disabled'; ?>>حفظ</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -586,5 +728,21 @@ function showReminderModal(scheduleId) {
     const modal = new bootstrap.Modal(document.getElementById('reminderModal'));
     modal.show();
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+    const addScheduleModal = document.getElementById('addScheduleModal');
+    if (addScheduleModal) {
+        addScheduleModal.addEventListener('hidden.bs.modal', function () {
+            const form = addScheduleModal.querySelector('form');
+            if (form) {
+                form.reset();
+                const dueDateInput = form.querySelector('input[name=\"due_date\"]');
+                if (dueDateInput) {
+                    dueDateInput.value = '<?php echo date('Y-m-d'); ?>';
+                }
+            }
+        });
+    }
+});
 </script>
 

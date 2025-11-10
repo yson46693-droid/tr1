@@ -278,18 +278,25 @@ function createAutoReminder($scheduleId, $daysBeforeDue = 3, $createdBy = null) 
 /**
  * إرسال التذكيرات
  */
-function sendPaymentReminders() {
+function sendPaymentReminders($salesRepId = null) {
     $db = db();
-    $reminders = $db->query(
-        "SELECT pr.*, ps.amount, ps.due_date, c.name as customer_name,
-                u.full_name as sales_rep_name, u.id as sales_rep_id
-         FROM payment_reminders pr
-         JOIN payment_schedules ps ON pr.payment_schedule_id = ps.id
-         LEFT JOIN customers c ON ps.customer_id = c.id
-         LEFT JOIN users u ON ps.sales_rep_id = u.id
-         WHERE pr.sent_status = 'pending' 
-         AND pr.reminder_date <= CURDATE()"
-    );
+    
+    $sql = "SELECT pr.*, ps.amount, ps.due_date, c.name as customer_name,
+                   u.full_name as sales_rep_name, u.id as sales_rep_id
+            FROM payment_reminders pr
+            JOIN payment_schedules ps ON pr.payment_schedule_id = ps.id
+            LEFT JOIN customers c ON ps.customer_id = c.id
+            LEFT JOIN users u ON ps.sales_rep_id = u.id
+            WHERE pr.sent_status = 'pending' 
+              AND pr.reminder_date <= CURDATE()";
+    $params = [];
+    
+    if (!empty($salesRepId)) {
+        $sql .= " AND ps.sales_rep_id = ?";
+        $params[] = $salesRepId;
+    }
+    
+    $reminders = $db->query($sql, $params);
     
     $sentCount = 0;
     

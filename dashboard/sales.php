@@ -246,29 +246,6 @@ $pageTitle = isset($lang['sales_dashboard']) ? $lang['sales_dashboard'] : 'لو�
                 }
                 ?>
                 
-            <?php elseif ($page === 'reports'): ?>
-                <!-- Page Header -->
-                <div class="page-header">
-                    <h2><i class="bi bi-file-earmark-text"></i><?php echo isset($lang['reports']) ? $lang['reports'] : 'التقارير'; ?></h2>
-                </div>
-                
-                <!-- Reports Page -->
-                <div class="analytics-card">
-                    <div class="analytics-card-header">
-                        <h3 class="analytics-card-title">تقارير المبيعات</h3>
-                    </div>
-                    <div class="analytics-card-content">
-                        <div class="d-flex gap-3 flex-wrap">
-                            <button class="btn btn-primary" onclick="generatePDFReport('sales', {})">
-                                <i class="bi bi-file-pdf me-2"></i>توليد تقرير PDF
-                            </button>
-                            <button class="btn btn-success" onclick="generateExcelReport('sales', {})">
-                                <i class="bi bi-file-excel me-2"></i>توليد تقرير Excel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                
             <?php elseif ($page === 'orders'): ?>
                 <!-- صفحة طلبات العملاء -->
                 <?php 

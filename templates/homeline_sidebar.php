@@ -283,13 +283,6 @@ switch ($role) {
                 'badge' => null
             ],
             [
-                'title' => isset($lang['menu_reports']) ? $lang['menu_reports'] : 'التقارير',
-                'icon' => 'bi-file-earmark-text',
-                'url' => $baseUrl . 'sales.php?page=reports',
-                'active' => ($currentPage === 'sales.php' && $currentPageParam === 'reports'),
-                'badge' => null
-            ],
-            [
                 'title' => isset($lang['my_salary']) ? $lang['my_salary'] : 'مرتبي',
                 'icon' => 'bi-wallet2',
                 'url' => $baseUrl . 'sales.php?page=my_salary',
