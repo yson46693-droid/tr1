@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/notifications.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
@@ -684,8 +685,8 @@ function tasksHtml(string $value): string
                     <p class="text-muted mt-3 mb-0">لا توجد مهام</p>
                 </div>
             <?php else: ?>
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0 align-middle">
+                <div class="table-responsive dashboard-table-wrapper">
+                    <table class="table dashboard-table align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th style="width: 60px;">#</th>

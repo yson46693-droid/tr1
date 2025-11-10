@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -229,8 +230,8 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
             <div class="text-center text-muted py-4">لا يوجد مخزون عسل</div>
         <?php else: ?>
             <!-- عرض الجدول على الشاشات الكبيرة -->
-            <div class="table-responsive d-none d-md-block">
-                <table class="table table-striped table-hover">
+            <div class="table-responsive dashboard-table-wrapper d-none d-md-block">
+                <table class="table dashboard-table align-middle">
                     <thead class="table-primary">
                         <tr>
                             <th class="text-center" style="width: 50px;">#</th>

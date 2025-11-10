@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/permissions.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -234,8 +235,8 @@ $userPermissions = $selectedUserId ? getUserPermissions($selectedUserId) : [];
                     <?php foreach ($permissionsByCategory as $category => $perms): ?>
                         <div class="mb-4">
                             <h6 class="text-primary"><?php echo htmlspecialchars(ucfirst($category)); ?></h6>
-                            <div class="table-responsive">
-                                <table class="table table-sm table-hover align-middle">
+                            <div class="table-responsive dashboard-table-wrapper">
+                                <table class="table dashboard-table dashboard-table--compact align-middle">
                                     <thead class="table-light">
                                         <tr>
                                             <th style="min-width: 150px;">الصلاحية</th>

@@ -254,7 +254,7 @@ function renderCombinedReportTable(array $rows, array $totals)
         return;
     }
 
-    echo '<div class="table-responsive">';
+    echo '<div class="table-responsive dashboard-table-wrapper">';
     echo '<table class="table dashboard-table align-middle">';
     echo '<thead class="table-light"><tr>';
     echo '<th>النوع</th><th>العنصر</th><th>الفئة / التفاصيل</th><th>الوارد</th><th>الاستهلاك</th><th>الصافي</th><th>الحركات</th><th>معلومات إضافية</th>';

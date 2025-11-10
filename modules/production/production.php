@@ -16,6 +16,7 @@ require_once __DIR__ . '/../../includes/batch_numbers.php';
 require_once __DIR__ . '/../../includes/simple_barcode.php';
 require_once __DIR__ . '/../../includes/consumption_reports.php';
 require_once __DIR__ . '/../../includes/production_helper.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
@@ -2024,8 +2025,8 @@ if (!function_exists('productionPageRenderConsumptionTable')) {
             return;
         }
 
-        echo '<div class="table-responsive">';
-        echo '<table class="table table-hover align-middle">';
+        echo '<div class="table-responsive dashboard-table-wrapper">';
+        echo '<table class="table dashboard-table align-middle">';
         echo '<thead class="table-light"><tr>';
         echo '<th>المادة</th>';
         if ($includeCategory) {

@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/vehicle_inventory.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -180,7 +181,8 @@ if (isset($_GET['id'])) {
         <div class="card-body">
             <div class="row">
                 <div class="col-md-6">
-                    <table class="table table-bordered">
+                    <div class="table-responsive dashboard-table-wrapper">
+                        <table class="table dashboard-table dashboard-table--compact align-middle table-bordered">
                         <tr>
                             <th width="40%">من المخزن:</th>
                             <td>
@@ -220,10 +222,12 @@ if (isset($_GET['id'])) {
                             <th>طلب بواسطة:</th>
                             <td><?php echo htmlspecialchars($selectedTransfer['requested_by_name'] ?? '-'); ?></td>
                         </tr>
-                    </table>
+                        </table>
+                    </div>
                 </div>
                 <div class="col-md-6">
-                    <table class="table table-bordered">
+                    <div class="table-responsive dashboard-table-wrapper">
+                        <table class="table dashboard-table dashboard-table--compact align-middle table-bordered">
                         <tr>
                             <th width="40%">الحالة:</th>
                             <td>
@@ -257,14 +261,15 @@ if (isset($_GET['id'])) {
                             <td><?php echo htmlspecialchars($selectedTransfer['rejection_reason']); ?></td>
                         </tr>
                         <?php endif; ?>
-                    </table>
+                        </table>
+                    </div>
                 </div>
             </div>
             
             <?php if (!empty($selectedTransfer['items'])): ?>
                 <h6 class="mt-3">عناصر النقل:</h6>
-                <div class="table-responsive">
-                    <table class="table table-striped">
+                <div class="table-responsive dashboard-table-wrapper">
+                    <table class="table dashboard-table align-middle">
                         <thead>
                             <tr>
                                 <th>المنتج</th>
@@ -383,8 +388,8 @@ if (isset($_GET['id'])) {
         <h5 class="mb-0">قائمة طلبات النقل (<?php echo $totalTransfers; ?>)</h5>
     </div>
     <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-striped table-hover">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>رقم الطلب</th>

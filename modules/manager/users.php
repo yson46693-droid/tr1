@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/notifications.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -455,8 +456,8 @@ $users = $db->query($sql, $params);
         </div>
         
         <!-- عرض الجدول على الشاشات الكبيرة -->
-        <div class="table-responsive d-none d-md-block">
-            <table class="table table-striped">
+        <div class="table-responsive dashboard-table-wrapper d-none d-md-block">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>اسم المستخدم</th>

@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/permissions.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/security.php';
 require_once __DIR__ . '/../../includes/request_monitor.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -499,8 +500,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                         <h5 class="mb-0"><i class="bi bi-ban me-2"></i>IP المحظورة</h5>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table dashboard-table--compact align-middle">
                                 <thead>
                                     <tr>
                                         <th>عنوان IP</th>
@@ -571,8 +572,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table dashboard-table--compact align-middle">
                                 <thead>
                                     <tr>
                                         <th class="d-none d-md-table-cell">اسم المستخدم</th>
@@ -718,8 +719,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                         <small class="text-white-50">عرض أعلى <?php echo htmlspecialchars($usageLimit); ?> مستخدم</small>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover align-middle">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table dashboard-table--compact align-middle">
                                 <thead>
                                     <tr>
                                         <th>المستخدم</th>
@@ -796,8 +797,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                         <small class="text-white-50">أعلى العناوين خلال اليوم</small>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover align-middle">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table dashboard-table--compact align-middle">
                                 <thead>
                                     <tr>
                                         <th>عنوان IP</th>
@@ -873,8 +874,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                         <h5 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i>تنبيهات الاستخدام المرتفع</h5>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover align-middle">
+                        <div class="table-responsive dashboard-table-wrapper">
+                            <table class="table dashboard-table dashboard-table--compact align-middle">
                                 <thead>
                                     <tr>
                                         <th>النوع</th>
@@ -969,8 +970,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                                 <?php endif; ?>
                                 <small class="text-muted d-block">عدد الطلبات: <?php echo number_format(intval($selectedUsageUser['total_requests'] ?? 0)); ?></small>
                             </div>
-                            <div class="table-responsive">
-                                <table class="table table-sm table-hover align-middle">
+                            <div class="table-responsive dashboard-table-wrapper">
+                                <table class="table dashboard-table dashboard-table--compact align-middle">
                                     <thead>
                                         <tr>
                                             <th>المسار</th>
@@ -1104,8 +1105,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                 </div>
             </div>
             <div class="card-body">
-                <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle">
+                <div class="table-responsive dashboard-table-wrapper">
+                    <table class="table dashboard-table dashboard-table--compact align-middle">
                         <thead class="table-light">
                             <tr>
                                 <th>المستخدم</th>
@@ -1325,8 +1326,8 @@ $activeTab = $_GET['tab'] ?? 'security';
                                     <h6 class="text-primary mb-2">
                                         <i class="bi bi-folder me-2"></i><?php echo htmlspecialchars(ucfirst($category)); ?>
                                     </h6>
-                                    <div class="table-responsive">
-                                        <table class="table table-sm table-hover align-middle">
+                                    <div class="table-responsive dashboard-table-wrapper">
+                                        <table class="table dashboard-table dashboard-table--compact align-middle">
                                             <thead class="table-light">
                                                 <tr>
                                                     <th style="min-width: 120px;">الصلاحية</th>

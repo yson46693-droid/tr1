@@ -1303,7 +1303,7 @@ if (!$error) {
 <script>
 (function () {
     const locale = <?php echo json_encode($pageDirection === 'rtl' ? 'ar-EG' : 'en-US'); ?>;
-    const currencySymbol = <?php echo json_encode(CURRENCY_SYMBOL); ?>;
+    const currencySymbolRaw = <?php echo json_encode(CURRENCY_SYMBOL); ?>;
     const inventory = <?php
         $inventoryForJs = [];
         foreach ($vehicleInventory as $item) {
@@ -1365,6 +1365,19 @@ if (!$error) {
     function roundTwo(value) {
         return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
     }
+
+    function sanitizeCurrencySymbol(value) {
+        if (typeof value !== 'string') {
+            value = value == null ? '' : String(value);
+        }
+        const cleaned = value
+            .replace(/262145/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return cleaned || 'ج.م';
+    }
+
+    const currencySymbol = sanitizeCurrencySymbol(currencySymbolRaw);
 
     function sanitizeNumber(value) {
         if (value === null || value === undefined) {
