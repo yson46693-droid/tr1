@@ -455,16 +455,261 @@ if ($page === 'sales_collections') {
                         stylesheets.forEach(function (href) {
                             doc.write('<link rel="stylesheet" href="' + href + '" media="all">');
                         });
-                        doc.write('<style>body{background:#fff;color:#000;padding:24px;font-family:\'Segoe UI\',Tahoma,sans-serif;} .print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;} .print-header h1{font-size:1.5rem;margin-bottom:0;} .print-meta{font-size:0.9rem;color:#6c757d;} @media print{.print-controls{display:none!important;}}</style>');
+                        doc.write('<style>'
+                            + 'body{background:#fff;color:#000;padding:32px;font-family:"Segoe UI",Tahoma,sans-serif;}'
+                            + '.print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;}'
+                            + '.print-header h1{font-size:1.6rem;margin-bottom:0;font-weight:700;}'
+                            + '.print-meta{font-size:0.9rem;color:#6c757d;}'
+                            + '.print-section{display:flex;flex-direction:column;gap:20px;}'
+                            + '.print-block{border:1px solid #e5e7eb;border-radius:10px;padding:16px;background:#f9fafb;}'
+                            + '.print-block-title{font-weight:700;margin-bottom:12px;font-size:1.05rem;}'
+                            + '.print-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}'
+                            + '.print-summary-item{display:flex;flex-direction:column;gap:4px;padding:12px;border-radius:8px;background:#fff;border:1px solid #e5e7eb;}'
+                            + '.print-summary-label{font-size:0.85rem;color:#6c757d;}'
+                            + '.print-summary-value{font-weight:600;font-size:1rem;}'
+                            + '.print-stats-inline{display:flex;flex-wrap:wrap;gap:16px;}'
+                            + '.print-stat-card{flex:1 1 160px;padding:14px;border-radius:10px;background:#fff;border:1px solid #e5e7eb;display:flex;flex-direction:column;gap:4px;}'
+                            + '.print-stat-label{font-size:0.85rem;color:#6c757d;}'
+                            + '.print-stat-value{font-size:1.25rem;font-weight:700;color:#0d6efd;}'
+                            + '.print-content{display:flex;flex-direction:column;gap:18px;}'
+                            + '.print-content table{width:100%;border-collapse:collapse;}'
+                            + '.print-content table thead th{background:#0d6efd;color:#fff;padding:10px;border:1px solid #e5e7eb;font-weight:600;}'
+                            + '.print-content table tbody td{padding:10px;border:1px solid #e5e7eb;font-size:0.95rem;}'
+                            + '.print-content table tbody tr:nth-child(even){background:#f8f9fa;}'
+                            + '.print-content .btn,.print-content .form-control,.print-content select,.print-content input{display:none!important;}'
+                            + '.print-placeholder{padding:16px;border-radius:8px;background:#fff;border:1px dashed #ced4da;color:#6c757d;text-align:center;}'
+                            + '@media print{.print-controls{display:none!important;}}'
+                            + '</style>');
                         doc.write('</head><body>');
                         doc.write('<div class="print-header text-center">');
                         doc.write('<h1>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</h1>');
                         doc.write('<div class="print-meta">' + escapeHtmlForPrint('تم الإنشاء في: ' + generatedAt) + '</div>');
                         doc.write('</div>');
-                        doc.write('<div class="print-content">' + section.innerHTML + '</div>');
+                        const printableHtml = buildPrintableSection(section, sanitizedTitle || 'تقرير قابل للطباعة');
+                        doc.write('<div class="print-content">' + printableHtml + '</div>');
                         doc.write('<script>window.addEventListener("load",function(){window.focus();window.print();});<' + '/script>');
                         doc.write('</body></html>');
                         doc.close();
+                    }
+
+                    function buildPrintableSection(section, reportTitle) {
+                        const clone = section.cloneNode(true);
+
+                        // إزالة عناصر لا نحتاجها في التقرير
+                        clone.querySelectorAll('.combined-actions, .print-controls, [data-print-hide="true"]').forEach(function (el) {
+                            el.remove();
+                        });
+                        clone.querySelectorAll('script').forEach(function (el) {
+                            el.remove();
+                        });
+
+                        // جمع بيانات الفلاتر من العنصر الأصلي (قبل التعديل)
+                        const filtersSummary = collectFilterSummaries(section);
+                        const filtersBlock = filtersSummary ? renderFiltersBlock(filtersSummary) : null;
+
+                        // جمع إحصائيات بسيطة من الجداول
+                        const statsSummary = collectTableStats(section);
+                        const statsBlock = statsSummary ? renderStatsBlock(statsSummary, reportTitle) : null;
+
+                        // إزالة النماذج من النسخة للطباعة
+                        clone.querySelectorAll('form').forEach(function (form) {
+                            form.remove();
+                        });
+
+                        // تكييف الجداول مع الطباعة
+                        clone.querySelectorAll('table').forEach(function (table) {
+                            table.classList.add('print-table');
+                            table.removeAttribute('style');
+                        });
+
+                        const container = document.createElement('div');
+                        container.className = 'print-section';
+
+                        if (filtersBlock) {
+                            container.appendChild(filtersBlock);
+                        }
+                        if (statsBlock) {
+                            container.appendChild(statsBlock);
+                        }
+
+                        const bodyWrapper = document.createElement('div');
+                        while (clone.firstChild) {
+                            bodyWrapper.appendChild(clone.firstChild);
+                        }
+                        container.appendChild(bodyWrapper);
+
+                        return container.innerHTML;
+                    }
+
+                    function collectFilterSummaries(section) {
+                        const forms = Array.from(section.querySelectorAll('form'));
+                        if (!forms.length) {
+                            return null;
+                        }
+
+                        const groups = [];
+
+                        forms.forEach(function (form, index) {
+                            if (form.matches('[data-print-ignore="true"]')) {
+                                return;
+                            }
+
+                            const items = [];
+                            Array.from(form.elements).forEach(function (element) {
+                                if (!shouldIncludeInPrintSummary(element)) {
+                                    return;
+                                }
+
+                                const label = findFieldLabel(form, element);
+                                const value = extractFieldValue(element);
+                                if (!label || !value) {
+                                    return;
+                                }
+
+                                items.push({
+                                    label: label,
+                                    value: value
+                                });
+                            });
+
+                            if (items.length) {
+                                groups.push({
+                                    title: form.getAttribute('data-print-title') || (index === 0 ? 'الفلاتر المطبقة' : 'إعدادات إضافية'),
+                                    items: items
+                                });
+                            }
+                        });
+
+                        return groups.length ? groups : null;
+                    }
+
+                    function shouldIncludeInPrintSummary(element) {
+                        if (!element || element.disabled) {
+                            return false;
+                        }
+                        if (element.type === 'hidden' || element.type === 'submit' || element.type === 'button' || element.type === 'reset') {
+                            return false;
+                        }
+                        if (element.closest('[data-print-ignore-field="true"]')) {
+                            return false;
+                        }
+                        return true;
+                    }
+
+                    function findFieldLabel(form, element) {
+                        const id = element.id;
+                        if (id) {
+                            const label = form.querySelector('label[for="' + CSS.escape(id) + '"]');
+                            if (label) {
+                                return label.textContent.trim();
+                            }
+                        }
+
+                        let container = element.closest('.col-12, .col-sm-6, .col-md-3, .col-md-4, .col-md-6, .col-lg-3, .col-lg-4, .mb-3');
+                        if (!container) {
+                            container = element.parentElement;
+                        }
+                        if (container) {
+                            const labelEl = container.querySelector('.form-label');
+                            if (labelEl) {
+                                return labelEl.textContent.trim();
+                            }
+                        }
+
+                        return (element.getAttribute('aria-label') || element.name || '').replace(/[_-]+/g, ' ').trim();
+                    }
+
+                    function extractFieldValue(element) {
+                        if (element.tagName === 'SELECT') {
+                            const selectedOptions = Array.from(element.selectedOptions);
+                            const text = selectedOptions.map(function (option) {
+                                return option.text.trim();
+                            }).filter(Boolean).join('، ');
+                            return text || 'غير محدد';
+                        }
+
+                        if (element.type === 'checkbox' || element.type === 'radio') {
+                            return element.checked ? 'نعم' : 'لا';
+                        }
+
+                        const value = element.value ? element.value.trim() : '';
+                        return value || 'غير محدد';
+                    }
+
+                    function renderFiltersBlock(groups) {
+                        const block = document.createElement('div');
+                        block.className = 'print-block print-filters-block';
+
+                        let html = '';
+                        groups.forEach(function (group, index) {
+                            html += '<div class="print-block-title">' + escapeHtmlForPrint(group.title || 'الفلاتر') + '</div>';
+                            html += '<div class="print-summary-grid">';
+                            group.items.forEach(function (item) {
+                                html += '<div class="print-summary-item">'
+                                    + '<span class="print-summary-label">' + escapeHtmlForPrint(item.label) + '</span>'
+                                    + '<span class="print-summary-value">' + escapeHtmlForPrint(item.value) + '</span>'
+                                    + '</div>';
+                            });
+                            html += '</div>';
+                            if (index !== groups.length - 1) {
+                                html += '<div style="height:8px;"></div>';
+                            }
+                        });
+
+                        block.innerHTML = html;
+                        return block;
+                    }
+
+                    function collectTableStats(section) {
+                        const tables = Array.from(section.querySelectorAll('table'));
+                        if (!tables.length) {
+                            return null;
+                        }
+
+                        const stats = [];
+
+                        tables.forEach(function (table) {
+                            const tbodyRows = Array.from(table.querySelectorAll('tbody tr'));
+                            if (!tbodyRows.length) {
+                                return;
+                            }
+                            let records = 0;
+                            tbodyRows.forEach(function (row) {
+                                const cells = row.querySelectorAll('td');
+                                if (cells.length <= 1) {
+                                    return;
+                                }
+                                records += 1;
+                            });
+
+                            const caption = table.querySelector('caption');
+                            const title = caption ? caption.textContent.trim() : (table.getAttribute('data-print-title') || 'ملخص الجدول');
+
+                            stats.push({
+                                title: title,
+                                records: records
+                            });
+                        });
+
+                        return stats.length ? stats : null;
+                    }
+
+                    function renderStatsBlock(stats, reportTitle) {
+                        const block = document.createElement('div');
+                        block.className = 'print-block print-stats-block';
+
+                        let html = '<div class="print-block-title">نظرة سريعة على البيانات</div>';
+                        html += '<div class="print-stats-inline">';
+                        stats.forEach(function (stat) {
+                            html += '<div class="print-stat-card">'
+                                + '<span class="print-stat-label">' + escapeHtmlForPrint(stat.title || reportTitle || 'البيانات') + '</span>'
+                                + '<span class="print-stat-value">' + escapeHtmlForPrint(String(stat.records || 0)) + '</span>'
+                                + '</div>';
+                        });
+                        html += '</div>';
+
+                        block.innerHTML = html;
+                        return block;
                     }
 
                     function escapeHtmlForPrint(value) {
