@@ -699,18 +699,25 @@ function batchCreationCreate(int $templateId, int $units): array
         }
 
         // جلب العمال الحاضرين اليوم
+        $workers = [];
         $today = date('Y-m-d');
-        $workersStmt = batchCreationTableExists($pdo, 'attendance')
-            ? $pdo->prepare("
+
+        if (batchCreationTableExists($pdo, 'attendance') && batchCreationTableExists($pdo, 'employees')) {
+            $workersStmt = $pdo->prepare("
                 SELECT e.id, e.name
                 FROM employees e
                 JOIN attendance a ON a.employee_id = e.id
                 WHERE a.attendance_date = ? AND a.status = 'present'
-            ")
-            : null;
-
-        $workers = [];
-        if ($workersStmt instanceof PDOStatement) {
+            ");
+            $workersStmt->execute([$today]);
+            $workers = $workersStmt->fetchAll();
+        } elseif (batchCreationTableExists($pdo, 'attendance_records') && batchCreationTableExists($pdo, 'users')) {
+            $workersStmt = $pdo->prepare("
+                SELECT u.id, u.full_name AS name
+                FROM attendance_records ar
+                JOIN users u ON ar.user_id = u.id
+                WHERE DATE(ar.checked_in_at) = ? AND ar.status = 'present'
+            ");
             $workersStmt->execute([$today]);
             $workers = $workersStmt->fetchAll();
         }
