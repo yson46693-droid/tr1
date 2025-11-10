@@ -190,8 +190,8 @@ $customers = $db->query("SELECT id, name FROM customers WHERE status = 'active' 
         <h5 class="mb-0">قائمة المبيعات (<?php echo $totalSales ?? 0; ?>)</h5>
     </div>
     <div class="card-body">
-        <div class="table-responsive sales-table-responsive">
-            <table class="table sales-table align-middle">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>التاريخ</th>

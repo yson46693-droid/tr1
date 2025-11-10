@@ -496,7 +496,7 @@ if (isset($_GET['id'])) {
         <div class="card-body">
             <div class="row">
                 <div class="col-md-6">
-                    <table class="table sales-table-details">
+                    <table class="table dashboard-table-details">
                         <tr>
                             <th width="40%">العميل:</th>
                             <td><?php echo htmlspecialchars($selectedOrder['customer_name'] ?? '-'); ?></td>
@@ -536,7 +536,7 @@ if (isset($_GET['id'])) {
                     </table>
                 </div>
                 <div class="col-md-6">
-                    <table class="table sales-table-details">
+                    <table class="table dashboard-table-details">
                         <tr>
                             <th width="40%">الحالة:</th>
                             <td>
@@ -577,8 +577,8 @@ if (isset($_GET['id'])) {
             
             <?php if (!empty($selectedOrder['items'])): ?>
                 <h6 class="mt-3">عناصر الطلب:</h6>
-                <div class="table-responsive sales-table-responsive">
-                    <table class="table sales-table sales-table--compact align-middle">
+                <div class="table-responsive dashboard-table-wrapper">
+                    <table class="table dashboard-table dashboard-table--compact align-middle">
                         <thead>
                             <tr>
                                 <th>المنتج</th>
@@ -713,8 +713,8 @@ if (isset($_GET['id'])) {
         <h5 class="mb-0">قائمة الطلبات (<?php echo $totalOrders; ?>)</h5>
     </div>
     <div class="card-body">
-        <div class="table-responsive sales-table-responsive">
-            <table class="table sales-table align-middle">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>رقم الطلب</th>

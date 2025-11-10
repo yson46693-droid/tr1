@@ -239,7 +239,7 @@ foreach ($vehicleInventory as $item) {
         <div class="card-body">
             <div class="row mb-3">
                 <div class="col-md-6">
-                    <table class="table sales-table-details">
+                    <table class="table dashboard-table-details">
                         <tr>
                             <th width="40%">رقم السيارة:</th>
                             <td><?php echo htmlspecialchars($selectedVehicle['vehicle_number']); ?></td>
@@ -325,8 +325,8 @@ foreach ($vehicleInventory as $item) {
             </div>
             
             <!-- قائمة مخزون السيارة -->
-            <div class="table-responsive sales-table-responsive">
-                <table class="table sales-table align-middle">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>المنتج</th>

@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/notifications.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireAnyRole(['accountant', 'manager']);
 
@@ -413,8 +414,8 @@ $statusLabels = [
         <?php endif; ?>
     </div>
     <div class="card-body">
-        <div class="table-responsive">
-            <table class="table table-striped table-hover align-middle">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>#</th>

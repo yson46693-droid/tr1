@@ -1769,6 +1769,19 @@ if (!$error) {
     refreshPaymentOptionStates();
     renderCart();
     sanitizeSummaryDisplays();
+    window.posDebugInfo = {
+        sanitizeNumber,
+        sanitizeSummaryDisplays,
+        formatCurrency,
+        elements,
+        cart,
+        inventory
+    };
+    console.info('[POS] Initialized', {
+        netTotal: elements.netTotal?.textContent,
+        dueAmount: elements.dueAmount?.textContent,
+        inventoryCount: inventory.length
+    });
 })();
 </script>
 <?php endif; ?>

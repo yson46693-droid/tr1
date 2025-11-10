@@ -738,8 +738,8 @@ document.addEventListener('DOMContentLoaded', function () {
         </h5>
     </div>
     <div class="card-body">
-        <div class="table-responsive sales-table-responsive">
-            <table class="table sales-table align-middle">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>الاسم</th>
