@@ -355,13 +355,14 @@
 
 .production-tab-toggle {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     gap: 0.75rem;
+    align-items: center;
 }
 
 .production-tab-toggle .production-tab-btn {
-    flex: 1 1 200px;
-    min-width: 160px;
+    flex: 0 0 auto;
+    min-width: 140px;
     padding: 0.65rem 1.2rem !important;
     border-radius: 12px !important;
     border: 1px solid rgba(29, 78, 216, 0.35) !important;
@@ -497,6 +498,9 @@
     }
     .production-page-header {
         justify-content: center;
+    }
+    .production-tab-toggle {
+        flex-wrap: wrap;
     }
     .production-report-card .card-body {
         padding: 1.25rem;

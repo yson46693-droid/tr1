@@ -1911,7 +1911,12 @@ if (!empty($honeyTemplatesCheck)) {
     );
     foreach ($honeyTemplates as &$template) {
         $template['material_details'] = [
-            ['type' => 'عسل', 'quantity' => $template['honey_quantity'], 'unit' => 'جرام']
+            [
+                'type' => 'عسل',
+                'quantity' => $template['honey_quantity'],
+                'unit' => 'جرام',
+                'material_type' => 'honey'
+            ]
         ];
     }
     $templates = array_merge($templates, $honeyTemplates);
@@ -1928,7 +1933,12 @@ if (!empty($oliveOilTemplatesCheck)) {
     );
     foreach ($oliveOilTemplates as &$template) {
         $template['material_details'] = [
-            ['type' => 'زيت زيتون', 'quantity' => $template['olive_oil_quantity'], 'unit' => 'لتر']
+            [
+                'type' => 'زيت زيتون',
+                'quantity' => $template['olive_oil_quantity'],
+                'unit' => 'لتر',
+                'material_type' => 'olive_oil'
+            ]
         ];
         $template['creator_name'] = '';
     }
@@ -1946,7 +1956,12 @@ if (!empty($beeswaxTemplatesCheck)) {
     );
     foreach ($beeswaxTemplates as &$template) {
         $template['material_details'] = [
-            ['type' => 'شمع عسل', 'quantity' => $template['beeswax_weight'], 'unit' => 'كجم']
+            [
+                'type' => 'شمع عسل',
+                'quantity' => $template['beeswax_weight'],
+                'unit' => 'كجم',
+                'material_type' => 'beeswax'
+            ]
         ];
         $template['creator_name'] = '';
     }
@@ -1976,7 +1991,12 @@ if (!empty($derivativesTemplatesCheck)) {
         }
         
         $template['material_details'] = [
-            ['type' => $derivativeTypeArabic, 'quantity' => $template['derivative_weight'], 'unit' => 'كجم']
+            [
+                'type' => $derivativeTypeArabic,
+                'quantity' => $template['derivative_weight'],
+                'unit' => 'كجم',
+                'material_type' => 'derivatives'
+            ]
         ];
         $template['creator_name'] = '';
     }
