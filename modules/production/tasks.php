@@ -1057,6 +1057,31 @@ if (!Array.isArray(tasksData)) {
     }
 }
 
+function tasksSanitizeText(value) {
+    if (value === null || value === undefined) {
+        return '';
+    }
+
+    const unsafeControlChars = /[\u0000-\u001F\u007F]/g;
+    const htmlUnsafeChars = /[&<>"'`]/g;
+    const htmlEntities = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+        '`': '&#96;'
+    };
+
+    const stringValue = String(value).replace(unsafeControlChars, '');
+    return stringValue.replace(htmlUnsafeChars, (char) => htmlEntities[char] || char);
+}
+
+function tasksSanitizeMultilineText(value) {
+    const sanitized = tasksSanitizeText(value);
+    return sanitized.replace(/(\r\n|\r|\n)/g, '<br>');
+}
+
 function toggleProductionFields() {
     const taskTypeInput = document.getElementById('task_type');
     const productionFields = document.getElementById('production_fields');
@@ -1109,48 +1134,68 @@ function viewTask(taskId) {
     
     const priorityText = {'urgent': 'عاجلة', 'high': 'عالية', 'normal': 'عادية', 'low': 'منخفضة'};
     const statusText = {'pending': 'معلقة', 'received': 'مستلمة', 'in_progress': 'قيد التنفيذ', 'completed': 'مكتملة', 'cancelled': 'ملغاة'};
+    const title = tasksSanitizeText(task.title || '');
+    const description = task.description ? tasksSanitizeMultilineText(task.description) : tasksSanitizeMultilineText('لا يوجد وصف');
+    const productName = task.product_name ? tasksSanitizeText(task.product_name) : '';
+    const quantity = task.quantity ? tasksSanitizeText(task.quantity) : '';
+    const assignedToName = tasksSanitizeText(task.assigned_to_name || 'غير محدد');
+    const createdByName = tasksSanitizeText(task.created_by_name || '');
+    const dueDate = task.due_date ? tasksSanitizeText(task.due_date) : 'غير محدد';
+    const createdAt = task.created_at ? tasksSanitizeText(task.created_at) : '';
+    const notes = task.notes ? tasksSanitizeMultilineText(task.notes) : '';
+    const priorityBadgeClass = task.priority === 'urgent' ? 'danger'
+        : task.priority === 'high' ? 'warning'
+        : task.priority === 'normal' ? 'info'
+        : 'secondary';
+    const statusBadgeClass = task.status === 'pending' ? 'warning'
+        : task.status === 'received' ? 'info'
+        : task.status === 'in_progress' ? 'primary'
+        : task.status === 'completed' ? 'success'
+        : 'secondary';
+    const priorityLabel = tasksSanitizeText(priorityText[task.priority] || task.priority || '');
+    const statusLabel = tasksSanitizeText(statusText[task.status] || task.status || '');
     
     const content = `
         <div class="mb-3">
-            <h5>${task.title}</h5>
+            <h5>${title}</h5>
         </div>
         <div class="mb-3">
             <strong>الوصف:</strong>
-            <p>${task.description || 'لا يوجد وصف'}</p>
+            <p>${description}</p>
         </div>
-        ${task.product_name ? `<div class="mb-3"><strong>المنتج:</strong> ${task.product_name}</div>` : ''}
-        ${task.quantity ? `<div class="mb-3"><strong>الكمية:</strong> ${task.quantity} قطعة</div>` : ''}
+        ${productName ? `<div class="mb-3"><strong>المنتج:</strong> ${productName}</div>` : ''}
+        ${quantity ? `<div class="mb-3"><strong>الكمية:</strong> ${quantity} قطعة</div>` : ''}
         <div class="row mb-3">
             <div class="col-md-6">
-                <strong>المخصص إلى:</strong> ${task.assigned_to_name || 'غير محدد'}
+                <strong>المخصص إلى:</strong> ${assignedToName}
             </div>
             <div class="col-md-6">
-                <strong>أنشئت بواسطة:</strong> ${task.created_by_name || ''}
+                <strong>أنشئت بواسطة:</strong> ${createdByName}
             </div>
         </div>
         <div class="row mb-3">
             <div class="col-md-6">
                 <strong>الأولوية:</strong> 
-                <span class="badge bg-${task.priority === 'urgent' ? 'danger' : task.priority === 'high' ? 'warning' : task.priority === 'normal' ? 'info' : 'secondary'}">
-                    ${priorityText[task.priority] || task.priority}
+                <span class="badge bg-${priorityBadgeClass}">
+                    ${priorityLabel}
                 </span>
             </div>
             <div class="col-md-6">
                 <strong>الحالة:</strong> 
-                <span class="badge bg-${task.status === 'pending' ? 'warning' : task.status === 'received' ? 'info' : task.status === 'in_progress' ? 'primary' : task.status === 'completed' ? 'success' : 'secondary'}">
-                    ${statusText[task.status] || task.status}
+                <span class="badge bg-${statusBadgeClass}">
+                    ${statusLabel}
                 </span>
             </div>
         </div>
         <div class="row mb-3">
             <div class="col-md-6">
-                <strong>تاريخ الاستحقاق:</strong> ${task.due_date || 'غير محدد'}
+                <strong>تاريخ الاستحقاق:</strong> ${dueDate}
             </div>
             <div class="col-md-6">
-                <strong>تاريخ الإنشاء:</strong> ${task.created_at || ''}
+                <strong>تاريخ الإنشاء:</strong> ${createdAt}
             </div>
         </div>
-        ${task.notes ? `<div class="mb-3"><strong>ملاحظات:</strong><p>${task.notes}</p></div>` : ''}
+        ${notes ? `<div class="mb-3"><strong>ملاحظات:</strong><p>${notes}</p></div>` : ''}
     `;
     
     document.getElementById('viewTaskContent').innerHTML = content;
