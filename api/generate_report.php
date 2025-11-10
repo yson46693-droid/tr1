@@ -266,9 +266,11 @@ try {
                 "SELECT s.*, c.name as customer_name, u.full_name as sales_rep_name
                  FROM sales s
                  LEFT JOIN customers c ON s.customer_id = c.id
-                 LEFT JOIN users u ON s.sales_rep_id = u.id
+                 LEFT JOIN users u ON s.salesperson_id = u.id
                  WHERE 1=1" . 
                  (!empty($filters['customer_id']) ? " AND s.customer_id = " . intval($filters['customer_id']) : '') .
+                 (!empty($filters['salesperson_id']) ? " AND s.salesperson_id = " . intval($filters['salesperson_id']) : '') .
+                 (!empty($filters['sales_rep_id']) ? " AND s.salesperson_id = " . intval($filters['sales_rep_id']) : '') .
                  (!empty($filters['date_from']) ? " AND DATE(s.date) >= '" . $db->escape($filters['date_from']) . "'" : '') .
                  (!empty($filters['date_to']) ? " AND DATE(s.date) <= '" . $db->escape($filters['date_to']) . "'" : '') .
                  " ORDER BY s.date DESC LIMIT 1000"

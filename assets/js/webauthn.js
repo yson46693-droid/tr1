@@ -44,7 +44,19 @@ class SimpleWebAuthn {
         }
 
         const normalized = this.normalizeBase64(base64);
-        const binaryString = window.atob(normalized);
+        let binaryString;
+
+        try {
+            binaryString = window.atob(normalized);
+        } catch (error) {
+            console.error('WebAuthn: Invalid Base64 input', {
+                original: base64,
+                normalized,
+                length: normalized.length,
+                error: error.message
+            });
+            throw new Error('فشل في قراءة بيانات الترميز (Base64).');
+        }
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
             bytes[i] = binaryString.charCodeAt(i);
