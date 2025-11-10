@@ -17,7 +17,6 @@ require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/invoices.php';
 require_once __DIR__ . '/../../includes/reports.php';
 require_once __DIR__ . '/../../includes/simple_telegram.php';
-require_once __DIR__ . '/../../includes/auto_fix_262145.php';
 
 if (!function_exists('renderSalesInvoiceHtml')) {
     function renderSalesInvoiceHtml(array $invoice, array $meta = []): string
@@ -193,11 +192,20 @@ $inventoryStats = [
 if (!$error && $vehicle) {
     $vehicleInventory = getVehicleInventory($vehicle['id']);
 
-    foreach ($vehicleInventory as $item) {
+    foreach ($vehicleInventory as &$item) {
+        $item['quantity'] = cleanFinancialValue($item['quantity'] ?? 0);
+        $item['unit_price'] = cleanFinancialValue($item['unit_price'] ?? 0);
+        $computedTotal = cleanFinancialValue(($item['quantity'] ?? 0) * ($item['unit_price'] ?? 0));
+        $item['total_value'] = cleanFinancialValue($item['total_value'] ?? $computedTotal);
+        if (abs($item['total_value'] - $computedTotal) > 0.01) {
+            $item['total_value'] = $computedTotal;
+        }
+
         $inventoryStats['total_products']++;
         $inventoryStats['total_quantity'] += (float) ($item['quantity'] ?? 0);
         $inventoryStats['total_value'] += (float) ($item['total_value'] ?? 0);
     }
+    unset($item);
 }
 
 // معالجة إنشاء عملية بيع جديدة
@@ -505,11 +513,20 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     'total_quantity' => 0,
                     'total_value' => 0,
                 ];
-                foreach ($vehicleInventory as $item) {
+                foreach ($vehicleInventory as &$item) {
+                    $item['quantity'] = cleanFinancialValue($item['quantity'] ?? 0);
+                    $item['unit_price'] = cleanFinancialValue($item['unit_price'] ?? 0);
+                    $computedTotal = cleanFinancialValue(($item['quantity'] ?? 0) * ($item['unit_price'] ?? 0));
+                    $item['total_value'] = cleanFinancialValue($item['total_value'] ?? $computedTotal);
+                    if (abs($item['total_value'] - $computedTotal) > 0.01) {
+                        $item['total_value'] = $computedTotal;
+                    }
+
                     $inventoryStats['total_products']++;
                     $inventoryStats['total_quantity'] += (float) ($item['quantity'] ?? 0);
                     $inventoryStats['total_value'] += (float) ($item['total_value'] ?? 0);
                 }
+                unset($item);
 
                 // تحديث الخريطة بعد البيع
                 $inventoryByProduct = [];
@@ -1046,15 +1063,15 @@ if (!$error) {
                                 </div>
                                 <div class="col-sm-6">
                                     <label class="form-label">اختيار العميل</label>
-                                    <div class="d-flex gap-3">
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="radio" name="customer_mode" id="posCustomerModeExisting" value="existing" checked>
-                                            <label class="form-check-label" for="posCustomerModeExisting">عميل حالي</label>
-                                        </div>
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="radio" name="customer_mode" id="posCustomerModeNew" value="new">
-                                            <label class="form-check-label" for="posCustomerModeNew">عميل جديد</label>
-                                        </div>
+                                    <div class="btn-group w-100 pos-customer-mode-toggle" role="group" aria-label="Customer mode options">
+                                        <input class="btn-check" type="radio" name="customer_mode" id="posCustomerModeExisting" value="existing" autocomplete="off" checked>
+                                        <label class="btn btn-outline-primary flex-fill" for="posCustomerModeExisting">
+                                            <i class="bi bi-person-check me-1"></i>عميل حالي
+                                        </label>
+                                        <input class="btn-check" type="radio" name="customer_mode" id="posCustomerModeNew" value="new" autocomplete="off">
+                                        <label class="btn btn-outline-secondary flex-fill" for="posCustomerModeNew">
+                                            <i class="bi bi-person-plus me-1"></i>عميل جديد
+                                        </label>
                                     </div>
                                 </div>
                             </div>
@@ -1087,10 +1104,11 @@ if (!$error) {
                             </div>
 
                             <div class="mb-3">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
                                     <h5 class="mb-0">سلة البيع</h5>
-                                    <button type="button" class="btn btn-link text-danger p-0" id="posClearCartBtn">
-                                        <i class="bi bi-trash me-1"></i>تفريغ السلة
+                                    <button type="button" class="btn btn-outline-danger btn-sm d-flex align-items-center gap-2" id="posClearCartBtn">
+                                        <i class="bi bi-trash"></i>
+                                        <span>تفريغ السلة</span>
                                     </button>
                                 </div>
                                 <div class="pos-cart-empty" id="posCartEmpty">
@@ -1244,6 +1262,12 @@ if (!$error) {
         echo json_encode($inventoryForJs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     ?>;
 
+    inventory.forEach((item) => {
+        item.quantity = sanitizeNumber(item.quantity);
+        item.unit_price = sanitizeNumber(item.unit_price);
+        item.total_value = sanitizeNumber(item.total_value);
+    });
+
     const inventoryMap = new Map(inventory.map((item) => [item.product_id, item]));
     const cart = [];
 
@@ -1280,11 +1304,31 @@ if (!$error) {
     };
 
     function roundTwo(value) {
-        return Math.round((value + Number.EPSILON) * 100) / 100;
+        return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+    }
+
+    function sanitizeNumber(value) {
+        if (value === null || value === undefined) {
+            return 0;
+        }
+        if (typeof value === 'string') {
+            const stripped = value
+                .replace(/262145/gi, '')
+                .replace(/[^\d.\-]/g, '');
+            value = parseFloat(stripped);
+        }
+        if (!Number.isFinite(value)) {
+            return 0;
+        }
+        if (Math.abs(value - 262145) < 0.01 || value > 10000000 || value < 0) {
+            return 0;
+        }
+        return roundTwo(value);
     }
 
     function formatCurrency(value) {
-        return (value || 0).toLocaleString(locale, {
+        const sanitized = sanitizeNumber(value);
+        return sanitized.toLocaleString(locale, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
         }) + ' ' + currencySymbol;
@@ -1311,8 +1355,8 @@ if (!$error) {
     function syncCartData() {
         const payload = cart.map((item) => ({
             product_id: item.product_id,
-            quantity: roundTwo(item.quantity),
-            unit_price: roundTwo(item.unit_price),
+            quantity: sanitizeNumber(item.quantity),
+            unit_price: sanitizeNumber(item.unit_price),
         }));
         elements.cartData.value = JSON.stringify(payload);
     }
@@ -1329,9 +1373,13 @@ if (!$error) {
     }
 
     function updateSummary() {
-        const subtotal = cart.reduce((total, item) => total + (item.quantity * item.unit_price), 0);
-        let prepaid = parseFloat(elements.prepaidInput.value) || 0;
-        let sanitizedSubtotal = roundTwo(subtotal);
+        const subtotal = cart.reduce((total, item) => {
+            const qty = sanitizeNumber(item.quantity);
+            const price = sanitizeNumber(item.unit_price);
+            return total + (qty * price);
+        }, 0);
+        let prepaid = sanitizeNumber(elements.prepaidInput.value);
+        let sanitizedSubtotal = sanitizeNumber(subtotal);
 
         if (prepaid < 0) {
             prepaid = 0;
@@ -1341,7 +1389,7 @@ if (!$error) {
         }
         elements.prepaidInput.value = prepaid.toFixed(2);
 
-        const netTotal = roundTwo(sanitizedSubtotal - prepaid);
+        const netTotal = sanitizeNumber(sanitizedSubtotal - prepaid);
         let paidAmount = 0;
         const paymentType = Array.from(elements.paymentRadios).find((radio) => radio.checked)?.value || 'full';
 
@@ -1351,7 +1399,7 @@ if (!$error) {
             elements.partialInput.value = '0.00';
         } else if (paymentType === 'partial') {
             elements.partialWrapper.classList.remove('d-none');
-            let partialValue = parseFloat(elements.partialInput.value) || 0;
+            let partialValue = sanitizeNumber(elements.partialInput.value);
             if (partialValue < 0) {
                 partialValue = 0;
             }
@@ -1366,7 +1414,7 @@ if (!$error) {
             paidAmount = 0;
         }
 
-        const dueAmount = roundTwo(Math.max(0, netTotal - paidAmount));
+        const dueAmount = sanitizeNumber(Math.max(0, netTotal - paidAmount));
 
         if (elements.netTotal) {
             elements.netTotal.textContent = formatCurrency(netTotal);
@@ -1398,23 +1446,26 @@ if (!$error) {
         elements.cartEmpty.classList.add('d-none');
 
         const rows = cart.map((item) => {
+            const sanitizedQty = sanitizeNumber(item.quantity);
+            const sanitizedPrice = sanitizeNumber(item.unit_price);
+            const sanitizedAvailable = sanitizeNumber(item.available);
             return `
                 <tr data-cart-row data-product-id="${item.product_id}">
                     <td>
                         <div class="fw-semibold">${escapeHtml(item.name)}</div>
-                        <div class="text-muted small">التصنيف: ${escapeHtml(item.category || 'غير مصنف')} • متاح: ${item.available.toFixed(2)}</div>
+                        <div class="text-muted small">التصنيف: ${escapeHtml(item.category || 'غير مصنف')} • متاح: ${sanitizedAvailable.toFixed(2)}</div>
                     </td>
                     <td>
                         <div class="pos-qty-control">
                             <button type="button" class="btn btn-light border" data-action="decrease" data-product-id="${item.product_id}"><i class="bi bi-dash"></i></button>
-                            <input type="number" step="0.01" min="0" class="form-control" data-cart-qty data-product-id="${item.product_id}" value="${item.quantity.toFixed(2)}">
+                            <input type="number" step="0.01" min="0" class="form-control" data-cart-qty data-product-id="${item.product_id}" value="${sanitizedQty.toFixed(2)}">
                             <button type="button" class="btn btn-light border" data-action="increase" data-product-id="${item.product_id}"><i class="bi bi-plus"></i></button>
                         </div>
                     </td>
                     <td>
-                        <input type="number" step="0.01" min="0" class="form-control" data-cart-price data-product-id="${item.product_id}" value="${item.unit_price.toFixed(2)}">
+                        <input type="number" step="0.01" min="0" class="form-control" data-cart-price data-product-id="${item.product_id}" value="${sanitizedPrice.toFixed(2)}">
                     </td>
-                    <td class="fw-semibold">${formatCurrency(item.quantity * item.unit_price)}</td>
+                    <td class="fw-semibold">${formatCurrency(sanitizedQty * sanitizedPrice)}</td>
                     <td class="text-end">
                         <button type="button" class="btn btn-link text-danger" data-action="remove" data-product-id="${item.product_id}"><i class="bi bi-x-circle"></i></button>
                     </td>
@@ -1430,12 +1481,16 @@ if (!$error) {
         if (!product) {
             return;
         }
+        product.quantity = sanitizeNumber(product.quantity);
+        product.unit_price = sanitizeNumber(product.unit_price);
         const existing = cart.find((item) => item.product_id === productId);
         if (existing) {
-            if (existing.quantity + 1 > product.quantity) {
-                existing.quantity = product.quantity;
+            const maxQty = sanitizeNumber(product.quantity);
+            const newQty = sanitizeNumber(existing.quantity + 1);
+            if (newQty > maxQty) {
+                existing.quantity = maxQty;
             } else {
-                existing.quantity = roundTwo(existing.quantity + 1);
+                existing.quantity = newQty;
             }
         } else {
             if (product.quantity <= 0) {
@@ -1445,9 +1500,9 @@ if (!$error) {
                 product_id: product.product_id,
                 name: product.name,
                 category: product.category,
-                quantity: Math.min(1, product.quantity),
-                available: product.quantity,
-                unit_price: product.unit_price > 0 ? product.unit_price : 0,
+                quantity: Math.min(1, sanitizeNumber(product.quantity)),
+                available: sanitizeNumber(product.quantity),
+                unit_price: sanitizeNumber(product.unit_price),
             });
         }
         renderSelectedProduct(product);
@@ -1468,13 +1523,14 @@ if (!$error) {
         if (!item || !product) {
             return;
         }
-        let newQuantity = roundTwo(item.quantity + delta);
+        let newQuantity = sanitizeNumber(item.quantity + delta);
         if (newQuantity <= 0) {
             removeFromCart(productId);
             return;
         }
-        if (newQuantity > product.quantity) {
-            newQuantity = product.quantity;
+        const maxQty = sanitizeNumber(product.quantity);
+        if (newQuantity > maxQty) {
+            newQuantity = maxQty;
         }
         item.quantity = newQuantity;
         renderCart();
@@ -1486,15 +1542,16 @@ if (!$error) {
         if (!item || !product) {
             return;
         }
-        let qty = parseFloat(value) || 0;
+        let qty = sanitizeNumber(value);
         if (qty <= 0) {
             removeFromCart(productId);
             return;
         }
-        if (qty > product.quantity) {
-            qty = product.quantity;
+        const maxQty = sanitizeNumber(product.quantity);
+        if (qty > maxQty) {
+            qty = maxQty;
         }
-        item.quantity = roundTwo(qty);
+        item.quantity = qty;
         renderCart();
     }
 
@@ -1503,11 +1560,11 @@ if (!$error) {
         if (!item) {
             return;
         }
-        let price = parseFloat(value) || 0;
+        let price = sanitizeNumber(value);
         if (price < 0) {
             price = 0;
         }
-        item.unit_price = roundTwo(price);
+        item.unit_price = price;
         renderCart();
     }
 
