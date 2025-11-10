@@ -468,16 +468,18 @@ if (!function_exists('enforceTasksRetentionLimit')) {
 ?>
 
 <style>
+    html #pageLoader,
     body #pageLoader,
-    html #pageLoader {
+    #pageLoader {
         display: none !important;
         visibility: hidden !important;
         opacity: 0 !important;
+        pointer-events: none !important;
     }
 </style>
 <script>
 (function () {
-    function hidePageLoader() {
+    function removePageLoader() {
         const loader = document.getElementById('pageLoader');
         if (!loader) {
             return;
@@ -487,12 +489,14 @@ if (!function_exists('enforceTasksRetentionLimit')) {
         loader.style.display = 'none';
         loader.style.visibility = 'hidden';
         loader.style.opacity = '0';
+        loader.style.pointerEvents = 'none';
     }
 
-    hidePageLoader();
-    document.addEventListener('readystatechange', hidePageLoader);
-    window.addEventListener('load', hidePageLoader);
-    window.addEventListener('pageshow', hidePageLoader);
+    removePageLoader();
+    document.addEventListener('readystatechange', removePageLoader);
+    document.addEventListener('DOMContentLoaded', removePageLoader);
+    window.addEventListener('load', removePageLoader);
+    window.addEventListener('pageshow', removePageLoader);
 })();
 </script>
 
