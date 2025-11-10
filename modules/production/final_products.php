@@ -275,8 +275,6 @@ $finalProducts = $db->query($sql, $params);
 $totalAvailableSum = 0.0;
 $totalProducedSum = 0.0;
 $totalProductionCountSum = 0;
-$totalEstimatedValue = 0.0;
-
 if (is_array($finalProducts)) {
     foreach ($finalProducts as $product) {
         $availableQuantity = (float)($product['available_quantity'] ?? 0);
@@ -287,10 +285,6 @@ if (is_array($finalProducts)) {
         $totalAvailableSum += $availableQuantity;
         $totalProducedSum += $producedQuantity;
         $totalProductionCountSum += $productOperations;
-
-        if ($productUnitPrice > 0) {
-            $totalEstimatedValue += $availableQuantity * $productUnitPrice;
-        }
     }
 }
 
@@ -398,12 +392,8 @@ $lang = isset($translations) ? $translations : [];
     </div>
 <?php endif; ?>
 
-<?php
-$overallAverage = $totalProductionCountSum > 0 ? $totalProducedSum / $totalProductionCountSum : 0;
-?>
-
 <div class="row g-3 mb-4">
-    <div class="col-md-3 col-sm-6">
+    <div class="col-lg-6 col-md-6 col-sm-6">
         <div class="card shadow-sm h-100">
             <div class="card-body d-flex align-items-center">
                 <div class="stat-card-icon green">
@@ -425,35 +415,7 @@ $overallAverage = $totalProductionCountSum > 0 ? $totalProducedSum / $totalProdu
                 <div class="ms-3">
                     <div class="text-muted small">إجمالي الإنتاج</div>
                     <div class="h5 mb-0"><?php echo number_format($totalProducedSum, 2); ?></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm h-100">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-card-icon orange">
-                    <i class="bi bi-speedometer2"></i>
-                </div>
-                <div class="ms-3">
-                    <div class="text-muted small">متوسط إنتاج العملية</div>
-                    <div class="h5 mb-0"><?php echo number_format($overallAverage, 2); ?></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm h-100">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-card-icon purple">
-                    <i class="bi bi-wallet2"></i>
-                </div>
-                <div class="ms-3">
-                    <div class="text-muted small">القيمة التقديرية</div>
-                    <div class="h5 mb-1">
-                        <?php echo $totalEstimatedValue > 0 ? formatCurrency($totalEstimatedValue) : 'غير متاح'; ?>
-                    </div>
-                    <div class="text-muted small"><i class="bi bi-flag me-1"></i>عمليات الإنتاج: <?php echo number_format($totalProductionCountSum); ?></div>
+                    <div class="text-muted small mt-1"><i class="bi bi-flag me-1"></i>عمليات الإنتاج: <?php echo number_format($totalProductionCountSum); ?></div>
                 </div>
             </div>
         </div>

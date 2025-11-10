@@ -2095,8 +2095,9 @@ $lang = isset($translations) ? $translations : [];
     </div>
 <?php endif; ?>
 
-<div class="mb-4">
-    <div class="production-tab-toggle" role="tablist" aria-label="التنقل بين أقسام صفحة الإنتاج">
+<div class="production-page">
+    <header class="production-page-header">
+        <div class="production-tab-toggle" role="tablist" aria-label="التنقل بين أقسام صفحة الإنتاج">
         <button type="button"
                 class="btn btn-outline-primary production-tab-btn active"
                 data-production-tab="records"
@@ -2113,10 +2114,10 @@ $lang = isset($translations) ? $translations : [];
             <i class="bi bi-graph-up-arrow me-1"></i>
             تقارير الإنتاج
         </button>
-    </div>
-</div>
+        </div>
+    </header>
 
-<div id="productionRecordsSection">
+<section id="productionRecordsSection" class="production-section active">
 
 <!-- قسم قوالب المنتجات -->
 <div class="card shadow-sm mb-4">
@@ -2345,8 +2346,7 @@ $lang = isset($translations) ? $translations : [];
 </div>
 
 </div>
-
-</div>
+</section>
 
 <div id="productionReportsSection" class="d-none">
     <div class="card shadow-sm mb-4">
