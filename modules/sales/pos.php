@@ -977,6 +977,13 @@ if (!$error) {
                 color: #1f2937;
                 font-size: 0.95rem;
             }
+            .pos-cart-table td[data-label="إجمالي"],
+            .pos-cart-table td[data-label="الإجمالي"] {
+                font-size: 1.05rem;
+            }
+            .pos-cart-table td[data-label="إجراءات"] {
+                align-items: flex-end;
+            }
             .pos-cart-table td .form-control {
                 width: 100%;
             }
