@@ -217,7 +217,7 @@ class WebAuthn {
             $credentialIdLength = unpack('n', substr($authData, $offset, 2))[1];
             $offset += 2;
             
-            if ($credentialIdLength <= 0 || $credentialIdLength > 200) {
+            if ($credentialIdLength <= 0 || $credentialIdLength > 1024) {
                 error_log("WebAuthn: Invalid credential ID length: " . $credentialIdLength);
                 return false;
             }
@@ -619,10 +619,10 @@ class WebAuthn {
                 // هذا يعطينا 53 bytes على الأقل قبل credential ID
                 
                 // محاولة قراءة credential ID length
-                if (strlen($testData) >= 55) {
+            if (strlen($testData) >= 55) {
                     $credIdLen = unpack('n', substr($testData, 53, 2))[1];
                     
-                    if ($credIdLen > 0 && $credIdLen < 200 && (55 + $credIdLen) <= strlen($testData)) {
+                    if ($credIdLen > 0 && $credIdLen < 1024 && (55 + $credIdLen) <= strlen($testData)) {
                         // يبدو صحيحاً، نعيد البيانات من هذا الموضع
                         return substr($attestationObject, $i);
                     }
