@@ -467,6 +467,14 @@ if (!function_exists('enforceTasksRetentionLimit')) {
 }
 ?>
 
+<style>
+#pageLoader {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+</style>
+
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
@@ -709,25 +717,6 @@ if (!function_exists('enforceTasksRetentionLimit')) {
 </div>
 
 <script>
-(function () {
-    function hidePageLoader() {
-        const pageLoader = document.getElementById('pageLoader');
-        if (!pageLoader) {
-            return;
-        }
-
-        pageLoader.classList.add('hidden');
-        pageLoader.style.opacity = '0';
-        pageLoader.style.visibility = 'hidden';
-        pageLoader.style.display = 'none';
-    }
-
-    hidePageLoader();
-    document.addEventListener('readystatechange', hidePageLoader);
-    window.addEventListener('load', hidePageLoader);
-    window.addEventListener('pageshow', hidePageLoader);
-})();
-
 document.addEventListener('DOMContentLoaded', function () {
     const taskTypeSelect = document.getElementById('taskTypeSelect');
     const titleInput = document.querySelector('input[name="title"]');
