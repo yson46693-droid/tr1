@@ -12,6 +12,7 @@ class AttendanceNotificationManager {
         this.workTime = null;
         this.userId = null;
         this.userRole = null;
+        this.storageAvailable = this.checkStorageAvailability();
     }
 
     /**
@@ -56,7 +57,62 @@ class AttendanceNotificationManager {
         }
 
         this.userRole = userRole;
+        const userIdAttr = document.body.getAttribute('data-user-id');
+        if (userIdAttr) {
+            const parsed = parseInt(userIdAttr, 10);
+            if (!Number.isNaN(parsed) && parsed > 0) {
+                this.userId = parsed;
+            }
+        } else if (window.currentUser?.id) {
+            this.userId = parseInt(window.currentUser.id, 10) || null;
+        }
         return true;
+    }
+
+    checkStorageAvailability() {
+        try {
+            if (typeof window === 'undefined' || !window.localStorage) {
+                return false;
+            }
+            const testKey = '__attendance_storage_test__';
+            window.localStorage.setItem(testKey, '1');
+            window.localStorage.removeItem(testKey);
+            return true;
+        } catch (error) {
+            console.warn('Local storage unavailable for attendance reminders:', error);
+            return false;
+        }
+    }
+
+    getReminderStorageKey(kind) {
+        const today = new Date().toISOString().split('T')[0];
+        const userId = this.userId || 'guest';
+        return `attendanceReminder:${userId}:${kind}:${today}`;
+    }
+
+    hasReminderShownToday(kind) {
+        if (!this.storageAvailable) {
+            return false;
+        }
+        try {
+            const key = this.getReminderStorageKey(kind);
+            return window.localStorage.getItem(key) === '1';
+        } catch (error) {
+            console.warn('Unable to read reminder storage:', error);
+            return false;
+        }
+    }
+
+    markReminderShown(kind) {
+        if (!this.storageAvailable) {
+            return;
+        }
+        try {
+            const key = this.getReminderStorageKey(kind);
+            window.localStorage.setItem(key, '1');
+        } catch (error) {
+            console.warn('Unable to persist reminder marker:', error);
+        }
     }
 
     /**
@@ -272,6 +328,11 @@ class AttendanceNotificationManager {
             return;
         }
 
+        if (this.hasReminderShownToday(eventType)) {
+            console.log(`Reminder for ${eventType} already shown today – skipping.`);
+            return;
+        }
+
         if (this.notificationPermission !== 'granted') {
             await this.requestNotificationPermission();
             if (this.notificationPermission !== 'granted') {
@@ -317,6 +378,7 @@ class AttendanceNotificationManager {
             }, 10000);
 
             console.log(`Reminder notification shown (${eventType})`);
+            this.markReminderShown(eventType);
         } catch (error) {
             console.error('Error showing notification:', error);
         }
@@ -464,6 +526,10 @@ class AttendanceNotificationManager {
             return;
         }
 
+        if (this.hasReminderShownToday('checkout')) {
+            return;
+        }
+
         if (this.notificationPermission !== 'granted') {
             await this.requestNotificationPermission();
         }
@@ -496,6 +562,7 @@ class AttendanceNotificationManager {
                 };
 
                 setTimeout(() => notification.close(), 10000);
+                this.markReminderShown('checkout');
             } catch (error) {
                 console.error('Error showing overdue checkout notification:', error);
             }

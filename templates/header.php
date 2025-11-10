@@ -523,7 +523,9 @@ if (function_exists('processDailyPackagingAlert')) {
         }
     </script>
 </head>
-<body class="dashboard-body" data-user-role="<?php echo htmlspecialchars($currentUser['role'] ?? ''); ?>">
+<body class="dashboard-body"
+      data-user-role="<?php echo htmlspecialchars($currentUser['role'] ?? ''); ?>"
+      data-user-id="<?php echo isset($currentUser['id']) ? (int) $currentUser['id'] : 0; ?>">
     <!-- 🎬 شاشة التحميل -->
     <div id="pageLoader">
         <div class="loader-icon">
