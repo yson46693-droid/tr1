@@ -340,17 +340,8 @@ if (!defined('ACCESS_ALLOWED')) {
             
             const pageLoader = document.getElementById('pageLoader');
             const dashboardMain = document.querySelector('.dashboard-main');
-            const DISABLE_PAGE_LOADER = true;
             
             if (!pageLoader) {
-                return;
-            }
-            
-            if (DISABLE_PAGE_LOADER) {
-                pageLoader.classList.add('hidden');
-                pageLoader.style.display = 'none';
-                pageLoader.style.visibility = 'hidden';
-                pageLoader.style.opacity = '0';
                 return;
             }
             

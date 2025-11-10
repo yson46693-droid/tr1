@@ -389,7 +389,12 @@ function hasRole($role) {
         return false;
     }
     
-    return $_SESSION['role'] === $role;
+    $currentRole = $_SESSION['role'] ?? null;
+    if ($currentRole === null) {
+        return false;
+    }
+    
+    return strtolower((string) $currentRole) === strtolower((string) $role);
 }
 
 /**
@@ -400,7 +405,22 @@ function hasAnyRole($roles) {
         return false;
     }
     
-    return in_array($_SESSION['role'], $roles);
+    $currentRole = $_SESSION['role'] ?? null;
+    if ($currentRole === null) {
+        return false;
+    }
+    
+    $normalizedRoles = array_map(static function ($role) {
+        return strtolower((string) $role);
+    }, array_filter((array) $roles, static function ($role) {
+        return $role !== null && $role !== '';
+    }));
+    
+    if (empty($normalizedRoles)) {
+        return false;
+    }
+    
+    return in_array(strtolower((string) $currentRole), $normalizedRoles, true);
 }
 
 /**
