@@ -167,10 +167,16 @@ class SimpleWebAuthn {
                     { type: 'public-key', alg: -257 }  // RS256
                 ];
 
-            const authenticatorSelection = challenge.authenticatorSelection || {
-                authenticatorAttachment: 'platform',
-                userVerification: 'preferred'
-            };
+            const authenticatorSelection = { ...(challenge.authenticatorSelection || {}) };
+
+            if (!authenticatorSelection.userVerification) {
+                authenticatorSelection.userVerification = 'preferred';
+            }
+
+            // إذا لم يحدد الخادم نوع authenticatorAttachment، نتركه فارغاً
+            if (!('authenticatorAttachment' in authenticatorSelection)) {
+                delete authenticatorSelection.authenticatorAttachment;
+            }
 
             const publicKeyTimeout = typeof challenge.timeout === 'number' ? challenge.timeout : 60000;
             const attestation = challenge.attestation || 'none';
@@ -187,10 +193,13 @@ class SimpleWebAuthn {
                     displayName: challenge.user.displayName || challenge.user.name
                 },
                 pubKeyCredParams,
-                authenticatorSelection,
                 timeout: publicKeyTimeout,
                 attestation
             };
+
+            if (Object.keys(authenticatorSelection).length > 0) {
+                publicKeyCredentialCreationOptions.authenticatorSelection = authenticatorSelection;
+            }
 
             if (excludeCredentials.length > 0) {
                 publicKeyCredentialCreationOptions.excludeCredentials = excludeCredentials;
