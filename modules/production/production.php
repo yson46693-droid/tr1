@@ -2344,8 +2344,6 @@ $lang = isset($translations) ? $translations : [];
         <?php endif; ?>
     </div>
 </div>
-
-</div>
 </section>
 
 <div id="productionReportsSection" class="d-none">
