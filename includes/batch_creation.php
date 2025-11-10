@@ -78,6 +78,89 @@ function batchCreationColumnExists(PDO $pdo, string $tableName, string $columnNa
 }
 
 /**
+ * التأكد من وجود الجداول المطلوبة للتشغيل.
+ */
+function batchCreationEnsureTables(PDO $pdo): void
+{
+    static $ensured = false;
+
+    if ($ensured) {
+        return;
+    }
+
+    $tableStatements = [
+        "CREATE TABLE IF NOT EXISTS `batches` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `product_id` int(11) DEFAULT NULL,
+            `batch_number` varchar(100) NOT NULL,
+            `production_date` date NOT NULL,
+            `expiry_date` date DEFAULT NULL,
+            `quantity` int(11) NOT NULL DEFAULT 0,
+            `status` enum('in_production','completed','cancelled') DEFAULT 'in_production',
+            `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `unique_batch_number` (`batch_number`),
+            KEY `product_id` (`product_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        "CREATE TABLE IF NOT EXISTS `batch_raw_materials` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `batch_id` int(11) NOT NULL,
+            `raw_material_id` int(11) DEFAULT NULL,
+            `quantity_used` decimal(12,3) NOT NULL DEFAULT 0.000,
+            `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `batch_id` (`batch_id`),
+            KEY `raw_material_id` (`raw_material_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        "CREATE TABLE IF NOT EXISTS `batch_packaging` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `batch_id` int(11) NOT NULL,
+            `packaging_material_id` int(11) DEFAULT NULL,
+            `quantity_used` decimal(12,3) NOT NULL DEFAULT 0.000,
+            `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `batch_id` (`batch_id`),
+            KEY `packaging_material_id` (`packaging_material_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        "CREATE TABLE IF NOT EXISTS `batch_workers` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `batch_id` int(11) NOT NULL,
+            `employee_id` int(11) NOT NULL,
+            `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `batch_id` (`batch_id`),
+            KEY `employee_id` (`employee_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        "CREATE TABLE IF NOT EXISTS `finished_products` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `batch_id` int(11) NOT NULL,
+            `product_id` int(11) DEFAULT NULL,
+            `product_name` varchar(255) NOT NULL,
+            `batch_number` varchar(100) NOT NULL,
+            `production_date` date NOT NULL,
+            `expiry_date` date DEFAULT NULL,
+            `quantity_produced` int(11) NOT NULL DEFAULT 0,
+            `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `batch_id` (`batch_id`),
+            KEY `product_id` (`product_id`),
+            KEY `batch_number` (`batch_number`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    ];
+
+    foreach ($tableStatements as $sql) {
+        $pdo->exec($sql);
+    }
+
+    $ensured = true;
+}
+
+/**
  * توليد رقم تشغيلة بالشكل BATCH-YYYYMMDD-###.
  */
 function batchCreationGenerateNumber(PDO $pdo): string
@@ -127,6 +210,7 @@ function batchCreationCreate(int $templateId, int $units): array
     $pdo = batchCreationGetPdo();
 
     try {
+        batchCreationEnsureTables($pdo);
         foreach (['product_templates', 'batches', 'finished_products'] as $requiredTable) {
             if (!batchCreationTableExists($pdo, $requiredTable)) {
                 throw new RuntimeException("جدول {$requiredTable} غير موجود في قاعدة البيانات");
