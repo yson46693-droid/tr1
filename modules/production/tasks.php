@@ -30,18 +30,43 @@ $isProduction = ($currentUser['role'] ?? '') === 'production';
 if (!function_exists('tasksSafeString')) {
     function tasksSafeString($value)
     {
-        if ($value === null) {
+        if ($value === null || (!is_scalar($value) && $value !== '')) {
             return '';
         }
 
-        if (!is_scalar($value)) {
+        $value = (string) $value;
+
+        if ($value === '') {
             return '';
         }
 
         if (function_exists('mb_convert_encoding')) {
-            $value = @mb_convert_encoding((string) $value, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1256, Windows-1252');
-        } else {
-            $value = (string) $value;
+            static $supportedSources = null;
+
+            if ($supportedSources === null) {
+                $preferred = ['UTF-8', 'ISO-8859-1', 'Windows-1256', 'Windows-1252'];
+                $available = array_map('strtolower', mb_list_encodings());
+                $supportedSources = [];
+
+                foreach ($preferred as $encoding) {
+                    if (in_array(strtolower($encoding), $available, true)) {
+                        $supportedSources[] = $encoding;
+                    }
+                }
+
+                if (empty($supportedSources)) {
+                    $supportedSources[] = 'UTF-8';
+                }
+            }
+
+            $converted = @mb_convert_encoding($value, 'UTF-8', $supportedSources);
+            if ($converted !== false) {
+                $value = $converted;
+            }
+        }
+
+        if ($value === '') {
+            return '';
         }
 
         $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value);
