@@ -44,9 +44,14 @@ function batchCreationGetPdo(): PDO
  */
 function batchCreationTableExists(PDO $pdo, string $tableName): bool
 {
-    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-    $stmt->execute([$tableName]);
-    return (bool) $stmt->fetchColumn();
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $tableName)) {
+        throw new InvalidArgumentException('Invalid table name supplied.');
+    }
+
+    $sql = sprintf("SHOW TABLES LIKE '%s'", addslashes($tableName));
+    $result = $pdo->query($sql);
+
+    return $result !== false && $result->fetchColumn() !== false;
 }
 
 /**
@@ -54,9 +59,22 @@ function batchCreationTableExists(PDO $pdo, string $tableName): bool
  */
 function batchCreationColumnExists(PDO $pdo, string $tableName, string $columnName): bool
 {
-    $stmt = $pdo->prepare(sprintf('SHOW COLUMNS FROM `%s` LIKE ?', $tableName));
-    $stmt->execute([$columnName]);
-    return (bool) $stmt->fetchColumn();
+    if (
+        !preg_match('/^[a-zA-Z0-9_]+$/', $tableName) ||
+        !preg_match('/^[a-zA-Z0-9_]+$/', $columnName)
+    ) {
+        throw new InvalidArgumentException('Invalid identifier supplied.');
+    }
+
+    $sql = sprintf(
+        "SHOW COLUMNS FROM `%s` LIKE '%s'",
+        $tableName,
+        addslashes($columnName)
+    );
+
+    $result = $pdo->query($sql);
+
+    return $result !== false && $result->fetchColumn() !== false;
 }
 
 /**
