@@ -1674,6 +1674,8 @@ if (!empty($unifiedTemplatesCheck)) {
          ORDER BY upt.created_at DESC"
     );
     
+    $templatePackagingCheck = $db->queryOne("SHOW TABLES LIKE 'template_packaging'");
+
     foreach ($unifiedTemplates as &$template) {
         // جلب المواد الخام المرتبطة بالقالب
         if (!empty($templateRawMaterialsCheck)) {
@@ -1739,15 +1741,23 @@ if (!empty($unifiedTemplatesCheck)) {
         }
 
         // جلب أدوات التعبئة المرتبطة بالقالب
-        $packagingItems = $db->query(
-            "SELECT tp.packaging_material_id, tp.quantity_per_unit,
-                    COALESCE(tp.packaging_name, pm.name) AS packaging_name,
-                    pm.unit AS packaging_unit
-             FROM template_packaging tp
-             LEFT JOIN packaging_materials pm ON tp.packaging_material_id = pm.id
-             WHERE tp.template_id = ?",
-            [$template['id']]
-        );
+        $packagingItems = [];
+        if (!empty($templatePackagingCheck)) {
+            try {
+                $packagingItems = $db->query(
+                    "SELECT tp.packaging_material_id, tp.quantity_per_unit,
+                            COALESCE(tp.packaging_name, pm.name) AS packaging_name,
+                            pm.unit AS packaging_unit
+                     FROM template_packaging tp
+                     LEFT JOIN packaging_materials pm ON tp.packaging_material_id = pm.id
+                     WHERE tp.template_id = ?",
+                    [$template['id']]
+                );
+            } catch (Exception $e) {
+                error_log("Fetching template packaging failed for template {$template['id']}: " . $e->getMessage());
+                $packagingItems = [];
+            }
+        }
 
         $template['packaging_count'] = count($packagingItems);
         $template['packaging_details'] = array_map(static function ($item) {
