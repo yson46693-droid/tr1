@@ -802,12 +802,64 @@ if (!$error) {
         }
         .pos-payment-options {
             display: grid;
-            gap: 0.6rem;
+            gap: 0.75rem;
         }
-        .pos-payment-options .form-check {
+        .pos-payment-option {
+            position: relative;
             display: flex;
             align-items: center;
-            gap: 0.6rem;
+            gap: 0.9rem;
+            padding: 0.85rem 1rem;
+            border: 1px solid rgba(15, 23, 42, 0.12);
+            border-radius: 14px;
+            background: #f8fafc;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .pos-payment-option:hover {
+            border-color: rgba(30, 64, 175, 0.4);
+            background: #ffffff;
+            box-shadow: 0 10px 24px rgba(30, 64, 175, 0.12);
+        }
+        .pos-payment-option.active {
+            border-color: rgba(22, 163, 74, 0.7);
+            background: rgba(22, 163, 74, 0.08);
+            box-shadow: 0 14px 28px rgba(22, 163, 74, 0.18);
+        }
+        .pos-payment-option .form-check-input {
+            margin: 0;
+            width: 1.1rem;
+            height: 1.1rem;
+            border-width: 2px;
+        }
+        .pos-payment-option-icon {
+            width: 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: rgba(15, 23, 42, 0.08);
+            color: #1f2937;
+            font-size: 1.25rem;
+        }
+        .pos-payment-option.active .pos-payment-option-icon {
+            background: rgba(22, 163, 74, 0.18);
+            color: #15803d;
+        }
+        .pos-payment-option-details {
+            flex: 1;
+        }
+        .pos-payment-option-title {
+            font-weight: 700;
+            color: #111827;
+            display: block;
+        }
+        .pos-payment-option-desc {
+            display: block;
+            margin-top: 0.15rem;
+            font-size: 0.85rem;
+            color: #64748b;
         }
         .pos-history-list {
             display: flex;
@@ -1078,19 +1130,37 @@ if (!$error) {
 
                             <div class="mb-3">
                                 <label class="form-label">طريقة الدفع</label>
-                                <div class="pos-payment-options">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="payment_type" id="posPaymentFull" value="full" checked>
-                                        <label class="form-check-label" for="posPaymentFull">دفع كامل الآن</label>
+                            <div class="pos-payment-options">
+                                <label class="pos-payment-option active" for="posPaymentFull" data-payment-option>
+                                    <input class="form-check-input" type="radio" name="payment_type" id="posPaymentFull" value="full" checked>
+                                    <div class="pos-payment-option-icon">
+                                        <i class="bi bi-cash-stack"></i>
                                     </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="payment_type" id="posPaymentPartial" value="partial">
-                                        <label class="form-check-label" for="posPaymentPartial">تحصيل جزئي الآن</label>
+                                    <div class="pos-payment-option-details">
+                                        <span class="pos-payment-option-title">دفع كامل الآن</span>
+                                        <span class="pos-payment-option-desc">تحصيل المبلغ بالكامل فوراً دون أي ديون.</span>
                                     </div>
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="radio" name="payment_type" id="posPaymentCredit" value="credit">
-                                        <label class="form-check-label" for="posPaymentCredit">بيع بالآجل (دون تحصيل فوري)</label>
+                                </label>
+                                <label class="pos-payment-option" for="posPaymentPartial" data-payment-option>
+                                    <input class="form-check-input" type="radio" name="payment_type" id="posPaymentPartial" value="partial">
+                                    <div class="pos-payment-option-icon">
+                                        <i class="bi bi-cash-coin"></i>
                                     </div>
+                                    <div class="pos-payment-option-details">
+                                        <span class="pos-payment-option-title">تحصيل جزئي الآن</span>
+                                        <span class="pos-payment-option-desc">استلام جزء من المبلغ حالياً وتسجيل المتبقي كدين.</span>
+                                    </div>
+                                </label>
+                                <label class="pos-payment-option" for="posPaymentCredit" data-payment-option>
+                                    <input class="form-check-input" type="radio" name="payment_type" id="posPaymentCredit" value="credit">
+                                    <div class="pos-payment-option-icon">
+                                        <i class="bi bi-receipt"></i>
+                                    </div>
+                                    <div class="pos-payment-option-details">
+                                        <span class="pos-payment-option-title">بيع بالآجل</span>
+                                        <span class="pos-payment-option-desc">تمويل كامل للعميل دون تحصيل فوري، مع متابعة الدفعات لاحقاً.</span>
+                                    </div>
+                                </label>
                                 </div>
                                 <div class="mt-3 d-none" id="posPartialWrapper">
                                     <label class="form-label">مبلغ التحصيل الجزئي</label>
@@ -1188,6 +1258,7 @@ if (!$error) {
         netTotal: document.getElementById('posNetTotal'),
         dueAmount: document.getElementById('posDueAmount'),
         prepaidInput: document.getElementById('posPrepaidInput'),
+        paymentOptionCards: document.querySelectorAll('[data-payment-option]'),
         paymentRadios: document.querySelectorAll('input[name="payment_type"]'),
         partialWrapper: document.getElementById('posPartialWrapper'),
         partialInput: document.getElementById('posPartialAmount'),
@@ -1245,6 +1316,17 @@ if (!$error) {
         elements.cartData.value = JSON.stringify(payload);
     }
 
+    function refreshPaymentOptionStates() {
+        if (!elements.paymentOptionCards) {
+            return;
+        }
+        elements.paymentOptionCards.forEach((card) => {
+            const input = card.querySelector('input[type="radio"]');
+            const isChecked = Boolean(input && input.checked);
+            card.classList.toggle('active', isChecked);
+        });
+    }
+
     function updateSummary() {
         const subtotal = cart.reduce((total, item) => total + (item.quantity * item.unit_price), 0);
         let prepaid = parseFloat(elements.prepaidInput.value) || 0;
@@ -1295,6 +1377,7 @@ if (!$error) {
         elements.paidField.value = paidAmount.toFixed(2);
         elements.submitBtn.disabled = cart.length === 0;
         syncCartData();
+        refreshPaymentOptionStates();
     }
 
     function renderCart() {
@@ -1554,6 +1637,7 @@ if (!$error) {
     }
 
     // تهيئة أولية للقيم
+    refreshPaymentOptionStates();
     renderCart();
 })();
 </script>
