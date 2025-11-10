@@ -1081,7 +1081,7 @@ function deleteTask(taskId) {
     form.submit();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+function hideTasksPageLoader() {
     const pageLoader = document.getElementById('pageLoader');
     if (pageLoader) {
         pageLoader.style.display = 'none';
@@ -1092,5 +1092,8 @@ document.addEventListener('DOMContentLoaded', function() {
     if (typeof toggleProductionFields === 'function') {
         toggleProductionFields();
     }
-});
+}
+
+document.addEventListener('DOMContentLoaded', hideTasksPageLoader);
+window.addEventListener('load', hideTasksPageLoader);
 </script>
