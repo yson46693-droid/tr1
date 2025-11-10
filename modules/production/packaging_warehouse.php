@@ -1882,18 +1882,22 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                 <td style="padding: 0.4rem 0.25rem;">
                                     <div class="btn-group btn-group-sm">
                                         <?php if ($showUseButton): ?>
-                                            <button class="btn btn-outline-primary btn-sm"
-                                                    type="button"
-                                                    data-id="<?php echo $material['id']; ?>"
-                                                    data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
-                                                    data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
-                                                    data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
-                                                    data-quantity-target="<?php echo htmlspecialchars($quantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
-                                                    data-use-quantity="1"
-                                                    onclick="usePackagingMaterial(this)"
-                                                    title="استخدام وحدة واحدة"
-                                                    style="padding: 0.2rem 0.4rem; font-size: 0.75rem;"<?php echo $useButtonDisabled ? ' disabled' : ''; ?>>
-                                                <i class="bi bi-check2-circle"></i>
+                                            <button
+                                                class="btn btn-outline-primary btn-sm"
+                                                type="button"
+                                                data-id="<?php echo $material['id']; ?>"
+                                                data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
+                                                data-quantity-target="<?php echo htmlspecialchars($quantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-use-quantity="1"
+                                                onclick="usePackagingMaterial(this)"
+                                                title="استخدام وحدة واحدة"
+                                                style="padding: 0.2rem 0.4rem; font-size: 0.75rem;"
+                                                <?php echo $useButtonDisabled ? 'disabled' : ''; ?>
+                                                aria-label="استخدام الأداة">
+                                                <span class="visually-hidden">استخدام</span>
+                                                <i class="bi bi-check2-circle" aria-hidden="true"></i>
                                             </button>
                                         <?php endif; ?>
                                         <button class="btn btn-success btn-sm"
@@ -2009,16 +2013,19 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                             
                             <div class="d-grid gap-2 d-flex mt-3">
                                 <?php if ($showUseButton): ?>
-                                    <button class="btn btn-sm btn-outline-primary flex-fill"
-                                            type="button"
-                                            data-id="<?php echo $material['id']; ?>"
-                                            data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
-                                            data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
-                                            data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
-                                            data-quantity-target="<?php echo htmlspecialchars($mobileQuantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
-                                            data-use-quantity="1"
-                                            onclick="usePackagingMaterial(this)"<?php echo $useButtonDisabled ? ' disabled' : ''; ?>>
-                                        <i class="bi bi-check2-circle me-2"></i>استخدام
+                                    <button
+                                        class="btn btn-sm btn-outline-primary flex-fill"
+                                        type="button"
+                                        data-id="<?php echo $material['id']; ?>"
+                                        data-name="<?php echo htmlspecialchars($material['name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-unit="<?php echo htmlspecialchars(!empty($material['unit']) ? $material['unit'] : 'وحدة', ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-quantity="<?php echo number_format($materialQuantity, 4, '.', ''); ?>"
+                                        data-quantity-target="<?php echo htmlspecialchars($mobileQuantityElementId, ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-use-quantity="1"
+                                        onclick="usePackagingMaterial(this)"
+                                        <?php echo $useButtonDisabled ? 'disabled' : ''; ?>>
+                                        <i class="bi bi-check2-circle me-2" aria-hidden="true"></i>
+                                        <span>استخدام</span>
                                     </button>
                                 <?php endif; ?>
                                 <button class="btn btn-sm btn-success flex-fill"

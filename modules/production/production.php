@@ -1240,7 +1240,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $batchNotes, // الملاحظات (إن وُجدت)
                     $currentUser['id'],
                     $allSuppliers, // جميع الموردين مع المواد
-                    $honeyVariety ?? null // نوع العسل المستخدم
+                    $honeyVariety ?? null, // نوع العسل المستخدم
+                    $templateId
                 );
                 
                 if (!$batchResult['success']) {

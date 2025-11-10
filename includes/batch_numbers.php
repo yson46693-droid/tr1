@@ -12,94 +12,144 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/audit_log.php';
 
 /**
- * توليد رقم تشغيلة
- * تنسيق جديد: BATCH: DATE-SUP1-SUP2-id1-id2-id3-RANDOM
- * مثال: BATCH: 20251106-HNY001-PKG002-5-7-12-12345
+ * توليد رقم تشغيلة بالصيغة الجديدة المعتمدة على القالب والموردين.
  */
-function generateBatchNumber($productId, $productionDate, $honeySupplierId = null, $packagingSupplierId = null, $workersIds = []) {
+function generateBatchNumber(
+    $productId,
+    $productionDate,
+    $honeySupplierId = null,
+    $packagingSupplierId = null,
+    $workersIds = [],
+    array $context = []
+) {
     $db = db();
-    
+
     // التحقق من وجود المنتج
-    $product = $db->queryOne("SELECT name, category FROM products WHERE id = ?", [$productId]);
+    $product = $db->queryOne("SELECT id FROM products WHERE id = ?", [$productId]);
     if (!$product) {
         return null;
     }
-    
-    // تاريخ الإنتاج (YYYYMMDD)
-    $dateCode = date('Ymd', strtotime($productionDate));
-    
-    // كود مورد العسل (من supplier_code)
-    $honeySupplierCode = '000';
-    if ($honeySupplierId) {
-        $honeySupplier = $db->queryOne("SELECT supplier_code FROM suppliers WHERE id = ?", [$honeySupplierId]);
-        if ($honeySupplier && !empty($honeySupplier['supplier_code'])) {
-            $honeySupplierCode = $honeySupplier['supplier_code'];
-        } else {
-            // Fallback: استخدام ID إذا لم يكن هناك supplier_code
-            $honeySupplierCode = str_pad($honeySupplierId, 3, '0', STR_PAD_LEFT);
+
+    $templateId = isset($context['template_id']) ? max(0, (int) $context['template_id']) : 0;
+    $allSuppliersContext = isset($context['all_suppliers']) && is_array($context['all_suppliers'])
+        ? $context['all_suppliers']
+        : [];
+
+    // تاريخ التنفيذ (اليوم الحالي) بصيغة YYYYMMDD
+    $executionDateRaw = $context['execution_date'] ?? date('Y-m-d');
+    $executionTimestamp = strtotime((string) $executionDateRaw);
+    $executionDate = $executionTimestamp ? date('Ymd', $executionTimestamp) : date('Ymd');
+
+    // تاريخ الإنتاج المختصر بصيغة YYMMDD
+    $productionTimestamp = strtotime((string) $productionDate);
+    $productionDateShort = $productionTimestamp ? date('ymd', $productionTimestamp) : date('ymd');
+
+    // تجميع معرفات الموردين
+    $supplierIds = [];
+    if (!empty($honeySupplierId)) {
+        $supplierIds[] = (int) $honeySupplierId;
+    }
+    if (!empty($packagingSupplierId)) {
+        $supplierIds[] = (int) $packagingSupplierId;
+    }
+    foreach ($allSuppliersContext as $supplierRow) {
+        if (!empty($supplierRow['id'])) {
+            $supplierIds[] = (int) $supplierRow['id'];
         }
     }
-    
-    // كود مورد التعبئة (من supplier_code)
-    $packagingSupplierCode = '000';
-    if ($packagingSupplierId) {
-        $packagingSupplier = $db->queryOne("SELECT supplier_code FROM suppliers WHERE id = ?", [$packagingSupplierId]);
-        if ($packagingSupplier && !empty($packagingSupplier['supplier_code'])) {
-            $packagingSupplierCode = $packagingSupplier['supplier_code'];
-        } else {
-            // Fallback: استخدام ID إذا لم يكن هناك supplier_code
-            $packagingSupplierCode = str_pad($packagingSupplierId, 3, '0', STR_PAD_LEFT);
-        }
-    }
-    
-    // معرفات عمال الإنتاج الحاضرين (id1-id2-id3...)
-    $workersCodes = [];
-    if (!empty($workersIds) && is_array($workersIds)) {
-        foreach ($workersIds as $workerId) {
-            $workerId = intval($workerId);
-            if ($workerId > 0) {
-                $workersCodes[] = $workerId;
+    $supplierIds = array_values(array_unique(array_filter($supplierIds, static function ($value) {
+        return (int) $value > 0;
+    })));
+
+    // جلب أكواد الموردين
+    $supplierCodesMap = [];
+    if (!empty($supplierIds)) {
+        $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+        $supplierRows = $db->query(
+            "SELECT id, supplier_code FROM suppliers WHERE id IN ($placeholders)",
+            $supplierIds
+        );
+
+        foreach ($supplierRows as $row) {
+            $rawCode = strtoupper(trim((string) ($row['supplier_code'] ?? '')));
+            $normalized = preg_replace('/[^A-Z0-9]/', '', $rawCode);
+            if ($normalized === '') {
+                $normalized = str_pad((string) $row['id'], 3, '0', STR_PAD_LEFT);
             }
+            $supplierCodesMap[(int) $row['id']] = $normalized;
         }
     }
-    
-    // إذا لم يكن هناك عمال، استخدم 0
-    if (empty($workersCodes)) {
-        $workersCodes = ['0'];
+    foreach ($supplierIds as $supplierId) {
+        if (!isset($supplierCodesMap[$supplierId])) {
+            $supplierCodesMap[$supplierId] = str_pad((string) $supplierId, 3, '0', STR_PAD_LEFT);
+        }
     }
-    $workersString = implode('-', $workersCodes);
-    
-    // 5 أرقام عشوائية
-    $randomCode = str_pad(rand(0, 99999), 5, '0', STR_PAD_LEFT);
-    
-    // بناء رقم التشغيلة: BATCH: DATE-SUP1-SUP2-id1-id2-id3-RANDOM
-    $batchNumber = sprintf('BATCH: %s-%s-%s-%s-%s', $dateCode, $honeySupplierCode, $packagingSupplierCode, $workersString, $randomCode);
-    
-    // التأكد من عدم تكرار الرقم
-    $counter = 0;
-    $originalRandom = $randomCode;
+    $supplierCodesOrdered = array_map(static function ($supplierId) use ($supplierCodesMap) {
+        return $supplierCodesMap[$supplierId];
+    }, $supplierIds);
+    $supplierSegment = !empty($supplierCodesOrdered) ? implode('_', $supplierCodesOrdered) : '000';
+
+    // إعداد معرفات العمال
+    $workersIds = is_array($workersIds) ? $workersIds : [];
+    $workerIdsUnique = array_values(array_unique(array_map('intval', $workersIds)));
+    if (empty($workerIdsUnique)) {
+        $workerIdsUnique = [0];
+    }
+    $workerCodes = array_map(static function ($workerId) {
+        return str_pad((string) $workerId, 3, '0', STR_PAD_LEFT);
+    }, $workerIdsUnique);
+    $workerSegment = implode('_', $workerCodes);
+
+    $templateSegment = str_pad((string) $templateId, 4, '0', STR_PAD_LEFT);
+
+    $buildBatchNumber = static function (string $randomSegment) use ($templateSegment, $supplierSegment, $executionDate, $workerSegment, $productionDateShort) {
+        return sprintf(
+            'TPL%s-SUP%s-EX%s-WRK%s-PD%s-%s',
+            $templateSegment,
+            $supplierSegment,
+            $executionDate,
+            $workerSegment,
+            $productionDateShort,
+            $randomSegment
+        );
+    };
+
+    $attempts = 0;
+    $randomSegment = 'R' . str_pad((string) rand(0, 999), 3, '0', STR_PAD_LEFT);
+    $batchNumber = $buildBatchNumber($randomSegment);
+
     while ($db->queryOne("SELECT id FROM batch_numbers WHERE batch_number = ?", [$batchNumber])) {
-        $counter++;
-        // توليد 5 أرقام عشوائية جديدة
-        $randomCode = str_pad(rand(0, 99999), 5, '0', STR_PAD_LEFT);
-        $batchNumber = sprintf('BATCH: %s-%s-%s-%s-%s', $dateCode, $honeySupplierCode, $packagingSupplierCode, $workersString, $randomCode);
-        
-        if ($counter > 100) {
-            // إذا فشل 100 مرة، أضف رقم عشوائي إضافي
-            $batchNumber = sprintf('BATCH: %s-%s-%s-%s-%s-%d', $dateCode, $honeySupplierCode, $packagingSupplierCode, $workersString, $randomCode, rand(1000, 9999));
-            break;
+        $attempts++;
+        if ($attempts > 200) {
+            $randomSegment = 'F' . str_pad((string) rand(100, 999), 3, '0', STR_PAD_LEFT);
+        } else {
+            $randomSegment = 'R' . str_pad((string) rand(0, 999), 3, '0', STR_PAD_LEFT);
         }
+        $batchNumber = $buildBatchNumber($randomSegment);
     }
-    
+
     return $batchNumber;
 }
 
 /**
  * إنشاء رقم تشغيلة جديد
  */
-function createBatchNumber($productId, $productionId, $productionDate, $honeySupplierId = null, 
-                          $packagingMaterials = [], $packagingSupplierId = null, 
-                          $workers = [], $quantity = 1, $expiryDate = null, $notes = null, $createdBy = null, $allSuppliers = [], $honeyVariety = null) {
+function createBatchNumber(
+    $productId,
+    $productionId,
+    $productionDate,
+    $honeySupplierId = null,
+    $packagingMaterials = [],
+    $packagingSupplierId = null,
+    $workers = [],
+    $quantity = 1,
+    $expiryDate = null,
+    $notes = null,
+    $createdBy = null,
+    $allSuppliers = [],
+    $honeyVariety = null,
+    $templateId = null
+) {
     try {
         $db = db();
         
@@ -113,8 +163,22 @@ function createBatchNumber($productId, $productionId, $productionDate, $honeySup
             return ['success' => false, 'message' => 'يجب تسجيل الدخول'];
         }
         
+        // سياق توليد رقم التشغيلة
+        $generationContext = [
+            'template_id'    => $templateId,
+            'all_suppliers'  => $allSuppliers,
+            'execution_date' => date('Y-m-d')
+        ];
+
         // توليد رقم التشغيلة مع معرفات العمال
-        $batchNumber = generateBatchNumber($productId, $productionDate, $honeySupplierId, $packagingSupplierId, $workers);
+        $batchNumber = generateBatchNumber(
+            $productId,
+            $productionDate,
+            $honeySupplierId,
+            $packagingSupplierId,
+            $workers,
+            $generationContext
+        );
         
         if (!$batchNumber) {
             return ['success' => false, 'message' => 'فشل في توليد رقم التشغيلة'];
@@ -203,7 +267,8 @@ function createBatchNumber($productId, $productionId, $productionDate, $honeySup
         // تسجيل سجل التدقيق
         logAudit($createdBy, 'create_batch_number', 'batch', $result['insert_id'], null, [
             'batch_number' => $batchNumber,
-            'product_id' => $productId
+            'product_id'   => $productId,
+            'template_id'  => $templateId ?: null
         ]);
         
         return ['success' => true, 'batch_id' => $result['insert_id'], 'batch_number' => $batchNumber];

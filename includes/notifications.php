@@ -20,6 +20,18 @@ if (!defined('NOTIFICATIONS_MAX_ROWS')) {
     define('NOTIFICATIONS_MAX_ROWS', 200);
 }
 
+if (!defined('ATTENDANCE_NOTIFICATION_COOLDOWN_MINUTES')) {
+    define('ATTENDANCE_NOTIFICATION_COOLDOWN_MINUTES', 120);
+}
+
+if (!defined('ATTENDANCE_NOTIFICATION_CACHE_TTL')) {
+    define('ATTENDANCE_NOTIFICATION_CACHE_TTL', 86400); // 24 hours
+}
+
+if (!defined('ATTENDANCE_NOTIFICATION_CACHE_PREFIX')) {
+    define('ATTENDANCE_NOTIFICATION_CACHE_PREFIX', 'attendance_notif:');
+}
+
 /**
  * إنشاء إشعار جديد
  */
@@ -226,6 +238,10 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
         return false;
     }
 
+    if (hasAttendanceNotificationBeenSentToday((int)$userId, $kind)) {
+        return false;
+    }
+
     $db = db();
     $type = 'attendance_' . $kind;
     $link = getAttendanceReminderLink($role);
@@ -234,6 +250,15 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
         "SELECT id, `read`, created_at FROM notifications WHERE user_id = ? AND type = ? AND DATE(created_at) = CURDATE() ORDER BY created_at DESC LIMIT 1",
         [$userId, $type]
     );
+
+    $startReference = null;
+    $endReference = null;
+    $workTime = getOfficialWorkTime($userId);
+    if (!empty($workTime['start']) && !empty($workTime['end'])) {
+        $today = date('Y-m-d');
+        $startReference = DateTime::createFromFormat('Y-m-d H:i:s', "{$today} {$workTime['start']}");
+        $endReference = DateTime::createFromFormat('Y-m-d H:i:s', "{$today} {$workTime['end']}");
+    }
 
     if ($existing) {
         $notificationId = (int) ($existing['id'] ?? 0);
@@ -244,7 +269,7 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
             $lastCreatedAt = DateTime::createFromFormat('Y-m-d H:i:s', $existing['created_at']);
         }
 
-        $shouldReactivate = shouldReactivateAttendanceNotification($kind, $isUnread, $lastCreatedAt, $startTime ?? null, $endTime ?? null);
+        $shouldReactivate = shouldReactivateAttendanceNotification($kind, $isUnread, $lastCreatedAt, $startReference, $endReference);
         $setParts = ['title = ?', 'message = ?', 'link = ?'];
         $params = [$title, $message, $link];
 
@@ -260,10 +285,140 @@ function ensureAttendanceReminderForUser($userId, $role, $kind, $title, $message
             $params
         );
 
+        if ($shouldReactivate || !$lastCreatedAt || $lastCreatedAt->format('Y-m-d') !== date('Y-m-d')) {
+            markAttendanceNotificationSent((int)$userId, $kind);
+        }
+
         return $notificationId;
     }
 
-    return createNotification($userId, $title, $message, $type, $link, false);
+    $sent = createNotification($userId, $title, $message, $type, $link, false);
+    if ($sent) {
+        markAttendanceNotificationSent((int)$userId, $kind);
+    }
+
+    return $sent;
+}
+
+/**
+ * التحقق مما إذا تم إرسال إشعار الحضور للمستخدم اليوم
+ */
+function hasAttendanceNotificationBeenSentToday(int $userId, string $kind): bool
+{
+    if (function_exists('cache_get')) {
+        $cacheKey = ATTENDANCE_NOTIFICATION_CACHE_PREFIX . $userId . ':' . $kind;
+        $cached = cache_get($cacheKey);
+        $today = date('Y-m-d');
+        if ($cached) {
+            if ($cached === $today) {
+                return true;
+            }
+            cache_delete($cacheKey);
+        }
+    }
+
+    $db = db();
+    $type = 'attendance_' . $kind;
+    $today = date('Y-m-d');
+
+    $notificationExists = $db->queryOne(
+        "SELECT id FROM notifications WHERE user_id = ? AND type = ? AND DATE(created_at) = ? LIMIT 1",
+        [$userId, $type, $today]
+    );
+
+    if (!empty($notificationExists)) {
+        if (function_exists('cache_set')) {
+            cache_set(ATTENDANCE_NOTIFICATION_CACHE_PREFIX . $userId . ':' . $kind, $today, ATTENDANCE_NOTIFICATION_CACHE_TTL);
+        }
+        return true;
+    }
+
+    $logTableExists = $db->queryOne("SHOW TABLES LIKE 'attendance_notification_logs'");
+    if (empty($logTableExists)) {
+        return false;
+    }
+
+    $logExists = $db->queryOne(
+        "SELECT id FROM attendance_notification_logs WHERE user_id = ? AND notification_kind = ? AND sent_date = ? LIMIT 1",
+        [$userId, $kind, $today]
+    );
+
+    if (!empty($logExists)) {
+        if (function_exists('cache_set')) {
+            cache_set(ATTENDANCE_NOTIFICATION_CACHE_PREFIX . $userId . ':' . $kind, $today, ATTENDANCE_NOTIFICATION_CACHE_TTL);
+        }
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * تسجيل إرسال إشعار الحضور للمستخدم
+ */
+function markAttendanceNotificationSent(int $userId, string $kind): void
+{
+    $db = db();
+    $today = date('Y-m-d');
+
+    try {
+        $logTableExists = $db->queryOne("SHOW TABLES LIKE 'attendance_notification_logs'");
+        if (empty($logTableExists)) {
+            $db->execute("
+                CREATE TABLE IF NOT EXISTS `attendance_notification_logs` (
+                  `id` int(11) NOT NULL AUTO_INCREMENT,
+                  `user_id` int(11) NOT NULL,
+                  `notification_kind` enum('checkin','checkout') NOT NULL,
+                  `sent_date` date NOT NULL,
+                  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `user_kind_date` (`user_id`,`notification_kind`,`sent_date`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+        }
+
+        $existingLog = $db->queryOne(
+            "SELECT id FROM attendance_notification_logs WHERE user_id = ? AND notification_kind = ? AND sent_date = ? LIMIT 1",
+            [$userId, $kind, $today]
+        );
+
+        if (empty($existingLog)) {
+            $db->execute(
+                "INSERT INTO attendance_notification_logs (user_id, notification_kind, sent_date) VALUES (?, ?, ?)",
+                [$userId, $kind, $today]
+            );
+        }
+    } catch (Exception $e) {
+        error_log('Attendance notification log error: ' . $e->getMessage());
+    }
+
+    if (function_exists('cache_set')) {
+        $secondsUntilTomorrow = strtotime('tomorrow') - time();
+        $ttl = max(60, $secondsUntilTomorrow);
+        cache_set(ATTENDANCE_NOTIFICATION_CACHE_PREFIX . $userId . ':' . $kind, $today, $ttl);
+    }
+}
+
+/**
+ * إزالة سجل إشعار الحضور للمستخدم (لنفس اليوم)
+ */
+function clearAttendanceNotificationLog(int $userId, string $kind): void
+{
+    $db = db();
+    $today = date('Y-m-d');
+
+    try {
+        $db->execute(
+            "DELETE FROM attendance_notification_logs WHERE user_id = ? AND notification_kind = ? AND sent_date = ?",
+            [$userId, $kind, $today]
+        );
+    } catch (Exception $e) {
+        error_log('Clear attendance notification log error: ' . $e->getMessage());
+    }
+
+    if (function_exists('cache_delete')) {
+        cache_delete(ATTENDANCE_NOTIFICATION_CACHE_PREFIX . $userId . ':' . $kind);
+    }
 }
 
 /**
@@ -281,7 +436,7 @@ function shouldReactivateAttendanceNotification(
     }
 
     $now = new DateTime('now');
-    $cooldownMinutes = 120;
+    $cooldownMinutes = ATTENDANCE_NOTIFICATION_COOLDOWN_MINUTES;
     $minutesSinceLast = null;
 
     if ($lastCreatedAt instanceof DateTime) {
@@ -306,8 +461,8 @@ function shouldReactivateAttendanceNotification(
             return false;
         }
 
-        $windowStart = (clone $endTime)->modify('-30 minutes');
-        $windowEnd = (clone $endTime)->modify('+30 minutes');
+        $windowStart = clone $endTime;
+        $windowEnd = (clone $endTime)->modify('+5 minutes');
 
         if ($now < $windowStart || $now > $windowEnd) {
             return false;
@@ -400,13 +555,13 @@ function handleAttendanceRemindersForUser($user) {
     }
 
     // تذكير تسجيل الانصراف
-    $checkOutReminderThreshold = (clone $endTime)->modify('-10 minutes');
-    $remainingMinutes = (int) floor(($endTime->getTimestamp() - $now->getTimestamp()) / 60);
-    $inCheckoutWindow = $remainingMinutes >= 0 && $remainingMinutes <= 10;
-    $eligibleForCheckoutReminder = $hasOpenAttendance && $inCheckoutWindow && $now >= $checkOutReminderThreshold;
+    $nowTimestamp = $now->getTimestamp();
+    $checkoutStart = $endTime->getTimestamp();
+    $checkoutEnd = $checkoutStart + 300; // +5 دقائق
+    $eligibleForCheckoutReminder = $hasOpenAttendance && $nowTimestamp >= $checkoutStart && $nowTimestamp <= $checkoutEnd;
 
     if ($eligibleForCheckoutReminder && $openAttendanceCheckInTime instanceof DateTime) {
-        $minutesSinceCheckIn = floor(($now->getTimestamp() - $openAttendanceCheckInTime->getTimestamp()) / 60);
+        $minutesSinceCheckIn = floor(($nowTimestamp - $openAttendanceCheckInTime->getTimestamp()) / 60);
         $minimumSessionMinutes = 30;
         if ($minutesSinceCheckIn < $minimumSessionMinutes) {
             $eligibleForCheckoutReminder = false;
@@ -415,9 +570,9 @@ function handleAttendanceRemindersForUser($user) {
 
     if ($eligibleForCheckoutReminder) {
         $title = 'تنبيه تسجيل الانصراف';
-        $message = 'تنبيه هام لتسجيل الانصراف لتفادي الخصومات. يرجى تسجيل الانصراف قبل مغادرة العمل.';
+        $message = 'تنبيه هام لتسجيل الانصراف لتفادي الخصومات. يرجى تسجيل الانصراف في موعده الآن.';
         ensureAttendanceReminderForUser($userId, $role, 'checkout', $title, $message);
-    } else {
+    } elseif ($nowTimestamp > $checkoutEnd || !$hasOpenAttendance) {
         clearAttendanceReminderForUser($userId, 'checkout');
     }
 }
