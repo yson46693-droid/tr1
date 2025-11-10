@@ -125,6 +125,32 @@ if ($isTemplateAjax) {
                     'requires_variety' => (mb_stripos($name, 'عسل') !== false)
                 ];
             }
+            if (empty($rawMaterials) && !empty($detailsPayload['raw_materials']) && is_array($detailsPayload['raw_materials'])) {
+                foreach ($detailsPayload['raw_materials'] as $index => $rawItem) {
+                    $name = trim((string)($rawItem['name'] ?? 'مادة خام'));
+                    if ($name === '') {
+                        continue;
+                    }
+                    $quantityValue = isset($rawItem['quantity']) ? (float)$rawItem['quantity'] : 0.0;
+                    if ($quantityValue <= 0) {
+                        continue;
+                    }
+                    $quantity = number_format($quantityValue, 3);
+                    $unit = $rawItem['unit'] ?? 'وحدة';
+                    $defaultSupplier = $rawItem['supplier_id'] ?? null;
+                    $defaultHoneyVariety = $rawItem['honey_variety'] ?? null;
+                    $components[] = [
+                        'key' => 'raw_fallback_' . $index,
+                        'name' => $name,
+                        'label' => 'مورد المادة: ' . $name,
+                        'description' => 'الكمية لكل وحدة: ' . $quantity . ' ' . $unit,
+                        'type' => 'raw_general',
+                        'default_supplier' => $defaultSupplier,
+                        'honey_variety' => $defaultHoneyVariety,
+                        'requires_variety' => (mb_stripos($name, 'عسل') !== false)
+                    ];
+                }
+            }
 
             $packagingItems = $db->query(
                 "SELECT id, packaging_material_id, packaging_name, quantity_per_unit 
@@ -149,6 +175,41 @@ if ($isTemplateAjax) {
                     'type' => 'packaging',
                     'default_supplier' => $defaultSupplier
                 ];
+            }
+            if (empty($packagingItems) && !empty($detailsPayload['packaging']) && is_array($detailsPayload['packaging'])) {
+                foreach ($detailsPayload['packaging'] as $index => $packItem) {
+                    $packagingId = $packItem['packaging_material_id'] ?? null;
+                    $quantityValue = isset($packItem['quantity_per_unit']) ? (float)$packItem['quantity_per_unit'] : 0.0;
+                    if ($quantityValue <= 0) {
+                        continue;
+                    }
+                    $quantity = number_format($quantityValue, 3);
+                    $name = 'أداة تعبئة';
+                    if ($packagingId) {
+                        $packagingRow = $db->queryOne(
+                            "SELECT name FROM packaging_materials WHERE id = ?",
+                            [$packagingId]
+                        );
+                        if ($packagingRow && !empty($packagingRow['name'])) {
+                            $name = $packagingRow['name'];
+                        } else {
+                            $name .= ' #' . $packagingId;
+                        }
+                    } elseif (!empty($packItem['name'])) {
+                        $name = $packItem['name'];
+                    } else {
+                        $name .= ' #' . ($index + 1);
+                    }
+
+                    $components[] = [
+                        'key' => 'pack_fallback_' . ($packagingId ?: $index),
+                        'name' => $name,
+                        'label' => 'مورد أداة التعبئة: ' . $name,
+                        'description' => 'الكمية لكل وحدة: ' . $quantity . ' قطعة',
+                        'type' => 'packaging',
+                        'default_supplier' => $packItem['supplier_id'] ?? null
+                    ];
+                }
             }
 
             $response['hint'] = 'اختر المورد لكل مادة خام وأداة تعبئة مرتبطة بالقالب.';
