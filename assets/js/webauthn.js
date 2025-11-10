@@ -140,16 +140,41 @@ class SimpleWebAuthn {
             const userIdBuffer = this.base64ToArrayBuffer(challenge.user.id);
 
             // 3. تحويل excludeCredentials
-            const excludeCredentials = (challenge.excludeCredentials || []).map(cred => ({
-                id: this.base64ToArrayBuffer(cred.id),
-                type: cred.type || 'public-key'
-            }));
+            const excludeCredentials = (challenge.excludeCredentials || [])
+                .filter(cred => cred && cred.id)
+                .map(cred => {
+                    try {
+                        return {
+                            id: this.base64ToArrayBuffer(cred.id),
+                            type: cred.type || 'public-key'
+                        };
+                    } catch (error) {
+                        console.warn('WebAuthn: تجاهل excludeCredential غير صالح', cred, error);
+                        return null;
+                    }
+                })
+                .filter(Boolean);
 
             // 4. إعداد rpId
             let rpId = challenge.rp?.id || window.location.hostname;
             rpId = rpId.replace(/^www\./, '').split(':')[0];
 
             // 5. إنشاء challenge object - نظام مبسط يعمل على الموبايل
+            const pubKeyCredParams = Array.isArray(challenge.pubKeyCredParams) && challenge.pubKeyCredParams.length > 0
+                ? challenge.pubKeyCredParams
+                : [
+                    { type: 'public-key', alg: -7 },   // ES256
+                    { type: 'public-key', alg: -257 }  // RS256
+                ];
+
+            const authenticatorSelection = challenge.authenticatorSelection || {
+                authenticatorAttachment: 'platform',
+                userVerification: 'preferred'
+            };
+
+            const publicKeyTimeout = typeof challenge.timeout === 'number' ? challenge.timeout : 60000;
+            const attestation = challenge.attestation || 'none';
+
             const publicKeyCredentialCreationOptions = {
                 challenge: challengeBuffer,
                 rp: {
@@ -161,22 +186,23 @@ class SimpleWebAuthn {
                     name: challenge.user.name,
                     displayName: challenge.user.displayName || challenge.user.name
                 },
-                pubKeyCredParams: [{ alg: -7, type: "public-key" }], // ES256 فقط
-                authenticatorSelection: {
-                    authenticatorAttachment: "platform", // مهم للموبايل - يستخدم Face ID/Touch ID
-                    userVerification: "preferred"
-                },
-                timeout: 60000,
-                attestation: "direct" // 'direct' أفضل للموبايل - يعمل مع Face ID/Touch ID
+                pubKeyCredParams,
+                authenticatorSelection,
+                timeout: publicKeyTimeout,
+                attestation
             };
-            
-            // لا نضيف excludeCredentials لأنها قد تسبب مشاكل على الموبايل
-            
+
+            if (excludeCredentials.length > 0) {
+                publicKeyCredentialCreationOptions.excludeCredentials = excludeCredentials;
+            }
+
             console.log('WebAuthn Registration Options:', {
                 rpId: rpId,
                 timeout: publicKeyCredentialCreationOptions.timeout,
                 authenticatorSelection: publicKeyCredentialCreationOptions.authenticatorSelection,
-                attestation: publicKeyCredentialCreationOptions.attestation
+                attestation: publicKeyCredentialCreationOptions.attestation,
+                pubKeyCredParams: publicKeyCredentialCreationOptions.pubKeyCredParams,
+                excludeCredentialsCount: excludeCredentials.length
             });
 
             // 6. إنشاء الاعتماد
