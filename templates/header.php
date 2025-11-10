@@ -165,6 +165,7 @@ if ($currentUser && $currentUserRole === 'sales') {
     <link rel="manifest" href="<?php echo getRelativeUrl('manifest.json'); ?>">
     
     <!-- 🎬 Page Loading Animation CSS -->
+    <?php if (!defined('ENABLE_PAGE_LOADER') || ENABLE_PAGE_LOADER): ?>
     <style>
         /* شاشة التحميل الرئيسية - تدرجات أزرق متناسقة */
         #pageLoader {
@@ -387,6 +388,7 @@ if ($currentUser && $currentUserRole === 'sales') {
             transition: all 0.3s ease;
         }
     </style>
+    <?php endif; ?>
     
     <!-- Service Worker Registration with Auto-Update -->
     <script>
@@ -537,6 +539,7 @@ if ($currentUser && $currentUserRole === 'sales') {
       data-user-role="<?php echo htmlspecialchars($currentUser['role'] ?? ''); ?>"
       data-user-id="<?php echo isset($currentUser['id']) ? (int) $currentUser['id'] : 0; ?>">
     <!-- 🎬 شاشة التحميل -->
+    <?php if (!defined('ENABLE_PAGE_LOADER') || ENABLE_PAGE_LOADER): ?>
     <div id="pageLoader">
         <div class="loader-icon">
             <i class="bi bi-box-seam"></i>
@@ -554,6 +557,7 @@ if ($currentUser && $currentUserRole === 'sales') {
             <div class="loader-progress-bar"></div>
         </div>
     </div>
+    <?php endif; ?>
     
     <div class="dashboard-wrapper">
         <!-- Homeline Style Sidebar -->
