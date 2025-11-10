@@ -517,9 +517,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
             } catch (Throwable $exception) {
-                if (isset($conn) && $conn->errno === 0) {
-                    $conn->rollback();
-                } elseif (isset($conn) && $conn->errno !== 0) {
+                if (isset($conn)) {
                     $conn->rollback();
                 }
                 $error = 'حدث خطأ أثناء حفظ عملية البيع: ' . $exception->getMessage();
@@ -562,6 +560,16 @@ if (!$error) {
     <div class="alert alert-success alert-dismissible fade show" role="alert">
         <i class="bi bi-check-circle-fill me-2"></i>
         <?php echo htmlspecialchars($success); ?>
+        <?php if (!empty($posInvoiceLinks['absolute_report_url'])): ?>
+            <div class="mt-3 d-flex flex-wrap gap-2">
+                <a href="<?php echo htmlspecialchars($posInvoiceLinks['absolute_report_url']); ?>" target="_blank" class="btn btn-light btn-sm">
+                    <i class="bi bi-eye me-1"></i>عرض الفاتورة
+                </a>
+                <a href="<?php echo htmlspecialchars($posInvoiceLinks['absolute_print_url'] ?? $posInvoiceLinks['absolute_report_url']); ?>" target="_blank" class="btn btn-primary btn-sm">
+                    <i class="bi bi-printer me-1"></i>طباعة الفاتورة
+                </a>
+            </div>
+        <?php endif; ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 <?php endif; ?>
@@ -573,296 +581,973 @@ if (!$error) {
         <div class="empty-state-description">يرجى التواصل مع الإدارة لربط سيارة بحسابك قبل استخدام نقطة البيع.</div>
     </div>
 <?php elseif (!$error): ?>
-    <div class="row g-4">
-        <div class="col-lg-4">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white">
-                    <h5 class="mb-0"><i class="bi bi-truck me-2"></i>بيانات السيارة</h5>
-                </div>
-                <div class="card-body">
-                    <div class="mb-2 d-flex justify-content-between">
-                        <span class="text-muted">رقم السيارة:</span>
-                        <strong><?php echo htmlspecialchars($vehicle['vehicle_number'] ?? '-'); ?></strong>
-                    </div>
-                    <div class="mb-2 d-flex justify-content-between">
-                        <span class="text-muted">الموديل:</span>
-                        <strong><?php echo htmlspecialchars($vehicle['model'] ?? '-'); ?></strong>
-                    </div>
-                    <div class="mb-2 d-flex justify-content-between">
-                        <span class="text-muted">المخزن المرتبط:</span>
-                        <strong><?php echo htmlspecialchars($vehicle['warehouse_name'] ?? 'مخزن السيارة'); ?></strong>
-                    </div>
-                    <div class="mt-3">
-                        <h6 class="fw-bold mb-3">إحصائيات المخزون</h6>
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>عدد المنتجات:</span>
-                            <strong><?php echo number_format($inventoryStats['total_products']); ?></strong>
-                        </div>
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>إجمالي الكمية:</span>
-                            <strong><?php echo number_format($inventoryStats['total_quantity'], 2); ?></strong>
-                        </div>
-                        <div class="d-flex justify-content-between">
-                            <span>قيمة المخزون:</span>
-                            <strong><?php echo formatCurrency($inventoryStats['total_value']); ?></strong>
-                        </div>
-                    </div>
-                </div>
+    <style>
+        .pos-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .pos-vehicle-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1rem;
+        }
+        .pos-summary-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 18px;
+            padding: 1.5rem;
+            color: #ffffff;
+            background: linear-gradient(135deg, rgba(30,58,95,0.95), rgba(44,82,130,0.88));
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.15);
+        }
+        .pos-summary-card .label {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            opacity: 0.8;
+        }
+        .pos-summary-card .value {
+            font-size: 1.45rem;
+            font-weight: 700;
+            margin-top: 0.35rem;
+        }
+        .pos-summary-card .meta {
+            margin-top: 0.35rem;
+            font-size: 0.9rem;
+            opacity: 0.85;
+        }
+        .pos-summary-card .icon {
+            position: absolute;
+            bottom: 1rem;
+            right: 1rem;
+            font-size: 2.4rem;
+            opacity: 0.12;
+        }
+        .pos-content {
+            display: grid;
+            grid-template-columns: repeat(12, 1fr);
+            gap: 1.5rem;
+        }
+        .pos-panel {
+            background: #fff;
+            border-radius: 18px;
+            padding: 1.5rem;
+            box-shadow: 0 16px 35px rgba(15, 23, 42, 0.12);
+            border: 1px solid rgba(15, 23, 42, 0.05);
+        }
+        .pos-panel-header {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1.15rem;
+        }
+        .pos-panel-header h4,
+        .pos-panel-header h5 {
+            margin: 0;
+            font-weight: 700;
+            color: #1f2937;
+        }
+        .pos-panel-header p {
+            margin: 0;
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+        .pos-search {
+            position: relative;
+            flex: 1;
+            min-width: 220px;
+        }
+        .pos-search input {
+            border-radius: 12px;
+            padding-inline-start: 2.75rem;
+            height: 3rem;
+        }
+        .pos-search i {
+            position: absolute;
+            inset-inline-start: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6b7280;
+            font-size: 1.1rem;
+        }
+        .pos-product-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1.25rem;
+        }
+        .pos-product-card {
+            border-radius: 18px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            padding: 1.15rem;
+            background: #f8fafc;
+            transition: all 0.25s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            position: relative;
+        }
+        .pos-product-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(30, 58, 95, 0.35);
+            box-shadow: 0 18px 40px rgba(30, 58, 95, 0.15);
+        }
+        .pos-product-card.active {
+            border-color: rgba(30, 58, 95, 0.65);
+            background: #ffffff;
+            box-shadow: 0 20px 45px rgba(30, 58, 95, 0.18);
+        }
+        .pos-product-name {
+            font-size: 1.08rem;
+            font-weight: 700;
+            color: #1f2937;
+        }
+        .pos-product-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            font-size: 0.85rem;
+            color: #475569;
+        }
+        .pos-product-badge {
+            background: rgba(30, 58, 95, 0.08);
+            color: #1e3a5f;
+            border-radius: 999px;
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+        }
+        .pos-product-qty {
+            font-weight: 700;
+            color: #059669;
+        }
+        .pos-select-btn {
+            margin-top: auto;
+            border-radius: 12px;
+            font-weight: 600;
+        }
+        .pos-checkout-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+        .pos-selected-product {
+            display: none;
+            border-radius: 18px;
+            padding: 1.25rem;
+            color: #fff;
+            background: linear-gradient(135deg, rgba(6,78,59,0.95), rgba(16,185,129,0.9));
+            box-shadow: 0 18px 40px rgba(6, 78, 59, 0.25);
+        }
+        .pos-selected-product.active {
+            display: block;
+        }
+        .pos-selected-product h5 {
+            margin-bottom: 0.75rem;
+        }
+        .pos-selected-product .meta-row {
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .pos-selected-product .meta-block span {
+            font-size: 0.8rem;
+            opacity: 0.8;
+            text-transform: uppercase;
+        }
+        .pos-form .form-control,
+        .pos-form .form-select {
+            border-radius: 12px;
+        }
+        .pos-cart-table thead {
+            background: #f1f5f9;
+            font-size: 0.9rem;
+        }
+        .pos-cart-table td {
+            vertical-align: middle;
+        }
+        .pos-qty-control {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .pos-qty-control .btn {
+            border-radius: 999px;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .pos-qty-control input {
+            width: 80px;
+            text-align: center;
+        }
+        .pos-summary-card-neutral {
+            background: #0f172a;
+            color: #fff;
+            border-radius: 16px;
+            padding: 1rem 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+        .pos-summary-card-neutral .total {
+            font-size: 1.45rem;
+            font-weight: 700;
+        }
+        .pos-payment-options {
+            display: grid;
+            gap: 0.6rem;
+        }
+        .pos-payment-options .form-check {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .pos-history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            max-height: 320px;
+            overflow-y: auto;
+        }
+        .pos-sale-card {
+            border-radius: 14px;
+            border: 1px solid rgba(15, 23, 42, 0.08);
+            padding: 0.95rem 1.15rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+        }
+        .pos-sale-card .meta {
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+        .pos-empty {
+            border-radius: 18px;
+            background: #f8fafc;
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            color: #475569;
+        }
+        .pos-empty i {
+            font-size: 2.6rem;
+            color: #94a3b8;
+        }
+        .pos-cart-empty {
+            text-align: center;
+            padding: 2rem 1rem;
+            color: #6b7280;
+        }
+        .pos-inline-note {
+            font-size: 0.82rem;
+            color: #64748b;
+        }
+        @media (max-width: 992px) {
+            .pos-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 576px) {
+            .pos-summary-card {
+                padding: 1.15rem;
+            }
+            .pos-panel {
+                padding: 1.25rem;
+            }
+            .pos-product-grid {
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            }
+        }
+    </style>
+
+    <div class="pos-wrapper">
+        <section class="pos-vehicle-summary">
+            <div class="pos-summary-card">
+                <span class="label">معلومات السيارة</span>
+                <div class="value"><?php echo htmlspecialchars($vehicle['vehicle_number'] ?? '-'); ?></div>
+                <div class="meta">الموديل: <?php echo htmlspecialchars($vehicle['model'] ?? 'غير محدد'); ?></div>
+                <i class="bi bi-truck icon"></i>
             </div>
+            <div class="pos-summary-card">
+                <span class="label">عدد المنتجات</span>
+                <div class="value"><?php echo number_format($inventoryStats['total_products']); ?></div>
+                <div class="meta">أصناف جاهزة للبيع</div>
+                <i class="bi bi-box-seam icon"></i>
+            </div>
+            <div class="pos-summary-card">
+                <span class="label">إجمالي الكمية</span>
+                <div class="value"><?php echo number_format($inventoryStats['total_quantity'], 2); ?></div>
+                <div class="meta">إجمالي الوحدات في السيارة</div>
+                <i class="bi bi-stack icon"></i>
+            </div>
+            <div class="pos-summary-card">
+                <span class="label">قيمة المخزون</span>
+                <div class="value"><?php echo formatCurrency($inventoryStats['total_value']); ?></div>
+                <div class="meta">التقييم الإجمالي الحالي</div>
+                <i class="bi bi-cash-stack icon"></i>
+            </div>
+        </section>
 
-            <div class="card shadow-sm mt-4">
-                <div class="card-header bg-success text-white">
-                    <h5 class="mb-0"><i class="bi bi-cash-coin me-2"></i>إنشاء عملية بيع</h5>
-                </div>
-                <div class="card-body">
-                    <?php if (empty($vehicleInventory)): ?>
-                        <div class="alert alert-info mb-0">
-                            <i class="bi bi-info-circle me-2"></i>
-                            لا يوجد مخزون متاح في السيارة حالياً.
+        <?php if (empty($vehicleInventory)): ?>
+            <div class="pos-empty">
+                <i class="bi bi-box"></i>
+                <h5 class="mt-3 mb-2">لا يوجد مخزون متاح حالياً</h5>
+                <p class="mb-0">اطلب تزويد السيارة بالمنتجات لبدء البيع من نقطة البيع الميدانية.</p>
+            </div>
+        <?php else: ?>
+            <section class="pos-content">
+                <div class="pos-panel" style="grid-column: span 7;">
+                    <div class="pos-panel-header">
+                        <div>
+                            <h4>مخزون السيارة</h4>
+                            <p>اضغط على المنتج لإضافته إلى سلة البيع</p>
                         </div>
-                    <?php else: ?>
-                        <form method="post" class="needs-validation" novalidate>
-                            <input type="hidden" name="action" value="create_pos_sale">
-
-                            <?php if (empty($customers)): ?>
-                                <div class="alert alert-warning">
-                                    <i class="bi bi-person-plus me-2"></i>
-                                    لا يوجد عملاء نشطون حالياً. قم بإضافة عميل جديد قبل تسجيل عملية بيع.
+                        <div class="pos-search">
+                            <i class="bi bi-search"></i>
+                            <input type="text" id="posInventorySearch" class="form-control" placeholder="بحث سريع عن منتج...">
+                        </div>
+                    </div>
+                    <div class="pos-product-grid" id="posProductGrid">
+                        <?php foreach ($vehicleInventory as $item): ?>
+                            <div class="pos-product-card" data-product-card data-product-id="<?php echo (int) $item['product_id']; ?>" data-name="<?php echo htmlspecialchars($item['product_name'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" data-category="<?php echo htmlspecialchars($item['category'] ?? '', ENT_QUOTES, 'UTF-8'); ?>">
+                                <div class="pos-product-name"><?php echo htmlspecialchars($item['product_name'] ?? 'منتج'); ?></div>
+                                <?php if (!empty($item['category'])): ?>
+                                    <div class="pos-product-meta">
+                                        <span class="pos-product-badge"><?php echo htmlspecialchars($item['category']); ?></span>
+                                    </div>
+                                <?php endif; ?>
+                                <div class="pos-product-meta">
+                                    <span>سعر الوحدة</span>
+                                    <strong><?php echo formatCurrency((float) ($item['unit_price'] ?? 0)); ?></strong>
                                 </div>
-                            <?php endif; ?>
+                                <div class="pos-product-meta">
+                                    <span>الكمية المتاحة</span>
+                                    <span class="pos-product-qty"><?php echo number_format((float) ($item['quantity'] ?? 0), 2); ?></span>
+                                </div>
+                                <div class="pos-product-meta">
+                                    <span>آخر تحديث</span>
+                                    <span><?php echo !empty($item['last_updated_at']) ? formatDateTime($item['last_updated_at']) : '-'; ?></span>
+                                </div>
+                                <button type="button"
+                                        class="btn btn-outline-primary pos-select-btn"
+                                        data-select-product
+                                        data-product-id="<?php echo (int) $item['product_id']; ?>">
+                                    <i class="bi bi-plus-circle me-2"></i>إضافة إلى السلة
+                                </button>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
 
-                            <div class="mb-3">
-                                <label for="posCustomer" class="form-label">العميل</label>
-                                <select class="form-select" id="posCustomer" name="customer_id" <?php echo empty($customers) ? 'disabled' : 'required'; ?>>
+                <div class="pos-panel pos-checkout-panel" style="grid-column: span 5;">
+                    <div class="pos-selected-product" id="posSelectedProduct">
+                        <h5 class="mb-3">تفاصيل المنتج المختار</h5>
+                        <div class="meta-row">
+                            <div class="meta-block">
+                                <span>المنتج</span>
+                                <div class="fw-semibold" id="posSelectedProductName">-</div>
+                            </div>
+                            <div class="meta-block">
+                                <span>التصنيف</span>
+                                <div class="fw-semibold" id="posSelectedProductCategory">-</div>
+                            </div>
+                        </div>
+                        <div class="meta-row mt-3">
+                            <div class="meta-block">
+                                <span>السعر</span>
+                                <div class="fw-semibold" id="posSelectedProductPrice">-</div>
+                            </div>
+                            <div class="meta-block">
+                                <span>المتوفر</span>
+                                <div class="fw-semibold" id="posSelectedProductStock">-</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pos-panel">
+                        <form method="post" id="posSaleForm" class="pos-form needs-validation" novalidate>
+                            <input type="hidden" name="action" value="create_pos_sale">
+                            <input type="hidden" name="cart_data" id="posCartData">
+                            <input type="hidden" name="paid_amount" id="posPaidField" value="0">
+
+                            <div class="row g-3 mb-3 align-items-end">
+                                <div class="col-sm-6">
+                                    <label class="form-label">تاريخ العملية</label>
+                                    <input type="date" class="form-control" name="sale_date" id="posSaleDate" value="<?php echo date('Y-m-d'); ?>">
+                                </div>
+                                <div class="col-sm-6">
+                                    <label class="form-label">اختيار العميل</label>
+                                    <div class="d-flex gap-3">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="customer_mode" id="posCustomerModeExisting" value="existing" checked>
+                                            <label class="form-check-label" for="posCustomerModeExisting">عميل حالي</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="radio" name="customer_mode" id="posCustomerModeNew" value="new">
+                                            <label class="form-check-label" for="posCustomerModeNew">عميل جديد</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3" id="posExistingCustomerWrap">
+                                <label class="form-label">العملاء المسجلون</label>
+                                <select class="form-select" id="posCustomerSelect" name="customer_id" required>
                                     <option value="">اختر العميل</option>
                                     <?php foreach ($customers as $customer): ?>
-                                        <option value="<?php echo (int) $customer['id']; ?>">
-                                            <?php echo htmlspecialchars($customer['name']); ?>
-                                        </option>
+                                        <option value="<?php echo (int) $customer['id']; ?>"><?php echo htmlspecialchars($customer['name']); ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
 
-                            <div class="mb-3">
-                                <label for="posProduct" class="form-label">المنتج</label>
-                                <select class="form-select" id="posProduct" name="product_id" required>
-                                    <option value="">اختر المنتج</option>
-                                    <?php foreach ($vehicleInventory as $item): ?>
-                                        <option value="<?php echo (int) $item['product_id']; ?>">
-                                            <?php echo htmlspecialchars($item['product_name'] ?? 'منتج غير معروف'); ?>
-                                            (<?php echo number_format((float) $item['quantity'], 2); ?>)
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                                <div class="form-text" id="posProductHint">اختر المنتج لمعرفة الكمية المتاحة والسعر.</div>
+                            <div class="mb-3 d-none" id="posNewCustomerWrap">
+                                <div class="row g-3">
+                                    <div class="col-12">
+                                        <label class="form-label">اسم العميل</label>
+                                        <input type="text" class="form-control" name="new_customer_name" id="posNewCustomerName" placeholder="اسم العميل الجديد">
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <label class="form-label">رقم الهاتف <span class="text-muted">(اختياري)</span></label>
+                                        <input type="text" class="form-control" name="new_customer_phone" placeholder="مثال: 01012345678">
+                                    </div>
+                                    <div class="col-sm-6">
+                                        <label class="form-label">العنوان <span class="text-muted">(اختياري)</span></label>
+                                        <input type="text" class="form-control" name="new_customer_address" placeholder="عنوان العميل">
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="mb-3">
-                                <label for="posQuantity" class="form-label">الكمية</label>
-                                <input type="number" step="0.01" min="0" class="form-control" id="posQuantity" name="quantity" required>
-                                <div class="form-text">الكمية المتاحة: <span id="posAvailableQuantity">0</span></div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <h5 class="mb-0">سلة البيع</h5>
+                                    <button type="button" class="btn btn-link text-danger p-0" id="posClearCartBtn">
+                                        <i class="bi bi-trash me-1"></i>تفريغ السلة
+                                    </button>
+                                </div>
+                                <div class="pos-cart-empty" id="posCartEmpty">
+                                    <i class="bi bi-basket3"></i>
+                                    <p class="mt-2 mb-0">لم يتم اختيار أي منتجات بعد. اضغط على البطاقة لإضافتها.</p>
+                                </div>
+                                <div class="table-responsive d-none" id="posCartTableWrapper">
+                                    <table class="table pos-cart-table align-middle">
+                                        <thead>
+                                            <tr>
+                                                <th>المنتج</th>
+                                                <th width="180">الكمية</th>
+                                                <th width="160">سعر الوحدة</th>
+                                                <th width="160">الإجمالي</th>
+                                                <th width="70"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="posCartBody"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="row g-3 align-items-start mb-3">
+                                <div class="col-sm-6">
+                                    <label class="form-label">مدفوع مسبقاً (اختياري)</label>
+                                    <input type="number" step="0.01" min="0" value="0" class="form-control" id="posPrepaidInput" name="prepaid_amount">
+                                    <div class="pos-inline-note">سيتم خصم المبلغ من إجمالي السلة.</div>
+                                </div>
+                                <div class="col-sm-6">
+                                    <div class="pos-summary-card-neutral">
+                                        <span class="small text-uppercase opacity-75">الإجمالي بعد الخصم</span>
+                                        <span class="total" id="posNetTotal">0</span>
+                                        <span class="small text-uppercase opacity-75">المتبقي على العميل</span>
+                                        <span class="fw-semibold" id="posDueAmount">0</span>
+                                    </div>
+                                </div>
                             </div>
 
                             <div class="mb-3">
-                                <label for="posPrice" class="form-label">سعر الوحدة</label>
-                                <input type="number" step="0.01" min="0" class="form-control" id="posPrice" name="price" required>
+                                <label class="form-label">طريقة الدفع</label>
+                                <div class="pos-payment-options">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="payment_type" id="posPaymentFull" value="full" checked>
+                                        <label class="form-check-label" for="posPaymentFull">دفع كامل الآن</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="payment_type" id="posPaymentPartial" value="partial">
+                                        <label class="form-check-label" for="posPaymentPartial">تحصيل جزئي الآن</label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="payment_type" id="posPaymentCredit" value="credit">
+                                        <label class="form-check-label" for="posPaymentCredit">بيع بالآجل (دون تحصيل فوري)</label>
+                                    </div>
+                                </div>
+                                <div class="mt-3 d-none" id="posPartialWrapper">
+                                    <label class="form-label">مبلغ التحصيل الجزئي</label>
+                                    <input type="number" step="0.01" min="0" value="0" class="form-control" id="posPartialAmount">
+                                </div>
                             </div>
 
                             <div class="mb-3">
-                                <label class="form-label">الإجمالي</label>
-                                <div class="fw-bold fs-5" id="posTotalValue"><?php echo formatCurrency(0); ?></div>
+                                <label class="form-label">ملاحظات إضافية <span class="text-muted">(اختياري)</span></label>
+                                <textarea class="form-control" name="notes" rows="3" placeholder="مثال: تعليمات التسليم، شروط خاصة..."></textarea>
                             </div>
 
-                            <div class="mb-3">
-                                <label for="posDate" class="form-label">تاريخ العملية</label>
-                                <input type="date" class="form-control" id="posDate" name="date" value="<?php echo date('Y-m-d'); ?>">
+                            <div class="d-flex flex-wrap gap-2 justify-content-between">
+                                <button type="button" class="btn btn-outline-secondary" id="posResetFormBtn">
+                                    <i class="bi bi-arrow-repeat me-1"></i>إعادة تعيين
+                                </button>
+                                <button type="submit" class="btn btn-success" id="posSubmitBtn" disabled>
+                                    <i class="bi bi-check-circle me-2"></i>إتمام عملية البيع
+                                </button>
                             </div>
-
-                            <button type="submit" class="btn btn-success w-100" <?php echo empty($customers) ? 'disabled' : ''; ?>>
-                                <i class="bi bi-check-circle me-2"></i>تسجيل البيع
-                            </button>
                         </form>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
+                    </div>
 
-        <div class="col-lg-8">
-            <div class="card shadow-sm">
-                <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-box-seam me-2"></i>مخزون السيارة</h5>
-                    <span class="badge bg-light text-primary">
-                        إجمالي المنتجات: <?php echo number_format($inventoryStats['total_products']); ?>
-                    </span>
-                </div>
-                <div class="card-body">
-                    <div class="table-responsive">
-                        <table class="table table-striped table-hover">
-                            <thead>
-                                <tr>
-                                    <th>المنتج</th>
-                                    <th>التصنيف</th>
-                                    <th>الكمية المتاحة</th>
-                                    <th>سعر الوحدة</th>
-                                    <th>القيمة الإجمالية</th>
-                                    <th>آخر تحديث</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php if (empty($vehicleInventory)): ?>
-                                    <tr>
-                                        <td colspan="6" class="text-center text-muted">لا يوجد مخزون متاح حالياً.</td>
-                                    </tr>
-                                <?php else: ?>
-                                    <?php foreach ($vehicleInventory as $item): ?>
-                                        <tr>
-                                            <td><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
-                                            <td><?php echo htmlspecialchars($item['category'] ?? '-'); ?></td>
-                                            <td><strong><?php echo number_format((float) $item['quantity'], 2); ?></strong></td>
-                                            <td><?php echo formatCurrency((float) ($item['unit_price'] ?? 0)); ?></td>
-                                            <td><?php echo formatCurrency((float) ($item['total_value'] ?? 0)); ?></td>
-                                            <td><?php echo !empty($item['last_updated_at']) ? formatDateTime($item['last_updated_at']) : '-'; ?></td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
+                    <div class="pos-panel">
+                        <div class="pos-panel-header">
+                            <div>
+                                <h5>آخر عمليات البيع</h5>
+                                <p>أحدث عملياتك خلال الفترة الأخيرة</p>
+                            </div>
+                        </div>
+                        <?php if (empty($recentSales)): ?>
+                            <div class="pos-empty mb-0">
+                                <div class="empty-state-icon mb-2"><i class="bi bi-receipt"></i></div>
+                                <div class="empty-state-title">لا توجد عمليات بيع مسجلة</div>
+                                <div class="empty-state-description">ابدأ ببيع منتجات مخزون السيارة ليظهر السجل هنا.</div>
+                            </div>
+                        <?php else: ?>
+                            <div class="pos-history-list">
+                                <?php foreach ($recentSales as $sale): ?>
+                                    <div class="pos-sale-card">
+                                        <div>
+                                            <div class="fw-semibold"><?php echo htmlspecialchars($sale['product_name'] ?? '-'); ?></div>
+                                            <div class="meta">
+                                                <?php echo formatDate($sale['date']); ?> • <?php echo htmlspecialchars($sale['customer_name'] ?? '-'); ?>
+                                            </div>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="fw-semibold mb-1"><?php echo formatCurrency((float) ($sale['total'] ?? 0)); ?></div>
+                                            <span class="badge bg-success">مكتمل</span>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
-            </div>
-
-            <div class="card shadow-sm mt-4">
-                <div class="card-header bg-secondary text-white">
-                    <h5 class="mb-0"><i class="bi bi-clock-history me-2"></i>آخر عمليات البيع</h5>
-                </div>
-                <div class="card-body">
-                    <?php if (empty($recentSales)): ?>
-                        <div class="empty-state-card mb-0">
-                            <div class="empty-state-icon"><i class="bi bi-receipt"></i></div>
-                            <div class="empty-state-title">لا توجد عمليات بيع مسجلة</div>
-                            <div class="empty-state-description">ابدأ ببيع منتجات مخزون السيارة ليظهر السجل هنا.</div>
-                        </div>
-                    <?php else: ?>
-                        <div class="table-responsive">
-                            <table class="table table-borderless align-middle">
-                                <thead>
-                                    <tr>
-                                        <th>التاريخ</th>
-                                        <th>العميل</th>
-                                        <th>المنتج</th>
-                                        <th>الكمية</th>
-                                        <th>الإجمالي</th>
-                                        <th>الحالة</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($recentSales as $sale): ?>
-                                        <tr>
-                                            <td><?php echo formatDate($sale['date']); ?></td>
-                                            <td><?php echo htmlspecialchars($sale['customer_name'] ?? '-'); ?></td>
-                                            <td><?php echo htmlspecialchars($sale['product_name'] ?? '-'); ?></td>
-                                            <td><?php echo number_format((float) $sale['quantity'], 2); ?></td>
-                                            <td><?php echo formatCurrency((float) $sale['total']); ?></td>
-                                            <td>
-                                                <span class="badge bg-success">مكتمل</span>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
+            </section>
+        <?php endif; ?>
     </div>
 <?php endif; ?>
 
 <?php if (!$error && !empty($vehicleInventory)): ?>
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    var productSelect = document.getElementById('posProduct');
-    var quantityInput = document.getElementById('posQuantity');
-    var priceInput = document.getElementById('posPrice');
-    var totalDisplay = document.getElementById('posTotalValue');
-    var availableSpan = document.getElementById('posAvailableQuantity');
-    var saleForm = productSelect ? productSelect.closest('form') : null;
-
-    if (!productSelect || !quantityInput || !priceInput || !totalDisplay) {
-        return;
-    }
-
-    var inventoryData = <?php
-        $inventoryPayload = [];
+(function () {
+    const locale = <?php echo json_encode($pageDirection === 'rtl' ? 'ar-EG' : 'en-US'); ?>;
+    const currencySymbol = <?php echo json_encode(CURRENCY_SYMBOL); ?>;
+    const inventory = <?php
+        $inventoryForJs = [];
         foreach ($vehicleInventory as $item) {
-            $inventoryPayload[(int) $item['product_id']] = [
-                'quantity' => (float) $item['quantity'],
+            $inventoryForJs[] = [
+                'product_id' => (int) ($item['product_id'] ?? 0),
+                'name' => $item['product_name'] ?? '',
+                'category' => $item['category'] ?? '',
+                'quantity' => (float) ($item['quantity'] ?? 0),
                 'unit_price' => (float) ($item['unit_price'] ?? 0),
+                'unit' => $item['unit'] ?? '',
+                'total_value' => (float) ($item['total_value'] ?? 0),
+                'last_updated_at' => $item['last_updated_at'] ?? null,
             ];
         }
-        echo json_encode($inventoryPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        echo json_encode($inventoryForJs, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     ?>;
 
-    var posLocale = <?php echo json_encode($pageDirection === 'rtl' ? 'ar-EG' : 'en-US'); ?>;
-    var currencySymbol = <?php echo json_encode(CURRENCY_SYMBOL); ?>;
+    const inventoryMap = new Map(inventory.map((item) => [item.product_id, item]));
+    const cart = [];
 
-    function updateTotals() {
-        var selectedProduct = parseInt(productSelect.value, 10);
-        var quantity = parseFloat(quantityInput.value) || 0;
-        var price = parseFloat(priceInput.value) || 0;
+    const elements = {
+        form: document.getElementById('posSaleForm'),
+        cartData: document.getElementById('posCartData'),
+        paidField: document.getElementById('posPaidField'),
+        cartBody: document.getElementById('posCartBody'),
+        cartEmpty: document.getElementById('posCartEmpty'),
+        cartTableWrapper: document.getElementById('posCartTableWrapper'),
+        clearCart: document.getElementById('posClearCartBtn'),
+        resetForm: document.getElementById('posResetFormBtn'),
+        netTotal: document.getElementById('posNetTotal'),
+        dueAmount: document.getElementById('posDueAmount'),
+        prepaidInput: document.getElementById('posPrepaidInput'),
+        paymentRadios: document.querySelectorAll('input[name="payment_type"]'),
+        partialWrapper: document.getElementById('posPartialWrapper'),
+        partialInput: document.getElementById('posPartialAmount'),
+        submitBtn: document.getElementById('posSubmitBtn'),
+        customerModeRadios: document.querySelectorAll('input[name="customer_mode"]'),
+        existingCustomerWrap: document.getElementById('posExistingCustomerWrap'),
+        customerSelect: document.getElementById('posCustomerSelect'),
+        newCustomerWrap: document.getElementById('posNewCustomerWrap'),
+        newCustomerName: document.getElementById('posNewCustomerName'),
+        inventoryCards: document.querySelectorAll('[data-product-card]'),
+        inventoryButtons: document.querySelectorAll('[data-select-product]'),
+        inventorySearch: document.getElementById('posInventorySearch'),
+        selectedPanel: document.getElementById('posSelectedProduct'),
+        selectedName: document.getElementById('posSelectedProductName'),
+        selectedCategory: document.getElementById('posSelectedProductCategory'),
+        selectedPrice: document.getElementById('posSelectedProductPrice'),
+        selectedStock: document.getElementById('posSelectedProductStock'),
+    };
 
-        if (inventoryData[selectedProduct]) {
-            var available = inventoryData[selectedProduct].quantity;
-            var defaultPrice = inventoryData[selectedProduct].unit_price;
-
-            availableSpan.textContent = available.toFixed(2);
-
-            if (!price || price <= 0) {
-                priceInput.value = defaultPrice.toFixed(2);
-                price = defaultPrice;
-            }
-
-            if (quantity > available) {
-                quantityInput.value = available.toFixed(2);
-                quantity = available;
-            }
-        } else {
-            availableSpan.textContent = '0.00';
-        }
-
-        var total = quantity * price;
-        var formattedTotal = (total || 0).toLocaleString(posLocale, {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        });
-        totalDisplay.textContent = formattedTotal + ' ' + currencySymbol;
+    function roundTwo(value) {
+        return Math.round((value + Number.EPSILON) * 100) / 100;
     }
 
-    productSelect.addEventListener('change', function () {
-        var selectedProduct = parseInt(this.value, 10);
-        if (inventoryData[selectedProduct]) {
-            priceInput.value = inventoryData[selectedProduct].unit_price.toFixed(2);
-            quantityInput.value = '';
-        } else {
-            priceInput.value = '';
-            quantityInput.value = '';
+    function formatCurrency(value) {
+        return (value || 0).toLocaleString(locale, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }) + ' ' + currencySymbol;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>\"']/g, function (char) {
+            const escapeMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return escapeMap[char] || char;
+        });
+    }
+
+    function renderSelectedProduct(product) {
+        if (!product || !elements.selectedPanel) {
+            return;
         }
-        updateTotals();
+        elements.selectedPanel.classList.add('active');
+        elements.selectedName.textContent = product.name || '-';
+        elements.selectedCategory.textContent = product.category || 'غير مصنف';
+        elements.selectedPrice.textContent = formatCurrency(product.unit_price || 0);
+        elements.selectedStock.textContent = (product.quantity ?? 0).toFixed(2);
+    }
+
+    function syncCartData() {
+        const payload = cart.map((item) => ({
+            product_id: item.product_id,
+            quantity: roundTwo(item.quantity),
+            unit_price: roundTwo(item.unit_price),
+        }));
+        elements.cartData.value = JSON.stringify(payload);
+    }
+
+    function updateSummary() {
+        const subtotal = cart.reduce((total, item) => total + (item.quantity * item.unit_price), 0);
+        let prepaid = parseFloat(elements.prepaidInput.value) || 0;
+        let sanitizedSubtotal = roundTwo(subtotal);
+
+        if (prepaid < 0) {
+            prepaid = 0;
+        }
+        if (prepaid > sanitizedSubtotal) {
+            prepaid = sanitizedSubtotal;
+        }
+        elements.prepaidInput.value = prepaid.toFixed(2);
+
+        const netTotal = roundTwo(sanitizedSubtotal - prepaid);
+        let paidAmount = 0;
+        const paymentType = Array.from(elements.paymentRadios).find((radio) => radio.checked)?.value || 'full';
+
+        if (paymentType === 'full') {
+            paidAmount = netTotal;
+            elements.partialWrapper.classList.add('d-none');
+            elements.partialInput.value = '0.00';
+        } else if (paymentType === 'partial') {
+            elements.partialWrapper.classList.remove('d-none');
+            let partialValue = parseFloat(elements.partialInput.value) || 0;
+            if (partialValue < 0) {
+                partialValue = 0;
+            }
+            if (partialValue >= netTotal && netTotal > 0) {
+                partialValue = Math.max(0, netTotal - 0.01);
+            }
+            elements.partialInput.value = partialValue.toFixed(2);
+            paidAmount = partialValue;
+        } else {
+            elements.partialWrapper.classList.add('d-none');
+            elements.partialInput.value = '0.00';
+            paidAmount = 0;
+        }
+
+        const dueAmount = roundTwo(Math.max(0, netTotal - paidAmount));
+
+        if (elements.netTotal) {
+            elements.netTotal.textContent = formatCurrency(netTotal);
+        }
+        if (elements.dueAmount) {
+            elements.dueAmount.textContent = formatCurrency(dueAmount);
+        }
+
+        elements.paidField.value = paidAmount.toFixed(2);
+        elements.submitBtn.disabled = cart.length === 0;
+        syncCartData();
+    }
+
+    function renderCart() {
+        if (!elements.cartBody || !elements.cartTableWrapper || !elements.cartEmpty) {
+            return;
+        }
+
+        if (!cart.length) {
+            elements.cartBody.innerHTML = '';
+            elements.cartTableWrapper.classList.add('d-none');
+            elements.cartEmpty.classList.remove('d-none');
+            updateSummary();
+            return;
+        }
+
+        elements.cartTableWrapper.classList.remove('d-none');
+        elements.cartEmpty.classList.add('d-none');
+
+        const rows = cart.map((item) => {
+            return `
+                <tr data-cart-row data-product-id="${item.product_id}">
+                    <td>
+                        <div class="fw-semibold">${escapeHtml(item.name)}</div>
+                        <div class="text-muted small">التصنيف: ${escapeHtml(item.category || 'غير مصنف')} • متاح: ${item.available.toFixed(2)}</div>
+                    </td>
+                    <td>
+                        <div class="pos-qty-control">
+                            <button type="button" class="btn btn-light border" data-action="decrease" data-product-id="${item.product_id}"><i class="bi bi-dash"></i></button>
+                            <input type="number" step="0.01" min="0" class="form-control" data-cart-qty data-product-id="${item.product_id}" value="${item.quantity.toFixed(2)}">
+                            <button type="button" class="btn btn-light border" data-action="increase" data-product-id="${item.product_id}"><i class="bi bi-plus"></i></button>
+                        </div>
+                    </td>
+                    <td>
+                        <input type="number" step="0.01" min="0" class="form-control" data-cart-price data-product-id="${item.product_id}" value="${item.unit_price.toFixed(2)}">
+                    </td>
+                    <td class="fw-semibold">${formatCurrency(item.quantity * item.unit_price)}</td>
+                    <td class="text-end">
+                        <button type="button" class="btn btn-link text-danger" data-action="remove" data-product-id="${item.product_id}"><i class="bi bi-x-circle"></i></button>
+                    </td>
+                </tr>`;
+        }).join('');
+
+        elements.cartBody.innerHTML = rows;
+        updateSummary();
+    }
+
+    function addToCart(productId) {
+        const product = inventoryMap.get(productId);
+        if (!product) {
+            return;
+        }
+        const existing = cart.find((item) => item.product_id === productId);
+        if (existing) {
+            if (existing.quantity + 1 > product.quantity) {
+                existing.quantity = product.quantity;
+            } else {
+                existing.quantity = roundTwo(existing.quantity + 1);
+            }
+        } else {
+            if (product.quantity <= 0) {
+                return;
+            }
+            cart.push({
+                product_id: product.product_id,
+                name: product.name,
+                category: product.category,
+                quantity: Math.min(1, product.quantity),
+                available: product.quantity,
+                unit_price: product.unit_price > 0 ? product.unit_price : 0,
+            });
+        }
+        renderSelectedProduct(product);
+        renderCart();
+    }
+
+    function removeFromCart(productId) {
+        const index = cart.findIndex((item) => item.product_id === productId);
+        if (index >= 0) {
+            cart.splice(index, 1);
+            renderCart();
+        }
+    }
+
+    function adjustQuantity(productId, delta) {
+        const item = cart.find((entry) => entry.product_id === productId);
+        const product = inventoryMap.get(productId);
+        if (!item || !product) {
+            return;
+        }
+        let newQuantity = roundTwo(item.quantity + delta);
+        if (newQuantity <= 0) {
+            removeFromCart(productId);
+            return;
+        }
+        if (newQuantity > product.quantity) {
+            newQuantity = product.quantity;
+        }
+        item.quantity = newQuantity;
+        renderCart();
+    }
+
+    function updateQuantity(productId, value) {
+        const item = cart.find((entry) => entry.product_id === productId);
+        const product = inventoryMap.get(productId);
+        if (!item || !product) {
+            return;
+        }
+        let qty = parseFloat(value) || 0;
+        if (qty <= 0) {
+            removeFromCart(productId);
+            return;
+        }
+        if (qty > product.quantity) {
+            qty = product.quantity;
+        }
+        item.quantity = roundTwo(qty);
+        renderCart();
+    }
+
+    function updateUnitPrice(productId, value) {
+        const item = cart.find((entry) => entry.product_id === productId);
+        if (!item) {
+            return;
+        }
+        let price = parseFloat(value) || 0;
+        if (price < 0) {
+            price = 0;
+        }
+        item.unit_price = roundTwo(price);
+        renderCart();
+    }
+
+    elements.inventoryButtons.forEach((button) => {
+        button.addEventListener('click', function (event) {
+            event.stopPropagation();
+            const productId = parseInt(this.dataset.productId, 10);
+            addToCart(productId);
+        });
     });
 
-    quantityInput.addEventListener('input', updateTotals);
-    priceInput.addEventListener('input', updateTotals);
+    elements.inventoryCards.forEach((card) => {
+        card.addEventListener('click', function () {
+            const productId = parseInt(this.dataset.productId, 10);
+            elements.inventoryCards.forEach((c) => c.classList.remove('active'));
+            this.classList.add('active');
+            renderSelectedProduct(inventoryMap.get(productId));
+        });
+    });
 
-    if (saleForm) {
-        saleForm.addEventListener('submit', function (event) {
-            if (!saleForm.checkValidity()) {
+    if (elements.inventorySearch) {
+        elements.inventorySearch.addEventListener('input', function () {
+            const term = (this.value || '').toLowerCase().trim();
+            elements.inventoryCards.forEach((card) => {
+                const name = (card.dataset.name || '').toLowerCase();
+                const category = (card.dataset.category || '').toLowerCase();
+                const matches = !term || name.includes(term) || category.includes(term);
+                card.style.display = matches ? '' : 'none';
+            });
+        });
+    }
+
+    if (elements.cartBody) {
+        elements.cartBody.addEventListener('click', function (event) {
+            const action = event.target.closest('[data-action]');
+            if (!action) {
+                return;
+            }
+            const productId = parseInt(action.dataset.productId, 10);
+            switch (action.dataset.action) {
+                case 'increase':
+                    adjustQuantity(productId, 1);
+                    break;
+                case 'decrease':
+                    adjustQuantity(productId, -1);
+                    break;
+                case 'remove':
+                    removeFromCart(productId);
+                    break;
+            }
+        });
+
+        elements.cartBody.addEventListener('input', function (event) {
+            const qtyInput = event.target.matches('[data-cart-qty]') ? event.target : null;
+            const priceInput = event.target.matches('[data-cart-price]') ? event.target : null;
+            const productId = parseInt(event.target.dataset.productId || '0', 10);
+            if (qtyInput) {
+                updateQuantity(productId, qtyInput.value);
+            }
+            if (priceInput) {
+                updateUnitPrice(productId, priceInput.value);
+            }
+        });
+    }
+
+    if (elements.clearCart) {
+        elements.clearCart.addEventListener('click', function () {
+            cart.length = 0;
+            renderCart();
+        });
+    }
+
+    if (elements.resetForm) {
+        elements.resetForm.addEventListener('click', function () {
+            cart.length = 0;
+            renderCart();
+            elements.form?.reset();
+            elements.partialWrapper?.classList.add('d-none');
+            elements.submitBtn.disabled = true;
+            elements.selectedPanel?.classList.remove('active');
+        });
+    }
+
+    if (elements.prepaidInput) {
+        elements.prepaidInput.addEventListener('input', updateSummary);
+    }
+
+    if (elements.partialInput) {
+        elements.partialInput.addEventListener('input', updateSummary);
+    }
+
+    elements.paymentRadios.forEach((radio) => {
+        radio.addEventListener('change', updateSummary);
+    });
+
+    elements.customerModeRadios.forEach((radio) => {
+        radio.addEventListener('change', function () {
+            const mode = this.value;
+            if (mode === 'existing') {
+                elements.existingCustomerWrap?.classList.remove('d-none');
+                elements.customerSelect?.setAttribute('required', 'required');
+                elements.newCustomerWrap?.classList.add('d-none');
+                elements.newCustomerName?.removeAttribute('required');
+            } else {
+                elements.existingCustomerWrap?.classList.add('d-none');
+                elements.customerSelect?.removeAttribute('required');
+                elements.newCustomerWrap?.classList.remove('d-none');
+                elements.newCustomerName?.setAttribute('required', 'required');
+            }
+        });
+    });
+
+    if (elements.form) {
+        elements.form.addEventListener('submit', function (event) {
+            if (!cart.length) {
+                event.preventDefault();
+                event.stopPropagation();
+                alert('يرجى إضافة منتجات إلى السلة قبل إتمام العملية.');
+                return;
+            }
+            updateSummary();
+            if (!elements.form.checkValidity()) {
                 event.preventDefault();
                 event.stopPropagation();
             }
-            saleForm.classList.add('was-validated');
+            elements.form.classList.add('was-validated');
         });
     }
-});
+
+    // تهيئة أولية للقيم
+    renderCart();
+})();
 </script>
 <?php endif; ?>
 
