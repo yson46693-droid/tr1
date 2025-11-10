@@ -1830,27 +1830,55 @@ if (!empty($unifiedTemplatesCheck)) {
                 $packagingNameSelect = $hasTemplatePackagingNameColumn
                     ? 'tp.packaging_name'
                     : "COALESCE(pm.name, CONCAT('أداة تعبئة #', tp.packaging_material_id))";
-                $packagingItems = $db->query(
-                    "SELECT tp.packaging_material_id, tp.quantity_per_unit,
-                            {$packagingNameSelect} AS packaging_name,
-                            pm.unit AS packaging_unit
-                     FROM template_packaging tp
-                     LEFT JOIN packaging_materials pm ON tp.packaging_material_id = pm.id
-                     WHERE tp.template_id = ?",
-                    [$template['id']]
-                );
 
-                foreach ($packagingItems as $item) {
-                    $quantity = isset($item['quantity_per_unit']) ? (float)$item['quantity_per_unit'] : 0.0;
-                    if ($quantity <= 0) {
-                        continue;
+                $packagingSql = "
+                    SELECT tp.packaging_material_id, tp.quantity_per_unit,
+                           {$packagingNameSelect} AS packaging_name,
+                           pm.unit AS packaging_unit
+                    FROM template_packaging tp
+                    LEFT JOIN packaging_materials pm ON tp.packaging_material_id = pm.id
+                    WHERE tp.template_id = ?
+                ";
+
+                try {
+                    $packagingItems = $db->query($packagingSql, [$template['id']]);
+
+                    foreach ($packagingItems as $item) {
+                        $quantity = isset($item['quantity_per_unit']) ? (float)$item['quantity_per_unit'] : 0.0;
+                        if ($quantity <= 0) {
+                            continue;
+                        }
+
+                        $packagingDetails[] = [
+                            'name' => $item['packaging_name'] ?? 'مادة تعبئة',
+                            'quantity_per_unit' => $quantity,
+                            'unit' => $item['packaging_unit'] ?? 'وحدة'
+                        ];
                     }
+                } catch (Exception $innerError) {
+                    // في حال فشل الاستعلام الأساسي بسبب عمود مفقود، كرر بدون الأعمدة الاختيارية
+                    $fallbackItems = $db->query(
+                        "SELECT tp.packaging_material_id, tp.quantity_per_unit,
+                                COALESCE(pm.name, CONCAT('أداة تعبئة #', tp.packaging_material_id)) AS packaging_name,
+                                pm.unit AS packaging_unit
+                         FROM template_packaging tp
+                         LEFT JOIN packaging_materials pm ON tp.packaging_material_id = pm.id
+                         WHERE tp.template_id = ?",
+                        [$template['id']]
+                    );
 
-                    $packagingDetails[] = [
-                        'name' => $item['packaging_name'] ?? 'مادة تعبئة',
-                        'quantity_per_unit' => $quantity,
-                        'unit' => $item['packaging_unit'] ?? 'وحدة'
-                    ];
+                    foreach ($fallbackItems as $item) {
+                        $quantity = isset($item['quantity_per_unit']) ? (float)$item['quantity_per_unit'] : 0.0;
+                        if ($quantity <= 0) {
+                            continue;
+                        }
+
+                        $packagingDetails[] = [
+                            'name' => $item['packaging_name'] ?? 'مادة تعبئة',
+                            'quantity_per_unit' => $quantity,
+                            'unit' => $item['packaging_unit'] ?? 'وحدة'
+                        ];
+                    }
                 }
             } catch (Exception $e) {
                 error_log("Fetching template packaging failed for template {$template['id']}: " . $e->getMessage());
