@@ -2988,6 +2988,7 @@ echo json_encode(array_map(function($supplier) {
 ?>;
 window.honeyStockData = <?php echo json_encode($honeyStockDataForJs, JSON_UNESCAPED_UNICODE); ?>;
 let currentTemplateMode = 'advanced';
+const TEMPLATE_DETAILS_BASE_URL = '<?php echo addslashes(getRelativeUrl('dashboard/production.php')); ?>';
 
 const HONEY_COMPONENT_TYPES = ['honey_raw', 'honey_filtered', 'honey_general', 'honey_main'];
 
@@ -3695,19 +3696,9 @@ function openCreateFromTemplateModal(element) {
         return;
     }
 
-    const createModalUrl = (relativePath) => {
-        if (/^https?:\/\//i.test(relativePath)) {
-            return relativePath;
-        }
-        try {
-            return new URL(relativePath, window.location.href).toString();
-        } catch (error) {
-            const basePath = window.location.pathname.replace(/[^\/]*$/, '');
-            return window.location.origin + basePath + relativePath.replace(/^\//, '');
-        }
-    };
-
-    const requestUrl = createModalUrl('/dashboard/production.php?page=production&ajax=template_details&template_id=' + templateId + '&template_type=' + encodeURIComponent(templateType));
+    const requestUrl = TEMPLATE_DETAILS_BASE_URL +
+        '?page=production&ajax=template_details&template_id=' + encodeURIComponent(templateId) +
+        '&template_type=' + encodeURIComponent(templateType);
 
     fetch(requestUrl, { cache: 'no-store' })
         .then(response => response.ok ? response.json() : Promise.reject(new Error('Network error')))
