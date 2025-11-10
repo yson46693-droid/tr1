@@ -264,6 +264,19 @@ if ($page === 'sales_collections') {
                         .combined-tab-pane {
                             animation: fadeUp 0.25s ease;
                         }
+                         .combined-actions {
+                             display: flex;
+                             justify-content: flex-end;
+                             gap: 0.75rem;
+                             margin-bottom: 1.5rem;
+                             flex-wrap: wrap;
+                         }
+                         .combined-actions .btn i {
+                             font-size: 1rem;
+                         }
+                         .combined-actions .btn span {
+                             font-weight: 600;
+                         }
                         @keyframes fadeUp {
                             from {
                                 opacity: 0;
@@ -302,6 +315,16 @@ if ($page === 'sales_collections') {
 
                     <div class="tab-content combined-tab-content" id="salesCollectionsTabContent">
                         <div class="tab-pane fade show active combined-tab-pane" id="sales-section" role="tabpanel" aria-labelledby="sales-tab">
+                             <div class="combined-actions">
+                                 <button type="button"
+                                         class="btn btn-outline-primary"
+                                         data-report-target="sales-section-content"
+                                         data-report-title="<?php echo htmlspecialchars(isset($lang['sales_report']) ? $lang['sales_report'] : 'تقرير المبيعات', ENT_QUOTES, 'UTF-8'); ?>">
+                                     <i class="bi bi-printer"></i>
+                                     <span><?php echo isset($lang['print_ready_report']) ? $lang['print_ready_report'] : 'إنشاء تقرير جاهز للطباعة'; ?></span>
+                                 </button>
+                             </div>
+                             <div id="sales-section-content" class="printable-section">
                             <?php 
                             $salesModulePath = __DIR__ . '/../modules/sales/sales.php';
                             if (file_exists($salesModulePath)) {
@@ -314,9 +337,20 @@ if ($page === 'sales_collections') {
                                 <div class="empty-state-description"><?php echo isset($lang['sales_page_coming_soon']) ? $lang['sales_page_coming_soon'] : 'صفحة المبيعات - سيتم إضافتها'; ?></div>
                             </div>
                             <?php } ?>
+                             </div>
                         </div>
 
                         <div class="tab-pane fade combined-tab-pane" id="collections-section" role="tabpanel" aria-labelledby="collections-tab">
+                             <div class="combined-actions">
+                                 <button type="button"
+                                         class="btn btn-outline-success"
+                                         data-report-target="collections-section-content"
+                                         data-report-title="<?php echo htmlspecialchars(isset($lang['collections_report']) ? $lang['collections_report'] : 'تقرير التحصيلات', ENT_QUOTES, 'UTF-8'); ?>">
+                                     <i class="bi bi-printer"></i>
+                                     <span><?php echo isset($lang['print_ready_report']) ? $lang['print_ready_report'] : 'إنشاء تقرير جاهز للطباعة'; ?></span>
+                                 </button>
+                             </div>
+                             <div id="collections-section-content" class="printable-section">
                             <?php 
                             $collectionsModulePath = __DIR__ . '/../modules/sales/collections.php';
                             if (file_exists($collectionsModulePath)) {
@@ -329,6 +363,7 @@ if ($page === 'sales_collections') {
                                 <div class="empty-state-description"><?php echo isset($lang['collections_page_coming_soon']) ? $lang['collections_page_coming_soon'] : 'صفحة التحصيلات - سيتم إضافتها'; ?></div>
                             </div>
                             <?php } ?>
+                             </div>
                         </div>
                     </div>
                 </div>
@@ -342,7 +377,79 @@ if ($page === 'sales_collections') {
                                 tab.show();
                             }
                         }
+ 
+                         const assetsBaseUrl = '<?php echo rtrim(ASSETS_URL, '/'); ?>';
+                         const printableButtons = document.querySelectorAll('[data-report-target]');
+ 
+                         printableButtons.forEach(function(button) {
+                             button.addEventListener('click', function() {
+                                 const targetId = this.getAttribute('data-report-target');
+                                 const reportTitle = this.getAttribute('data-report-title') || '';
+                                 openPrintableReport(targetId, reportTitle, assetsBaseUrl);
+                             });
+                         });
                     });
+ 
+                     function openPrintableReport(targetId, reportTitle, assetsBaseUrl) {
+                         if (!targetId) {
+                             console.warn('Missing target for printable report.');
+                             return;
+                         }
+ 
+                         const section = document.getElementById(targetId);
+                         if (!section) {
+                             console.warn('Printable section not found:', targetId);
+                             return;
+                         }
+ 
+                         const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=768');
+                         if (!printWindow) {
+                             alert('يرجى السماح بالنوافذ المنبثقة لإنشاء التقرير');
+                             return;
+                         }
+ 
+                         const doc = printWindow.document;
+                         const pageDirection = document.documentElement.getAttribute('dir') || 'rtl';
+                         const pageLang = document.documentElement.getAttribute('lang') || 'ar';
+ 
+                         const sanitizedTitle = typeof reportTitle === 'string' ? reportTitle : '';
+                         const generatedAt = new Date().toLocaleString('ar-EG', { hour12: false });
+                         const stylesheets = [
+                             'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
+                             assetsBaseUrl + '/css/homeline-dashboard.css',
+                             assetsBaseUrl + '/css/tables.css',
+                             assetsBaseUrl + '/css/cards.css'
+                         ];
+ 
+                         doc.open();
+                         doc.write('<!DOCTYPE html><html lang="' + pageLang + '" dir="' + pageDirection + '"><head><meta charset="UTF-8">');
+                         doc.write('<title>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</title>');
+                         stylesheets.forEach(function(href) {
+                             doc.write('<link rel="stylesheet" href="' + href + '" media="all">');
+                         });
+                         doc.write('<style>body{background:#fff;color:#000;padding:24px;font-family:\'Segoe UI\',Tahoma,sans-serif;} .print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;} .print-header h1{font-size:1.5rem;margin-bottom:0;} .print-meta{font-size:0.9rem;color:#6c757d;} @media print{.print-controls{display:none!important;}}</style>');
+                         doc.write('</head><body>');
+                         doc.write('<div class="print-header text-center">');
+                         doc.write('<h1>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</h1>');
+                         doc.write('<div class="print-meta">' + escapeHtmlForPrint('تم الإنشاء في: ' + generatedAt) + '</div>');
+                         doc.write('</div>');
+                         doc.write('<div class="print-content">' + section.innerHTML + '</div>');
+                         doc.write('<script>window.addEventListener("load",function(){window.focus();window.print();});<' + '/script>');
+                         doc.write('</body></html>');
+                         doc.close();
+                     }
+ 
+                     function escapeHtmlForPrint(value) {
+                         if (typeof value !== 'string') {
+                             return '';
+                         }
+                         return value
+                             .replace(/&/g, '&amp;')
+                             .replace(/</g, '&lt;')
+                             .replace(/>/g, '&gt;')
+                             .replace(/"/g, '&quot;')
+                             .replace(/'/g, '&#039;');
+                     }
                 </script>
                 
             <?php elseif ($page === 'orders'): ?>

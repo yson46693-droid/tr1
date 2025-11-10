@@ -14,6 +14,100 @@ require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/vehicle_inventory.php';
 require_once __DIR__ . '/../../includes/inventory_movements.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/invoices.php';
+require_once __DIR__ . '/../../includes/reports.php';
+require_once __DIR__ . '/../../includes/simple_telegram.php';
+
+if (!function_exists('renderSalesInvoiceHtml')) {
+    function renderSalesInvoiceHtml(array $invoice, array $meta = []): string
+    {
+        ob_start();
+        $selectedInvoice = $invoice;
+        $invoiceData = $invoice;
+        $invoiceMeta = $meta;
+        include __DIR__ . '/../accountant/invoice_print.php';
+        return (string) ob_get_clean();
+    }
+}
+
+if (!function_exists('storeSalesInvoiceDocument')) {
+    function storeSalesInvoiceDocument(array $invoice, array $meta = []): ?array
+    {
+        try {
+            if (!function_exists('ensurePrivateDirectory')) {
+                return null;
+            }
+
+            $basePath = defined('REPORTS_PRIVATE_PATH')
+                ? REPORTS_PRIVATE_PATH
+                : (defined('REPORTS_PATH') ? REPORTS_PATH : (dirname(__DIR__, 2) . '/reports'));
+
+            $basePath = rtrim((string) $basePath, '/\\');
+            if ($basePath === '') {
+                return null;
+            }
+
+            ensurePrivateDirectory($basePath);
+
+            $exportsDir = $basePath . DIRECTORY_SEPARATOR . 'exports';
+            $salesDir = $exportsDir . DIRECTORY_SEPARATOR . 'sales-pos';
+
+            ensurePrivateDirectory($exportsDir);
+            ensurePrivateDirectory($salesDir);
+
+            if (!is_dir($salesDir) || !is_writable($salesDir)) {
+                error_log('POS invoice directory not writable: ' . $salesDir);
+                return null;
+            }
+
+            $document = renderSalesInvoiceHtml($invoice, $meta);
+            if ($document === '') {
+                return null;
+            }
+
+            $pattern = $salesDir . DIRECTORY_SEPARATOR . 'pos-invoice-*';
+            foreach (glob($pattern) ?: [] as $file) {
+                if (is_string($file)) {
+                    @unlink($file);
+                }
+            }
+
+            $token = bin2hex(random_bytes(8));
+            $normalizedNumber = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($invoice['invoice_number'] ?? 'INV'));
+            $filename = sprintf('pos-invoice-%s-%s.html', date('Ymd-His'), $normalizedNumber);
+            $fullPath = $salesDir . DIRECTORY_SEPARATOR . $filename;
+
+            if (@file_put_contents($fullPath, $document) === false) {
+                return null;
+            }
+
+            $relativePath = 'exports/sales-pos/' . $filename;
+            $viewerPath = '/reports/view.php?type=export&file=' . rawurlencode($relativePath) . '&token=' . $token;
+            $printPath = $viewerPath . '&print=1';
+
+            $absoluteViewer = function_exists('getAbsoluteUrl')
+                ? getAbsoluteUrl(ltrim($viewerPath, '/'))
+                : $viewerPath;
+            $absolutePrint = function_exists('getAbsoluteUrl')
+                ? getAbsoluteUrl(ltrim($printPath, '/'))
+                : $printPath;
+
+            return [
+                'relative_path' => $relativePath,
+                'viewer_path' => $viewerPath,
+                'print_path' => $printPath,
+                'absolute_report_url' => $absoluteViewer,
+                'absolute_print_url' => $absolutePrint,
+                'generated_at' => date('Y-m-d H:i:s'),
+                'summary' => $meta['summary'] ?? [],
+                'token' => $token,
+            ];
+        } catch (Throwable $error) {
+            error_log('POS invoice storage failed: ' . $error->getMessage());
+            return null;
+        }
+    }
+}
 
 requireRole(['sales', 'manager']);
 
