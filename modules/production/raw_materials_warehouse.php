@@ -14,7 +14,6 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/honey_varieties.php';
-require_once __DIR__ . '/../../includes/table_styles.php';
 
 if (!function_exists('buildRawMaterialsReportHtmlDocument')) {
     /**
@@ -2817,8 +2816,8 @@ if ($section === 'honey') {
                     لا يوجد مخزون عسل
                 </div>
             <?php else: ?>
-                <div class="table-responsive dashboard-table-wrapper">
-                    <table class="table dashboard-table align-middle">
+                <div class="table-responsive">
+                    <table class="table table-hover">
                         <thead class="table-light">
                             <tr>
                                 <th>المورد</th>
@@ -3156,8 +3155,8 @@ if ($section === 'honey') {
                             لا يوجد مخزون
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive dashboard-table-wrapper">
-                            <table class="table dashboard-table dashboard-table--compact align-middle">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
                                 <thead>
                                     <tr>
                                         <th>المورد</th>
@@ -3354,8 +3353,8 @@ if ($section === 'honey') {
                             لا يوجد مخزون
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive dashboard-table-wrapper">
-                            <table class="table dashboard-table dashboard-table--compact align-middle">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
                                 <thead>
                                     <tr>
                                         <th>المورد</th>
@@ -3568,8 +3567,8 @@ if ($section === 'honey') {
                             لا يوجد مخزون
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive dashboard-table-wrapper">
-                            <table class="table dashboard-table dashboard-table--compact align-middle">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
                                 <thead>
                                     <tr>
                                         <th>النوع</th>
@@ -3798,8 +3797,8 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
                             لا يوجد مخزون مكسرات
                         </div>
                     <?php else: ?>
-                        <div class="table-responsive dashboard-table-wrapper">
-                            <table class="table dashboard-table dashboard-table--compact align-middle">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
                                 <thead>
                                     <tr>
                                         <th>النوع</th>
@@ -4649,8 +4648,8 @@ document.addEventListener('show.bs.modal', function() {
                     <hr>
                     <h6 class="mb-3"><i class="bi bi-droplet me-2"></i>المواد الخام</h6>
 
-                    <div class="table-responsive dashboard-table-wrapper">
-                        <table class="table dashboard-table dashboard-table--compact align-middle" id="templateRawMaterialsTable">
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle" id="templateRawMaterialsTable">
                             <thead class="table-light">
                                 <tr>
                                     <th>نوع المادة</th>
@@ -4707,8 +4706,8 @@ document.addEventListener('show.bs.modal', function() {
                     <hr>
                     <h6 class="mb-3"><i class="bi bi-box-seam me-2"></i>أدوات التعبئة</h6>
 
-                    <div class="table-responsive dashboard-table-wrapper">
-                        <table class="table dashboard-table dashboard-table--compact align-middle" id="templatePackagingTable">
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle" id="templatePackagingTable">
                             <thead class="table-light">
                                 <tr>
                                     <th>مادة التعبئة</th>

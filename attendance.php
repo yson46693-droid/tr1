@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/path_helper.php';
 require_once __DIR__ . '/includes/attendance.php';
 require_once __DIR__ . '/includes/audit_log.php';
+require_once __DIR__ . '/includes/table_styles.php';
 
 requireLogin();
 
@@ -262,8 +263,8 @@ $lang = isset($translations) ? $translations : [];
                     لا توجد سجلات حضور اليوم
                 </div>
             <?php else: ?>
-                <div class="table-responsive">
-                    <table class="table table-striped table-hover">
+                <div class="table-responsive dashboard-table-wrapper">
+                    <table class="table dashboard-table align-middle">
                         <thead>
                             <tr>
                                 <th>#</th>
@@ -327,8 +328,8 @@ $lang = isset($translations) ? $translations : [];
             <?php endif; ?>
         </div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>التاريخ</th>

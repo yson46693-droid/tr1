@@ -16,7 +16,6 @@ require_once __DIR__ . '/../../includes/batch_numbers.php';
 require_once __DIR__ . '/../../includes/simple_barcode.php';
 require_once __DIR__ . '/../../includes/consumption_reports.php';
 require_once __DIR__ . '/../../includes/production_helper.php';
-require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
