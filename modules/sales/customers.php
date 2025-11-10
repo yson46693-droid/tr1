@@ -17,11 +17,12 @@ require_once __DIR__ . '/../../includes/path_helper.php';
 requireRole(['sales', 'accountant', 'manager']);
 
 $currentUser = getCurrentUser();
+$isSalesUser = isset($currentUser['role']) && $currentUser['role'] === 'sales';
 $db = db();
 $error = '';
 $success = '';
 $section = $_GET['section'] ?? ($_POST['section'] ?? 'company');
-$allowedSections = ['company', 'delegates'];
+$allowedSections = $isSalesUser ? ['company'] : ['company', 'delegates'];
 if (!in_array($section, $allowedSections, true)) {
     $section = 'company';
 }
@@ -55,12 +56,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $transactionStarted = true;
 
                 $customer = $db->queryOne(
-                    "SELECT id, name, balance FROM customers WHERE id = ? FOR UPDATE",
+                    "SELECT id, name, balance, created_by FROM customers WHERE id = ? FOR UPDATE",
                     [$customerId]
                 );
 
                 if (!$customer) {
                     throw new InvalidArgumentException('لم يتم العثور على العميل المطلوب.');
+                }
+
+                if ($isSalesUser && (int)($customer['created_by'] ?? 0) !== (int)$currentUser['id']) {
+                    throw new InvalidArgumentException('غير مصرح لك بتحصيل ديون هذا العميل.');
                 }
 
                 $currentBalance = isset($customer['balance']) ? (float)$customer['balance'] : 0.0;
@@ -184,9 +189,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         }
 
         try {
-            $customer = $db->queryOne("SELECT id FROM customers WHERE id = ?", [$customerId]);
+            $customer = $db->queryOne("SELECT id, created_by FROM customers WHERE id = ?", [$customerId]);
             if (!$customer) {
                 throw new InvalidArgumentException('العميل المطلوب غير موجود.');
+            }
+
+            if ($isSalesUser && (int)($customer['created_by'] ?? 0) !== (int)$currentUser['id']) {
+                throw new InvalidArgumentException('غير مصرح لك بتحديث موقع هذا العميل.');
             }
 
             $db->execute(
@@ -286,6 +295,15 @@ $params = [];
 $countParams = [];
 $statsParams = [];
 
+if ($isSalesUser) {
+    $sql .= " AND c.created_by = ?";
+    $countSql .= " AND created_by = ?";
+    $statsSql .= " AND created_by = ?";
+    $params[] = $currentUser['id'];
+    $countParams[] = $currentUser['id'];
+    $statsParams[] = $currentUser['id'];
+}
+
 if ($debtStatus === 'debtor') {
     $sql .= " AND (c.balance IS NOT NULL AND c.balance > 0)";
     $countSql .= " AND (balance IS NOT NULL AND balance > 0)";
@@ -345,6 +363,11 @@ try {
         $collectionsSql .= " AND col.status = 'approved'";
     }
 
+    if ($isSalesUser) {
+        $collectionsSql .= " AND c.created_by = ?";
+        $collectionsParams[] = $currentUser['id'];
+    }
+
     if ($debtStatus === 'debtor') {
         $collectionsSql .= " AND (c.balance IS NOT NULL AND c.balance > 0)";
     } elseif ($debtStatus === 'clear') {
@@ -372,7 +395,9 @@ $summaryTotalCustomers = $customerStats['total_count'] ?? $totalCustomers;
 ?>
 
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center mb-3">
-    <h2 class="mb-2 mb-md-0"><i class="bi bi-people me-2"></i>العملاء</h2>
+    <h2 class="mb-2 mb-md-0">
+        <i class="bi bi-people me-2"></i><?php echo $isSalesUser ? 'عملائي' : 'العملاء'; ?>
+    </h2>
     <?php if ($section === 'company'): ?>
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addCustomerModal">
         <i class="bi bi-person-plus me-2"></i>إضافة عميل جديد
@@ -380,27 +405,43 @@ $summaryTotalCustomers = $customerStats['total_count'] ?? $totalCustomers;
     <?php endif; ?>
 </div>
 
-<ul class="nav nav-pills gap-2 mb-4">
-    <li class="nav-item">
-        <a class="nav-link <?php echo $section === 'company' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl('sales.php?page=customers&section=company'); ?>">
-            <i class="bi bi-building me-2"></i>عملاء الشركة
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link <?php echo $section === 'delegates' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl('sales.php?page=customers&section=delegates'); ?>">
-            <i class="bi bi-people-fill me-2"></i>عملاء المندوبين
-        </a>
-    </li>
-</ul>
+<?php if (!$isSalesUser): ?>
+    <ul class="nav nav-pills gap-2 mb-4">
+        <li class="nav-item">
+            <a class="nav-link <?php echo $section === 'company' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl('sales.php?page=customers&section=company'); ?>">
+                <i class="bi bi-building me-2"></i>عملاء الشركة
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link <?php echo $section === 'delegates' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl('sales.php?page=customers&section=delegates'); ?>">
+                <i class="bi bi-people-fill me-2"></i>عملاء المندوبين
+            </a>
+        </li>
+    </ul>
+<?php else: ?>
+    <div class="alert alert-info d-flex align-items-center gap-2">
+        <i class="bi bi-info-circle-fill"></i>
+        <div class="flex-grow-1">
+            هذه الصفحة تعرض فقط العملاء الذين قمت بإضافتهم أو متابعتهم بصفتك مندوب المبيعات الحالي.
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php if ($section === 'company'): ?>
+
+<?php
+$customersLabel = $isSalesUser ? 'عدد عملائي' : 'عدد العملاء';
+$debtorsLabel = $isSalesUser ? 'عملائي المدينون' : 'العملاء المدينون';
+$totalDebtLabel = $isSalesUser ? 'إجمالي ديون عملائي' : 'إجمالي الديون';
+$collectionsLabel = $isSalesUser ? 'تحصيلاتي' : 'إجمالي التحصيلات';
+?>
 
 <div class="row g-3 mb-4">
     <div class="col-12 col-md-6 col-xl-3">
         <div class="card shadow-sm border-0 h-100">
             <div class="card-body d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="text-muted small fw-semibold">عدد العملاء</div>
+                    <div class="text-muted small fw-semibold"><?php echo $customersLabel; ?></div>
                     <div class="fs-4 fw-bold mb-0"><?php echo number_format((int)$summaryTotalCustomers); ?></div>
                 </div>
                 <span class="text-primary display-6"><i class="bi bi-people-fill"></i></span>
@@ -411,7 +452,7 @@ $summaryTotalCustomers = $customerStats['total_count'] ?? $totalCustomers;
         <div class="card shadow-sm border-0 h-100">
             <div class="card-body d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="text-muted small fw-semibold">العملاء المدينون</div>
+                    <div class="text-muted small fw-semibold"><?php echo $debtorsLabel; ?></div>
                     <div class="fs-4 fw-bold mb-0"><?php echo number_format((int)$summaryDebtorCount); ?></div>
                 </div>
                 <span class="text-danger display-6"><i class="bi bi-exclamation-circle-fill"></i></span>
@@ -422,7 +463,7 @@ $summaryTotalCustomers = $customerStats['total_count'] ?? $totalCustomers;
         <div class="card shadow-sm border-0 h-100">
             <div class="card-body d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="text-muted small fw-semibold">إجمالي الديون</div>
+                    <div class="text-muted small fw-semibold"><?php echo $totalDebtLabel; ?></div>
                     <div class="fs-5 fw-bold mb-0"><?php echo formatCurrency($summaryTotalDebt); ?></div>
                 </div>
                 <span class="text-warning display-6"><i class="bi bi-cash-stack"></i></span>
@@ -433,7 +474,7 @@ $summaryTotalCustomers = $customerStats['total_count'] ?? $totalCustomers;
         <div class="card shadow-sm border-0 h-100">
             <div class="card-body d-flex align-items-center justify-content-between">
                 <div>
-                    <div class="text-muted small fw-semibold">إجمالي التحصيلات</div>
+                    <div class="text-muted small fw-semibold"><?php echo $collectionsLabel; ?></div>
                     <div class="fs-5 fw-bold mb-0"><?php echo formatCurrency($totalCollectionsAmount); ?></div>
                 </div>
                 <span class="text-success display-6"><i class="bi bi-wallet2"></i></span>
@@ -689,7 +730,10 @@ document.addEventListener('DOMContentLoaded', function () {
 <!-- قائمة العملاء -->
 <div class="card shadow-sm">
     <div class="card-header bg-primary text-white">
-        <h5 class="mb-0">قائمة عملاء الشركة (<?php echo $totalCustomers; ?>)</h5>
+        <h5 class="mb-0">
+            <?php echo $isSalesUser ? 'قائمة عملائي' : 'قائمة عملاء الشركة'; ?>
+            (<?php echo $totalCustomers; ?>)
+        </h5>
     </div>
     <div class="card-body">
         <div class="table-responsive">

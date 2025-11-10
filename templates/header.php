@@ -555,12 +555,14 @@ if (function_exists('processDailyPackagingAlert')) {
         <div class="homeline-topbar">
             <div class="topbar-left">
                 <!-- Mobile Menu Toggle -->
+                <?php if (($currentUser['role'] ?? '') !== 'sales'): ?>
                 <button class="mobile-menu-toggle d-md-none" id="mobileMenuToggle" type="button">
                     <i class="bi bi-list"></i>
                 </button>
                 <button class="mobile-reload-btn d-md-none" id="mobileReloadBtn" type="button">
                     <i class="bi bi-arrow-clockwise"></i>
                 </button>
+                <?php endif; ?>
                 <button class="mobile-dark-toggle d-md-none" id="mobileDarkToggle" type="button">
                     <i class="bi bi-moon-stars"></i>
                 </button>
