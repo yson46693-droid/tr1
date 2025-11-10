@@ -4,11 +4,18 @@
  */
 
 define('ACCESS_ALLOWED', true);
+
+// تعطيل تشغيل النسخ الاحتياطي التلقائي أثناء استدعاءات الـ API لتجنب تشغيله عند الحذف
+if (!defined('ENABLE_DAILY_BACKUP_DELIVERY')) {
+    define('ENABLE_DAILY_BACKUP_DELIVERY', false);
+}
+
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/backup.php';
 require_once __DIR__ . '/../includes/audit_log.php';
+require_once __DIR__ . '/../includes/daily_backup_sender.php';
 
 header('Content-Type: application/json');
 requireRole('manager');
@@ -76,7 +83,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         try {
             $db = db();
-            $backup = $db->queryOne("SELECT file_path FROM backups WHERE id = ?", [$backupId]);
+            $backup = $db->queryOne(
+                "SELECT id, filename, file_path, backup_type, status, created_by, created_at 
+                 FROM backups WHERE id = ?",
+                [$backupId]
+            );
             
             if (!$backup) {
                 http_response_code(404);
@@ -94,7 +105,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // حذف من قاعدة البيانات
             $db->execute("DELETE FROM backups WHERE id = ?", [$backupId]);
             
+            // تسجيل عملية الحذف في سجل التدقيق
             logAudit($currentUser['id'], 'delete_backup', 'backup', $backupId, null, null);
+
+            // في حال تم حذف نسخة احتياطية أنشأها النظام، لا نريد إعادة إرسالها تلقائياً
+            if (
+                function_exists('dailyBackupRegisterManualDeletion') &&
+                ($backup['backup_type'] ?? '') === 'daily' &&
+                empty($backup['created_by'])
+            ) {
+                dailyBackupRegisterManualDeletion($backup, $currentUser['id'] ?? null);
+            }
             
             echo json_encode(['success' => true, 'message' => 'تم حذف النسخة الاحتياطية بنجاح']);
         } catch (Exception $e) {

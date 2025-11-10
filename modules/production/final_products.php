@@ -295,6 +295,23 @@ $statusLabels = [
     'rejected' => 'مرفوض'
 ];
 
+$finishedProductsRows = [];
+$finishedProductsCount = 0;
+$finishedProductsTableExists = $db->queryOne("SHOW TABLES LIKE 'finished_products'");
+if (!empty($finishedProductsTableExists)) {
+    try {
+        $finishedProductsRows = $db->query("
+            SELECT id, batch_number, product_name, production_date, expiry_date, quantity_produced
+            FROM finished_products
+            ORDER BY id DESC
+            LIMIT 150
+        ");
+        $finishedProductsCount = is_array($finishedProductsRows) ? count($finishedProductsRows) : 0;
+    } catch (Exception $finishedProductsError) {
+        error_log('Finished products query error: ' . $finishedProductsError->getMessage());
+    }
+}
+
 $productDetailsMap = [];
 if (!empty($finalProducts)) {
     $productIds = array_column($finalProducts, 'product_id');
@@ -389,6 +406,53 @@ $lang = isset($translations) ? $translations : [];
         <i class="bi bi-check-circle-fill me-2"></i>
         <?php echo htmlspecialchars($success); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+<?php endif; ?>
+
+<?php if (!empty($finishedProductsTableExists)): ?>
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">
+                <i class="bi bi-archive-fill me-2"></i>
+                سجل التشغيلات المكتملة
+            </h5>
+            <span class="badge bg-light text-dark">
+                <?php echo number_format($finishedProductsCount); ?> تشغيلة
+            </span>
+        </div>
+        <div class="card-body">
+            <?php if (!empty($finishedProductsRows)): ?>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>رقم التشغيله</th>
+                                <th>المنتج</th>
+                                <th>تاريخ الإنتاج</th>
+                                <th>تاريخ الانتهاء</th>
+                                <th>الكمية المنتجة</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($finishedProductsRows as $finishedRow): ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($finishedRow['batch_number'] ?? '-'); ?></td>
+                                    <td><?php echo htmlspecialchars($finishedRow['product_name'] ?? '-'); ?></td>
+                                    <td><?php echo !empty($finishedRow['production_date']) ? htmlspecialchars(formatDate($finishedRow['production_date'])) : '-'; ?></td>
+                                    <td><?php echo !empty($finishedRow['expiry_date']) ? htmlspecialchars(formatDate($finishedRow['expiry_date'])) : '-'; ?></td>
+                                    <td><?php echo number_format((float)($finishedRow['quantity_produced'] ?? 0), 2); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php else: ?>
+                <div class="alert alert-info mb-0">
+                    <i class="bi bi-info-circle me-2"></i>
+                    لا توجد منتجات نهائية مسجلة حتى الآن.
+                </div>
+            <?php endif; ?>
+        </div>
     </div>
 <?php endif; ?>
 

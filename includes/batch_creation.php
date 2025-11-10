@@ -1,0 +1,450 @@
+<?php
+declare(strict_types=1);
+
+if (!defined('ACCESS_ALLOWED')) {
+    die('Direct access not allowed');
+}
+
+require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/db.php';
+
+/**
+ * الحصول على اتصال PDO مهيأ.
+ */
+function batchCreationGetPdo(): PDO
+{
+    static $pdo = null;
+
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+
+    $dsn = sprintf(
+        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+        DB_HOST,
+        DB_PORT,
+        DB_NAME
+    );
+
+    try {
+        $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES   => false,
+        ]);
+    } catch (PDOException $e) {
+        throw new RuntimeException('تعذر الاتصال بقاعدة البيانات: ' . $e->getMessage(), 0, $e);
+    }
+
+    return $pdo;
+}
+
+/**
+ * التحقق من وجود جدول.
+ */
+function batchCreationTableExists(PDO $pdo, string $tableName): bool
+{
+    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
+    $stmt->execute([$tableName]);
+    return (bool) $stmt->fetchColumn();
+}
+
+/**
+ * التحقق من وجود عمود داخل جدول.
+ */
+function batchCreationColumnExists(PDO $pdo, string $tableName, string $columnName): bool
+{
+    $stmt = $pdo->prepare(sprintf('SHOW COLUMNS FROM `%s` LIKE ?', $tableName));
+    $stmt->execute([$columnName]);
+    return (bool) $stmt->fetchColumn();
+}
+
+/**
+ * توليد رقم تشغيلة بالشكل BATCH-YYYYMMDD-###.
+ */
+function batchCreationGenerateNumber(PDO $pdo): string
+{
+    $datePrefix = 'BATCH-' . date('Ymd') . '-';
+
+    for ($attempt = 0; $attempt < 25; $attempt++) {
+        $sequence     = str_pad((string) random_int(0, 999), 3, '0', STR_PAD_LEFT);
+        $batchNumber  = $datePrefix . $sequence;
+        $batchChecker = $pdo->prepare('SELECT COUNT(*) FROM batches WHERE batch_number = ? LIMIT 1');
+        $batchChecker->execute([$batchNumber]);
+
+        if ((int) $batchChecker->fetchColumn() === 0) {
+            return $batchNumber;
+        }
+    }
+
+    throw new RuntimeException('تعذر إنشاء رقم تشغيل فريد بعد عدة محاولات');
+}
+
+/**
+ * إنشاء تشغيلة إنتاج جديدة اعتماداً على القالب وعدد الوحدات المطلوبة.
+ *
+ * @return array{
+ *     success: bool,
+ *     message?: string,
+ *     batch_id?: int,
+ *     batch_number?: string,
+ *     product_id?: int|null,
+ *     product_name?: string,
+ *     quantity?: int,
+ *     production_date?: string,
+ *     expiry_date?: string,
+ *     workers?: array<int, array{id:int,name:string}>
+ * }
+ */
+function batchCreationCreate(int $templateId, int $units): array
+{
+    if ($templateId <= 0) {
+        return ['success' => false, 'message' => 'معرف القالب غير صالح'];
+    }
+
+    if ($units <= 0) {
+        return ['success' => false, 'message' => 'عدد الوحدات غير صالح'];
+    }
+
+    $pdo = batchCreationGetPdo();
+
+    try {
+        foreach (['product_templates', 'batches', 'finished_products'] as $requiredTable) {
+            if (!batchCreationTableExists($pdo, $requiredTable)) {
+                throw new RuntimeException("جدول {$requiredTable} غير موجود في قاعدة البيانات");
+            }
+        }
+
+        $pdo->beginTransaction();
+
+        // جلب بيانات القالب
+        $templateStmt = $pdo->prepare("
+            SELECT 
+                t.id,
+                t.product_id,
+                COALESCE(t.product_name, p.name) AS product_name,
+                COALESCE(p.id, t.product_id)     AS resolved_product_id
+            FROM product_templates t
+            LEFT JOIN products p ON t.product_id = p.id
+            WHERE t.id = ?
+            LIMIT 1
+        ");
+        $templateStmt->execute([$templateId]);
+        $template = $templateStmt->fetch();
+
+        if (!$template) {
+            throw new RuntimeException('القالب غير موجود');
+        }
+
+        $productId   = (int) ($template['resolved_product_id'] ?? 0);
+        $productName = trim((string) ($template['product_name'] ?? ''));
+
+        if ($productId <= 0 && $productName === '') {
+            throw new RuntimeException('المنتج المرتبط بالقالب غير محدد');
+        }
+
+        // تجهيز الجداول المرتبطة بالمواد الخام
+        $templateMaterialsTable = batchCreationTableExists($pdo, 'template_materials')
+            ? 'template_materials'
+            : (batchCreationTableExists($pdo, 'product_template_materials') ? 'product_template_materials' : null);
+
+        if ($templateMaterialsTable === null) {
+            throw new RuntimeException('جدول المواد الخام غير موجود');
+        }
+
+        $rawInventoryTable = batchCreationTableExists($pdo, 'raw_materials') ? 'raw_materials' : null;
+        if ($rawInventoryTable === null) {
+            throw new RuntimeException('جدول مخزون المواد الخام غير موجود');
+        }
+
+        $materialIdColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'raw_material_id')
+            ? 'raw_material_id'
+            : (batchCreationColumnExists($pdo, $templateMaterialsTable, 'material_id') ? 'material_id' : null);
+
+        if ($materialIdColumn === null) {
+            throw new RuntimeException('لم يتم العثور على عمود معرف المادة الخام في جدول القوالب');
+        }
+
+        $materialNameColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'material_name')
+            ? 'material_name'
+            : null;
+
+        $rawStockColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'stock')
+            ? 'stock'
+            : (batchCreationColumnExists($pdo, $rawInventoryTable, 'quantity') ? 'quantity' : null);
+
+        if ($rawStockColumn === null) {
+            throw new RuntimeException('لم يتم العثور على عمود المخزون في جدول المواد الخام');
+        }
+
+        $rawUnitColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'unit') ? 'unit' : null;
+
+        $materialsStmt = $pdo->prepare(sprintf(
+            'SELECT 
+                rm.id AS raw_id,
+                %s AS raw_name,
+                tm.quantity_per_unit,
+                rm.%s AS available_stock,
+                %s
+            FROM %s tm
+            JOIN %s rm ON rm.id = tm.%s
+            WHERE tm.template_id = ?',
+            $materialNameColumn !== null
+                ? sprintf('COALESCE(rm.name, tm.%s)', $materialNameColumn)
+                : 'rm.name',
+            $rawStockColumn,
+            $rawUnitColumn !== null ? 'rm.' . $rawUnitColumn . ' AS unit' : 'NULL AS unit',
+            $templateMaterialsTable,
+            $rawInventoryTable,
+            $materialIdColumn
+        ));
+        $materialsStmt->execute([$templateId]);
+        $materials = $materialsStmt->fetchAll();
+
+        // تجهيز جداول أدوات التعبئة
+        $templatePackagingTable = batchCreationTableExists($pdo, 'template_packaging')
+            ? 'template_packaging'
+            : (batchCreationTableExists($pdo, 'product_template_packaging') ? 'product_template_packaging' : null);
+
+        if ($templatePackagingTable === null) {
+            throw new RuntimeException('جدول أدوات التعبئة غير موجود');
+        }
+
+        $packagingInventoryTable = batchCreationTableExists($pdo, 'packaging_materials') ? 'packaging_materials' : null;
+        if ($packagingInventoryTable === null) {
+            throw new RuntimeException('جدول مخزون أدوات التعبئة غير موجود');
+        }
+
+        $packagingIdColumn = batchCreationColumnExists($pdo, $templatePackagingTable, 'packaging_material_id')
+            ? 'packaging_material_id'
+            : null;
+
+        if ($packagingIdColumn === null) {
+            throw new RuntimeException('لم يتم العثور على عمود معرف أداة التعبئة في جدول القوالب');
+        }
+
+        $packagingNameColumn = batchCreationColumnExists($pdo, $templatePackagingTable, 'packaging_name')
+            ? 'packaging_name'
+            : null;
+
+        $packagingStockColumn = batchCreationColumnExists($pdo, $packagingInventoryTable, 'stock')
+            ? 'stock'
+            : (batchCreationColumnExists($pdo, $packagingInventoryTable, 'quantity') ? 'quantity' : null);
+
+        if ($packagingStockColumn === null) {
+            throw new RuntimeException('لم يتم العثور على عمود المخزون في جدول أدوات التعبئة');
+        }
+
+        $packagingUnitColumn = batchCreationColumnExists($pdo, $packagingInventoryTable, 'unit') ? 'unit' : null;
+
+        $packagingStmt = $pdo->prepare(sprintf(
+            'SELECT 
+                pm.id AS pack_id,
+                %s AS pack_name,
+                tp.quantity_per_unit,
+                pm.%s AS available_stock,
+                %s
+            FROM %s tp
+            JOIN %s pm ON pm.id = tp.%s
+            WHERE tp.template_id = ?',
+            $packagingNameColumn !== null
+                ? sprintf('COALESCE(pm.name, tp.%s)', $packagingNameColumn)
+                : 'pm.name',
+            $packagingStockColumn,
+            $packagingUnitColumn !== null ? 'pm.' . $packagingUnitColumn . ' AS unit' : 'NULL AS unit',
+            $templatePackagingTable,
+            $packagingInventoryTable,
+            $packagingIdColumn
+        ));
+        $packagingStmt->execute([$templateId]);
+        $packaging = $packagingStmt->fetchAll();
+
+        // التحقق من توفر المخزون
+        foreach ($materials as $material) {
+            $requiredQty = (float) $material['quantity_per_unit'] * $units;
+            $available   = (float) ($material['available_stock'] ?? 0);
+
+            if ($requiredQty > $available) {
+                throw new RuntimeException(
+                    sprintf(
+                        'المخزون غير كافٍ للمادة الخام "%s" (المتاح: %s، المطلوب: %s)',
+                        $material['raw_name'],
+                        number_format($available, 3),
+                        number_format($requiredQty, 3)
+                    )
+                );
+            }
+        }
+
+        foreach ($packaging as $pack) {
+            $requiredQty = (float) $pack['quantity_per_unit'] * $units;
+            $available   = (float) ($pack['available_stock'] ?? 0);
+
+            if ($requiredQty > $available) {
+                throw new RuntimeException(
+                    sprintf(
+                        'المخزون غير كافٍ لأداة التعبئة "%s" (المتاح: %s، المطلوب: %s)',
+                        $pack['pack_name'],
+                        number_format($available, 3),
+                        number_format($requiredQty, 3)
+                    )
+                );
+            }
+        }
+
+        // جلب العمال الحاضرين اليوم
+        $today = date('Y-m-d');
+        $workersStmt = batchCreationTableExists($pdo, 'attendance')
+            ? $pdo->prepare("
+                SELECT e.id, e.name
+                FROM employees e
+                JOIN attendance a ON a.employee_id = e.id
+                WHERE a.attendance_date = ? AND a.status = 'present'
+            ")
+            : null;
+
+        $workers = [];
+        if ($workersStmt instanceof PDOStatement) {
+            $workersStmt->execute([$today]);
+            $workers = $workersStmt->fetchAll();
+        }
+
+        $batchNumber    = batchCreationGenerateNumber($pdo);
+        $productionDate = date('Y-m-d');
+        $expiryDate     = date('Y-m-d', strtotime('+1 year'));
+
+        // حفظ سجل التشغيلة
+        $insertBatch = $pdo->prepare("
+            INSERT INTO batches (product_id, batch_number, production_date, expiry_date, quantity)
+            VALUES (?, ?, ?, ?, ?)
+        ");
+        $insertBatch->execute([
+            $productId > 0 ? $productId : null,
+            $batchNumber,
+            $productionDate,
+            $expiryDate,
+            $units,
+        ]);
+
+        $batchId = (int) $pdo->lastInsertId();
+        if ($batchId <= 0) {
+            throw new RuntimeException('تعذر حفظ بيانات التشغيله');
+        }
+
+        if (!empty($materials)) {
+            if (!batchCreationTableExists($pdo, 'batch_raw_materials')) {
+                throw new RuntimeException('جدول تفاصيل المواد الخام غير موجود');
+            }
+
+            $updateRawStock = $pdo->prepare(sprintf(
+                'UPDATE %s SET %s = GREATEST(%s - ?, 0) WHERE id = ?',
+                $rawInventoryTable,
+                $rawStockColumn,
+                $rawStockColumn
+            ));
+            $insertBatchRaw = $pdo->prepare('
+                INSERT INTO batch_raw_materials (batch_id, raw_material_id, quantity_used)
+                VALUES (?, ?, ?)
+            ');
+
+            foreach ($materials as $material) {
+                $qtyUsed = (float) $material['quantity_per_unit'] * $units;
+
+                $updateRawStock->execute([$qtyUsed, $material['raw_id']]);
+                $insertBatchRaw->execute([$batchId, $material['raw_id'], $qtyUsed]);
+            }
+        }
+
+        if (!empty($packaging)) {
+            if (!batchCreationTableExists($pdo, 'batch_packaging')) {
+                throw new RuntimeException('جدول تفاصيل أدوات التعبئة غير موجود');
+            }
+
+            $updatePackStock = $pdo->prepare(sprintf(
+                'UPDATE %s SET %s = GREATEST(%s - ?, 0) WHERE id = ?',
+                $packagingInventoryTable,
+                $packagingStockColumn,
+                $packagingStockColumn
+            ));
+            $insertBatchPack = $pdo->prepare('
+                INSERT INTO batch_packaging (batch_id, packaging_material_id, quantity_used)
+                VALUES (?, ?, ?)
+            ');
+
+            foreach ($packaging as $pack) {
+                $qtyUsed = (float) $pack['quantity_per_unit'] * $units;
+
+                $updatePackStock->execute([$qtyUsed, $pack['pack_id']]);
+                $insertBatchPack->execute([$batchId, $pack['pack_id'], $qtyUsed]);
+            }
+        }
+
+        if (!empty($workers)) {
+            if (!batchCreationTableExists($pdo, 'batch_workers')) {
+                throw new RuntimeException('جدول العمال المرتبطين بالتشغيلة غير موجود');
+            }
+
+            $insertWorker = $pdo->prepare('INSERT INTO batch_workers (batch_id, employee_id) VALUES (?, ?)');
+            foreach ($workers as $worker) {
+                $insertWorker->execute([$batchId, $worker['id']]);
+            }
+        }
+
+        $insertFinished = $pdo->prepare('
+            INSERT INTO finished_products
+                (batch_id, product_id, product_name, batch_number, production_date, expiry_date, quantity_produced)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ');
+        $insertFinished->execute([
+            $batchId,
+            $productId > 0 ? $productId : null,
+            $productName,
+            $batchNumber,
+            $productionDate,
+            $expiryDate,
+            $units,
+        ]);
+
+        $pdo->commit();
+
+        return [
+            'success'        => true,
+            'message'        => 'تم إنشاء التشغيله بنجاح',
+            'batch_id'       => $batchId,
+            'batch_number'   => $batchNumber,
+            'product_id'     => $productId > 0 ? $productId : null,
+            'product_name'   => $productName,
+            'quantity'       => $units,
+            'production_date'=> $productionDate,
+            'expiry_date'    => $expiryDate,
+            'workers'        => array_map(
+                static function (array $worker): array {
+                    return [
+                        'id'   => (int) $worker['id'],
+                        'name' => (string) $worker['name'],
+                    ];
+                },
+                $workers
+            ),
+        ];
+    } catch (RuntimeException $runtimeException) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return [
+            'success' => false,
+            'message' => $runtimeException->getMessage(),
+        ];
+    } catch (Throwable $throwable) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('Batch creation error: ' . $throwable->getMessage());
+
+        return [
+            'success' => false,
+            'message' => 'حدث خطأ غير متوقع أثناء إنشاء التشغيله',
+        ];
+    }
+}
+

@@ -460,10 +460,18 @@ $lang = isset($translations) ? $translations : [];
                         
                         <!-- Footer -->
                         <div class="d-flex justify-content-between align-items-center pt-3 border-top">
-                            <small class="text-muted">
-                                <i class="bi bi-calendar3 me-1"></i>
-                                <?php echo formatDate($template['created_at']); ?>
-                            </small>
+                            <div class="d-flex flex-wrap align-items-center gap-2">
+                                <button type="button"
+                                        class="btn btn-sm btn-primary"
+                                        onclick="createBatch(<?php echo $template['id']; ?>, '<?php echo htmlspecialchars($template['product_name'], ENT_QUOTES, 'UTF-8'); ?>', this)">
+                                    <i class="bi bi-gear-wide-connected me-1"></i>
+                                    تشغيل تشغيلة
+                                </button>
+                                <small class="text-muted d-block">
+                                    <i class="bi bi-calendar3 me-1"></i>
+                                    <?php echo formatDate($template['created_at']); ?>
+                                </small>
+                            </div>
                             <?php if ($currentUser['role'] === 'manager'): ?>
                                 <button class="btn btn-sm btn-danger" 
                                         onclick="deleteTemplate(<?php echo $template['id']; ?>, '<?php echo htmlspecialchars($template['product_name']); ?>')"
@@ -634,6 +642,65 @@ function addRawMaterial() {
 
 function removeRawMaterial(btn) {
     btn.closest('.raw-material-item').remove();
+}
+
+function createBatch(templateId, templateName, triggerButton) {
+    const unitsInput = prompt('كم عدد العبوات المطلوب إنتاجها؟');
+
+    if (unitsInput === null) {
+        return;
+    }
+
+    const units = parseInt(unitsInput, 10);
+
+    if (!Number.isFinite(units) || units <= 0) {
+        alert('يرجى إدخال رقم صحيح أكبر من صفر.');
+        return;
+    }
+
+    const btn = triggerButton instanceof HTMLElement ? triggerButton : null;
+    if (btn) {
+        btn.dataset.originalText = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>جاري التنفيذ...';
+        btn.disabled = true;
+    }
+
+    const formData = new FormData();
+    formData.append('template_id', templateId);
+    formData.append('units', units);
+
+    fetch('<?php echo getRelativeUrl("create_batch.php"); ?>', {
+        method: 'POST',
+        body: formData,
+        credentials: 'same-origin'
+    })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const productLabel = data.product_name || templateName || 'منتج غير معروف';
+                alert(
+                    '✅ تم إنشاء التشغيله بنجاح\n' +
+                    'رقم التشغيله: ' + (data.batch_number || '-') + '\n' +
+                    'المنتج: ' + productLabel + '\n' +
+                    'الكمية: ' + units + '\n' +
+                    'تاريخ الإنتاج: ' + (data.production_date || '-') + '\n' +
+                    'تاريخ الانتهاء: ' + (data.expiry_date || '-')
+                );
+            } else {
+                alert('❌ خطأ: ' + (data.message || 'تعذر إتمام العملية.'));
+            }
+        })
+        .catch(error => {
+            console.error('Batch creation error:', error);
+            alert('⚠️ حدث خطأ أثناء الاتصال بالخادم.');
+        })
+        .finally(() => {
+            if (btn) {
+                btn.innerHTML = btn.dataset.originalText || '<i class="bi bi-gear-wide-connected me-1"></i>تشغيل تشغيلة';
+                btn.disabled = false;
+                delete btn.dataset.originalText;
+            }
+        });
 }
 
 function deleteTemplate(templateId, templateName) {

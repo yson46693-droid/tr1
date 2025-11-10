@@ -166,6 +166,63 @@ if (!function_exists('dailyBackupNotifyManager')) {
     }
 }
 
+if (!function_exists('dailyBackupRegisterManualDeletion')) {
+    /**
+     * توثيق حذف النسخة الاحتياطية اليومية يدوياً لتجنب إعادة إرسالها خلال اليوم نفسه.
+     *
+     * @param array<string,mixed> $backup
+     * @param int|null $deletedByUserId
+     */
+    function dailyBackupRegisterManualDeletion(array $backup, ?int $deletedByUserId = null): void
+    {
+        $statusData = [
+            'date' => date('Y-m-d'),
+            'status' => 'manual_deleted',
+            'deleted_at' => date('Y-m-d H:i:s'),
+        ];
+
+        if (!empty($backup['id'])) {
+            $statusData['backup_id'] = (int) $backup['id'];
+        }
+
+        if (!empty($backup['filename'])) {
+            $statusData['filename'] = (string) $backup['filename'];
+        }
+
+        if (!empty($backup['file_path'])) {
+            $statusData['file_path'] = (string) $backup['file_path'];
+        }
+
+        if ($deletedByUserId !== null) {
+            $statusData['deleted_by'] = (int) $deletedByUserId;
+        }
+
+        dailyBackupSaveStatus($statusData);
+
+        try {
+            dailyBackupEnsureJobTable();
+            require_once __DIR__ . '/db.php';
+            $db = db();
+            $db->execute(
+                "UPDATE system_daily_jobs SET last_file_path = NULL WHERE job_key = ?",
+                [DAILY_BACKUP_JOB_KEY]
+            );
+        } catch (Throwable $error) {
+            error_log('Daily Backup: failed registering manual deletion - ' . $error->getMessage());
+        }
+
+        $messageParts = ['تم حذف النسخة الاحتياطية اليومية يدوياً من قبل الإدارة.'];
+        if (!empty($backup['filename'])) {
+            $messageParts[] = 'الملف:' . ' ' . (string) $backup['filename'];
+        }
+        if ($deletedByUserId !== null) {
+            $messageParts[] = '(المستخدم #' . (int) $deletedByUserId . ')';
+        }
+
+        dailyBackupNotifyManager(implode(' ', $messageParts), 'warning');
+    }
+}
+
 if (!function_exists('triggerDailyBackupDelivery')) {
     /**
      * تنفيذ النسخة الاحتياطية اليومية وإرسالها إلى Telegram مرة واحدة في اليوم.
@@ -252,6 +309,20 @@ if (!function_exists('triggerDailyBackupDelivery')) {
 
             $existingDataHasFile = false;
             $existingStoredPath = isset($existingData['file_path']) ? (string)$existingData['file_path'] : '';
+
+            if (
+                !empty($existingData) &&
+                ($existingData['date'] ?? null) === $todayDate &&
+                ($existingData['status'] ?? null) === 'manual_deleted'
+            ) {
+                $db->commit();
+                $statusData['status'] = 'manual_deleted';
+                $statusData['note'] = 'Daily backup delivery skipped due to manual deletion.';
+                $statusData['checked_at'] = date('Y-m-d H:i:s');
+                dailyBackupSaveStatus($statusData);
+                return;
+            }
+
             if (
                 $existingStoredPath !== '' &&
                 ($existingData['date'] ?? null) === $todayDate

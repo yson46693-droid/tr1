@@ -118,7 +118,7 @@ function generateBatchNumber(
     $randomSegment = 'R' . str_pad((string) rand(0, 999), 3, '0', STR_PAD_LEFT);
     $batchNumber = $buildBatchNumber($randomSegment);
 
-    while ($db->queryOne("SELECT id FROM batch_numbers WHERE batch_number = ?", [$batchNumber])) {
+    while ($db->queryOne("SELECT id FROM batches WHERE batch_number = ?", [$batchNumber])) {
         $attempts++;
         if ($attempts > 200) {
             $randomSegment = 'F' . str_pad((string) rand(100, 999), 3, '0', STR_PAD_LEFT);
@@ -150,133 +150,40 @@ function createBatchNumber(
     $honeyVariety = null,
     $templateId = null
 ) {
-    try {
-        $db = db();
-        
-        if ($createdBy === null) {
-            require_once __DIR__ . '/auth.php';
-            $currentUser = getCurrentUser();
-            $createdBy = $currentUser['id'] ?? null;
-        }
-        
-        if (!$createdBy) {
-            return ['success' => false, 'message' => 'يجب تسجيل الدخول'];
-        }
-        
-        // سياق توليد رقم التشغيلة
-        $generationContext = [
-            'template_id'    => $templateId,
-            'all_suppliers'  => $allSuppliers,
-            'execution_date' => date('Y-m-d')
-        ];
+    $templateId = $templateId !== null ? (int) $templateId : 0;
+    $units = (int) $quantity;
 
-        // توليد رقم التشغيلة مع معرفات العمال
-        $batchNumber = generateBatchNumber(
-            $productId,
-            $productionDate,
-            $honeySupplierId,
-            $packagingSupplierId,
-            $workers,
-            $generationContext
-        );
-        
-        if (!$batchNumber) {
-            return ['success' => false, 'message' => 'فشل في توليد رقم التشغيلة'];
-        }
-        
-        // تحويل المصفوفات إلى JSON
-        $packagingMaterialsJson = !empty($packagingMaterials) ? json_encode($packagingMaterials) : null;
-        $workersJson = !empty($workers) ? json_encode($workers) : null;
-        $allSuppliersJson = !empty($allSuppliers) ? json_encode($allSuppliers) : null;
-        
-        // التحقق من وجود الحقول الجديدة
-        $allSuppliersColumnCheck = $db->queryOne("SHOW COLUMNS FROM batch_numbers LIKE 'all_suppliers'");
-        $hasAllSuppliersColumn = !empty($allSuppliersColumnCheck);
-        
-        $honeyVarietyColumnCheck = $db->queryOne("SHOW COLUMNS FROM batch_numbers LIKE 'honey_variety'");
-        $hasHoneyVarietyColumn = !empty($honeyVarietyColumnCheck);
-        
-        // إنشاء رقم التشغيلة
-        if ($hasAllSuppliersColumn && $hasHoneyVarietyColumn) {
-            $sql = "INSERT INTO batch_numbers 
-                    (batch_number, product_id, production_id, production_date, honey_supplier_id, honey_variety,
-                     packaging_materials, packaging_supplier_id, all_suppliers, workers, quantity, expiry_date, notes, created_by, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_production')";
-            
-            $result = $db->execute($sql, [
-                $batchNumber,
-                $productId,
-                $productionId,
-                $productionDate,
-                $honeySupplierId,
-                $honeyVariety,
-                $packagingMaterialsJson,
-                $packagingSupplierId,
-                $allSuppliersJson,
-                $workersJson,
-                $quantity,
-                $expiryDate,
-                $notes,
-                $createdBy
-            ]);
-        } elseif ($hasAllSuppliersColumn) {
-            // للتوافق مع إصدار بدون honey_variety
-            $sql = "INSERT INTO batch_numbers 
-                    (batch_number, product_id, production_id, production_date, honey_supplier_id, 
-                     packaging_materials, packaging_supplier_id, all_suppliers, workers, quantity, expiry_date, notes, created_by, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_production')";
-            
-            $result = $db->execute($sql, [
-                $batchNumber,
-                $productId,
-                $productionId,
-                $productionDate,
-                $honeySupplierId,
-                $packagingMaterialsJson,
-                $packagingSupplierId,
-                $allSuppliersJson,
-                $workersJson,
-                $quantity,
-                $expiryDate,
-                $notes,
-                $createdBy
-            ]);
-        } else {
-            // للتوافق مع الإصدارات القديمة جداً
-            $sql = "INSERT INTO batch_numbers 
-                    (batch_number, product_id, production_id, production_date, honey_supplier_id, 
-                     packaging_materials, packaging_supplier_id, workers, quantity, expiry_date, notes, created_by, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'in_production')";
-            
-            $result = $db->execute($sql, [
-                $batchNumber,
-                $productId,
-                $productionId,
-                $productionDate,
-                $honeySupplierId,
-                $packagingMaterialsJson,
-                $packagingSupplierId,
-                $workersJson,
-                $quantity,
-                $expiryDate,
-                $notes,
-                $createdBy
-            ]);
-        }
-        
-        // تسجيل سجل التدقيق
-        logAudit($createdBy, 'create_batch_number', 'batch', $result['insert_id'], null, [
-            'batch_number' => $batchNumber,
-            'product_id'   => $productId,
-            'template_id'  => $templateId ?: null
-        ]);
-        
-        return ['success' => true, 'batch_id' => $result['insert_id'], 'batch_number' => $batchNumber];
-        
-    } catch (Exception $e) {
-        error_log("Batch Number Creation Error: " . $e->getMessage());
-        return ['success' => false, 'message' => 'حدث خطأ في إنشاء رقم التشغيلة'];
+    if ($templateId <= 0) {
+        return [
+            'success' => false,
+            'message' => 'لا يمكن إنشاء التشغيلة بدون قالب منتج مرتبط. يرجى اختيار قالب مناسب أولاً.',
+        ];
     }
+
+    if ($units <= 0) {
+        $units = 1;
+    }
+
+    $creationResult = batchCreationCreate($templateId, $units);
+
+    if (empty($creationResult['success'])) {
+        return [
+            'success' => false,
+            'message' => $creationResult['message'] ?? 'تعذر إنشاء التشغيلة باستخدام النظام الجديد',
+        ];
+    }
+
+    return [
+        'success'        => true,
+        'message'        => $creationResult['message'] ?? 'تم إنشاء التشغيله بنجاح',
+        'batch_id'       => $creationResult['batch_id'] ?? null,
+        'batch_number'   => $creationResult['batch_number'] ?? null,
+        'product_id'     => $creationResult['product_id'] ?? ($productId ?: null),
+        'product_name'   => $creationResult['product_name'] ?? null,
+        'quantity'       => $creationResult['quantity'] ?? $units,
+        'production_date'=> $creationResult['production_date'] ?? $productionDate,
+        'expiry_date'    => $creationResult['expiry_date'] ?? $expiryDate,
+    ];
 }
 
 /**
@@ -286,80 +193,79 @@ function getBatchNumber($batchId) {
     $db = db();
     
     $batch = $db->queryOne(
-        "SELECT b.*, p.name as product_name, p.category as product_category,
-                s1.name as honey_supplier_name, s2.name as packaging_supplier_name,
-                pr.id as production_id, pr.date as production_date_value,
-                u.username as created_by_name
-         FROM batch_numbers b
+        "SELECT 
+            b.id,
+            b.product_id,
+            b.batch_number,
+            b.production_date,
+            b.expiry_date,
+            b.quantity,
+            b.created_at,
+            COALESCE(fp.product_name, p.name) AS product_name,
+            fp.quantity_produced,
+            p.category AS product_category
+         FROM batches b
+         LEFT JOIN finished_products fp ON fp.batch_id = b.id
          LEFT JOIN products p ON b.product_id = p.id
-         LEFT JOIN suppliers s1 ON b.honey_supplier_id = s1.id
-         LEFT JOIN suppliers s2 ON b.packaging_supplier_id = s2.id
-         LEFT JOIN production pr ON b.production_id = pr.id
-         LEFT JOIN users u ON b.created_by = u.id
          WHERE b.id = ?",
         [$batchId]
     );
     
     if ($batch) {
-        // فك تشفير JSON
-        $batch['packaging_materials'] = !empty($batch['packaging_materials']) 
-            ? json_decode($batch['packaging_materials'], true) : [];
-        $batch['workers'] = !empty($batch['workers']) 
-            ? json_decode($batch['workers'], true) : [];
-        
-        // الحصول على معلومات مواد التعبئة
-        if (!empty($batch['packaging_materials']) && is_array($batch['packaging_materials']) && count($batch['packaging_materials']) > 0) {
-            $materialIds = array_map('intval', $batch['packaging_materials']);
-            $materialIds = array_filter($materialIds, function($id) { return $id > 0; }); // إزالة القيم غير الصحيحة
-            
-            if (!empty($materialIds)) {
-                $placeholders = implode(',', array_fill(0, count($materialIds), '?'));
-                
-                // التحقق من وجود الأعمدة قبل الاستعلام
-                $typeColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'type'");
-                $specificationsColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'specifications'");
-                $hasTypeColumn = !empty($typeColumnCheck);
-                $hasSpecificationsColumn = !empty($specificationsColumnCheck);
-                
-                $columns = ['id', 'name', 'category'];
-                if ($hasTypeColumn) {
-                    $columns[] = 'type';
-                }
-                if ($hasSpecificationsColumn) {
-                    $columns[] = 'specifications';
-                }
-                
-                $batch['packaging_materials_details'] = $db->query(
-                    "SELECT " . implode(', ', $columns) . " FROM products WHERE id IN ($placeholders) AND status = 'active'",
-                    $materialIds
-                );
-            } else {
-                $batch['packaging_materials_details'] = [];
-            }
+        $batchIdValue = (int) $batch['id'];
+        $batch['quantity_produced'] = $batch['quantity_produced'] ?? $batch['quantity'];
+
+        $rawMaterialsTableExists = $db->queryOne("SHOW TABLES LIKE 'batch_raw_materials'");
+        if (!empty($rawMaterialsTableExists)) {
+            $batch['raw_materials'] = $db->query(
+                "SELECT 
+                    brm.quantity_used,
+                    rm.name,
+                    rm.unit
+                 FROM batch_raw_materials brm
+                 LEFT JOIN raw_materials rm ON brm.raw_material_id = rm.id
+                 WHERE brm.batch_id = ?",
+                [$batchIdValue]
+            );
+        } else {
+            $batch['raw_materials'] = [];
+        }
+
+        $batchPackagingTableExists = $db->queryOne("SHOW TABLES LIKE 'batch_packaging'");
+        if (!empty($batchPackagingTableExists)) {
+            $batch['packaging_materials_details'] = $db->query(
+                "SELECT 
+                    bp.quantity_used,
+                    pm.name,
+                    pm.unit
+                 FROM batch_packaging bp
+                 LEFT JOIN packaging_materials pm ON bp.packaging_material_id = pm.id
+                 WHERE bp.batch_id = ?",
+                [$batchIdValue]
+            );
         } else {
             $batch['packaging_materials_details'] = [];
         }
-        
-        // الحصول على معلومات العمال
-        if (!empty($batch['workers']) && is_array($batch['workers']) && count($batch['workers']) > 0) {
-            $workerIds = array_map('intval', $batch['workers']);
-            $workerIds = array_filter($workerIds, function($id) { return $id > 0; }); // إزالة القيم غير الصحيحة
-            
-            if (!empty($workerIds)) {
-                $placeholders = implode(',', array_fill(0, count($workerIds), '?'));
-                $batch['workers_details'] = $db->query(
-                    "SELECT id, username, full_name FROM users WHERE id IN ($placeholders) AND status = 'active'",
-                    $workerIds
-                );
-            } else {
-                $batch['workers_details'] = [];
-            }
+
+        $batchWorkersTableExists = $db->queryOne("SHOW TABLES LIKE 'batch_workers'");
+        if (!empty($batchWorkersTableExists)) {
+            $batch['workers_details'] = $db->query(
+                "SELECT 
+                    bw.employee_id as id,
+                    e.name as full_name
+                 FROM batch_workers bw
+                 LEFT JOIN employees e ON bw.employee_id = e.id
+                 WHERE bw.batch_id = ?",
+                [$batchIdValue]
+            );
         } else {
             $batch['workers_details'] = [];
         }
+
+        return $batch;
     }
     
-    return $batch;
+    return null;
 }
 
 /**
@@ -372,49 +278,15 @@ function getBatchByNumber($batchNumber) {
     
     $db = db();
     
-    // تنظيف رقم التشغيلة (إزالة المسافات الزائدة)
     $batchNumber = trim($batchNumber);
     
-    // البحث عن رقم التشغيلة بالضبط
-    $batch = $db->queryOne("SELECT id FROM batch_numbers WHERE batch_number = ?", [$batchNumber]);
-    
-    // إذا لم يتم العثور عليه، جرب البحث بدون "BATCH: " في البداية
-    if (!$batch && strpos($batchNumber, 'BATCH:') === 0) {
-        $cleanBatchNumber = trim(str_replace('BATCH:', '', $batchNumber));
-        $batch = $db->queryOne("SELECT id FROM batch_numbers WHERE batch_number LIKE ? OR batch_number = ?", 
-            ["%{$cleanBatchNumber}%", $cleanBatchNumber]);
-    }
-    
-    // إذا لم يتم العثور عليه، جرب البحث الجزئي (لأخطاء القراءة)
-    if (!$batch) {
-        // إزالة "BATCH: " ومسافات زائدة
-        $cleanBatchNumber = preg_replace('/^BATCH:\s*/', '', $batchNumber);
-        $cleanBatchNumber = trim($cleanBatchNumber);
-        
-        // البحث عن رقم التشغيلة الذي يحتوي على الأجزاء الرئيسية
-        $parts = explode('-', $cleanBatchNumber);
-        if (count($parts) >= 3) {
-            // البحث عن رقم التشغيلة الذي يحتوي على تاريخ الإنتاج والموردين
-            $datePart = $parts[0] ?? '';
-            $supplierPart1 = $parts[1] ?? '';
-            $supplierPart2 = $parts[2] ?? '';
-            
-            if (!empty($datePart) && !empty($supplierPart1) && !empty($supplierPart2)) {
-                $batch = $db->queryOne(
-                    "SELECT id FROM batch_numbers 
-                     WHERE batch_number LIKE ? 
-                     ORDER BY id DESC LIMIT 1",
-                    ["%{$datePart}-{$supplierPart1}-{$supplierPart2}%"]
-                );
-            }
-        }
-    }
+    $batch = $db->queryOne("SELECT id FROM batches WHERE batch_number = ?", [$batchNumber]);
     
     if (!$batch) {
         return null;
     }
     
-    return getBatchNumber($batch['id']);
+    return getBatchNumber((int) $batch['id']);
 }
 
 /**
@@ -430,19 +302,27 @@ function recordBarcodeScan($batchNumber, $scanType = 'verification', $scanLocati
             $scannedBy = $currentUser['id'] ?? null;
         }
         
-        $batch = $db->queryOne("SELECT id FROM batch_numbers WHERE batch_number = ?", [$batchNumber]);
+        $batch = $db->queryOne("SELECT id FROM batches WHERE batch_number = ?", [$batchNumber]);
         
         if (!$batch) {
             return ['success' => false, 'message' => 'رقم التشغيلة غير موجود'];
         }
         
         $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
-        
-        $db->execute(
-            "INSERT INTO barcode_scans (batch_number_id, scanned_by, scan_location, scan_type, ip_address) 
-             VALUES (?, ?, ?, ?, ?)",
-            [$batch['id'], $scannedBy, $scanLocation, $scanType, $ipAddress]
-        );
+        $hasBatchIdColumn = $db->queryOne("SHOW COLUMNS FROM barcode_scans LIKE 'batch_id'");
+        $hasBatchNumberIdColumn = $db->queryOne("SHOW COLUMNS FROM barcode_scans LIKE 'batch_number_id'");
+
+        if (!empty($hasBatchIdColumn)) {
+            $db->execute(
+                "INSERT INTO barcode_scans (batch_id, scanned_by, scan_location, scan_type, ip_address) 
+                 VALUES (?, ?, ?, ?, ?)",
+                [$batch['id'], $scannedBy, $scanLocation, $scanType, $ipAddress]
+            );
+        } elseif (!empty($hasBatchNumberIdColumn)) {
+            return ['success' => false, 'message' => 'إصدار قاعدة البيانات يحتاج إلى ترقية ليتوافق مع نظام التشغيل الجديد.'];
+        } else {
+            return ['success' => false, 'message' => 'جدول تسجيل الباركود لا يدعم نظام التشغيل الجديد.'];
+        }
         
         return ['success' => true];
         
@@ -458,12 +338,19 @@ function recordBarcodeScan($batchNumber, $scanType = 'verification', $scanLocati
 function getBatchNumbers($filters = [], $limit = 100, $offset = 0) {
     $db = db();
     
-    $sql = "SELECT b.*, p.name as product_name, 
-                   s1.name as honey_supplier_name, s2.name as packaging_supplier_name
-            FROM batch_numbers b
+    $sql = "SELECT 
+                b.id,
+                b.batch_number,
+                b.product_id,
+                b.production_date,
+                b.expiry_date,
+                b.quantity,
+                b.created_at,
+                COALESCE(fp.product_name, p.name) AS product_name,
+                fp.quantity_produced
+            FROM batches b
+            LEFT JOIN finished_products fp ON fp.batch_id = b.id
             LEFT JOIN products p ON b.product_id = p.id
-            LEFT JOIN suppliers s1 ON b.honey_supplier_id = s1.id
-            LEFT JOIN suppliers s2 ON b.packaging_supplier_id = s2.id
             WHERE 1=1";
     
     $params = [];
@@ -483,11 +370,6 @@ function getBatchNumbers($filters = [], $limit = 100, $offset = 0) {
         $params[] = $filters['production_date'];
     }
     
-    if (!empty($filters['status'])) {
-        $sql .= " AND b.status = ?";
-        $params[] = $filters['status'];
-    }
-    
     if (!empty($filters['date_from'])) {
         $sql .= " AND DATE(b.production_date) >= ?";
         $params[] = $filters['date_from'];
@@ -498,7 +380,17 @@ function getBatchNumbers($filters = [], $limit = 100, $offset = 0) {
         $params[] = $filters['date_to'];
     }
     
-    $sql .= " ORDER BY b.created_at DESC LIMIT ? OFFSET ?";
+    if (!empty($filters['expiry_from'])) {
+        $sql .= " AND DATE(b.expiry_date) >= ?";
+        $params[] = $filters['expiry_from'];
+    }
+    
+    if (!empty($filters['expiry_to'])) {
+        $sql .= " AND DATE(b.expiry_date) <= ?";
+        $params[] = $filters['expiry_to'];
+    }
+    
+    $sql .= " ORDER BY b.production_date DESC, b.id DESC LIMIT ? OFFSET ?";
     $params[] = $limit;
     $params[] = $offset;
     
@@ -511,7 +403,7 @@ function getBatchNumbers($filters = [], $limit = 100, $offset = 0) {
 function getBatchNumbersCount($filters = []) {
     $db = db();
     
-    $sql = "SELECT COUNT(*) as count FROM batch_numbers WHERE 1=1";
+    $sql = "SELECT COUNT(*) as count FROM batches WHERE 1=1";
     $params = [];
     
     if (!empty($filters['product_id'])) {
@@ -529,11 +421,6 @@ function getBatchNumbersCount($filters = []) {
         $params[] = $filters['production_date'];
     }
     
-    if (!empty($filters['status'])) {
-        $sql .= " AND status = ?";
-        $params[] = $filters['status'];
-    }
-    
     if (!empty($filters['date_from'])) {
         $sql .= " AND DATE(production_date) >= ?";
         $params[] = $filters['date_from'];
@@ -542,6 +429,16 @@ function getBatchNumbersCount($filters = []) {
     if (!empty($filters['date_to'])) {
         $sql .= " AND DATE(production_date) <= ?";
         $params[] = $filters['date_to'];
+    }
+    
+    if (!empty($filters['expiry_from'])) {
+        $sql .= " AND DATE(expiry_date) >= ?";
+        $params[] = $filters['expiry_from'];
+    }
+    
+    if (!empty($filters['expiry_to'])) {
+        $sql .= " AND DATE(expiry_date) <= ?";
+        $params[] = $filters['expiry_to'];
     }
     
     $result = $db->queryOne($sql, $params);
@@ -561,16 +458,29 @@ function updateBatchStatus($batchId, $status, $updatedBy = null) {
             $updatedBy = $currentUser['id'] ?? null;
         }
         
-        $oldBatch = $db->queryOne("SELECT status FROM batch_numbers WHERE id = ?", [$batchId]);
+        $statusColumnCheck = $db->queryOne("SHOW COLUMNS FROM batches LIKE 'status'");
+        if (empty($statusColumnCheck)) {
+            return ['success' => false, 'message' => 'جدول التشغيلات لا يحتوي على عمود حالة.'];
+        }
+        
+        $oldBatch = $db->queryOne("SELECT status FROM batches WHERE id = ?", [$batchId]);
+        if (!$oldBatch) {
+            return ['success' => false, 'message' => 'لم يتم العثور على التشغيله المطلوبة.'];
+        }
         
         $db->execute(
-            "UPDATE batch_numbers SET status = ?, updated_at = NOW() WHERE id = ?",
+            "UPDATE batches SET status = ?, updated_at = NOW() WHERE id = ?",
             [$status, $batchId]
         );
         
-        logAudit($updatedBy, 'update_batch_status', 'batch', $batchId, 
-                 ['old_status' => $oldBatch['status']], 
-                 ['new_status' => $status]);
+        logAudit(
+            $updatedBy,
+            'update_batch_status',
+            'batch',
+            $batchId,
+            ['old_status' => $oldBatch['status']],
+            ['new_status' => $status]
+        );
         
         return ['success' => true];
         
