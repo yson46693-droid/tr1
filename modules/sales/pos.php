@@ -17,6 +17,7 @@ require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/invoices.php';
 require_once __DIR__ . '/../../includes/reports.php';
 require_once __DIR__ . '/../../includes/simple_telegram.php';
+require_once __DIR__ . '/../../includes/auto_fix_262145.php';
 
 if (!function_exists('renderSalesInvoiceHtml')) {
     function renderSalesInvoiceHtml(array $invoice, array $meta = []): string
