@@ -16,6 +16,8 @@ require_once __DIR__ . '/../../includes/notifications.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
+echo '<style>#pageLoader{display:none !important;visibility:hidden !important;opacity:0 !important;}</style>';
+
 $currentUser = getCurrentUser();
 $db = db();
 
