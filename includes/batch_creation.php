@@ -255,9 +255,7 @@ function batchCreationCreate(int $templateId, int $units): array
         }
 
         $rawInventoryTable = batchCreationTableExists($pdo, 'raw_materials') ? 'raw_materials' : null;
-        if ($rawInventoryTable === null) {
-            throw new RuntimeException('جدول مخزون المواد الخام غير موجود');
-        }
+        $canUpdateRawStock = $rawInventoryTable !== null;
 
         $materialIdColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'raw_material_id')
             ? 'raw_material_id'
@@ -271,37 +269,43 @@ function batchCreationCreate(int $templateId, int $units): array
             ? 'material_name'
             : null;
 
-        $rawStockColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'stock')
-            ? 'stock'
-            : (batchCreationColumnExists($pdo, $rawInventoryTable, 'quantity') ? 'quantity' : null);
+        $materials = [];
+        $rawStockColumn = null;
+        $rawUnitColumn = null;
 
-        if ($rawStockColumn === null) {
-            throw new RuntimeException('لم يتم العثور على عمود المخزون في جدول المواد الخام');
+        if ($canUpdateRawStock) {
+            $rawStockColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'stock')
+                ? 'stock'
+                : (batchCreationColumnExists($pdo, $rawInventoryTable, 'quantity') ? 'quantity' : null);
+
+            if ($rawStockColumn === null) {
+                throw new RuntimeException('لم يتم العثور على عمود المخزون في جدول المواد الخام');
+            }
+
+            $rawUnitColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'unit') ? 'unit' : null;
+
+            $materialsStmt = $pdo->prepare(sprintf(
+                'SELECT 
+                    rm.id AS raw_id,
+                    %s AS raw_name,
+                    tm.quantity_per_unit,
+                    rm.%s AS available_stock,
+                    %s
+                FROM %s tm
+                JOIN %s rm ON rm.id = tm.%s
+                WHERE tm.template_id = ?',
+                $materialNameColumn !== null
+                    ? sprintf('COALESCE(rm.name, tm.%s)', $materialNameColumn)
+                    : 'rm.name',
+                $rawStockColumn,
+                $rawUnitColumn !== null ? 'rm.' . $rawUnitColumn . ' AS unit' : 'NULL AS unit',
+                $templateMaterialsTable,
+                $rawInventoryTable,
+                $materialIdColumn
+            ));
+            $materialsStmt->execute([$templateId]);
+            $materials = $materialsStmt->fetchAll();
         }
-
-        $rawUnitColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'unit') ? 'unit' : null;
-
-        $materialsStmt = $pdo->prepare(sprintf(
-            'SELECT 
-                rm.id AS raw_id,
-                %s AS raw_name,
-                tm.quantity_per_unit,
-                rm.%s AS available_stock,
-                %s
-            FROM %s tm
-            JOIN %s rm ON rm.id = tm.%s
-            WHERE tm.template_id = ?',
-            $materialNameColumn !== null
-                ? sprintf('COALESCE(rm.name, tm.%s)', $materialNameColumn)
-                : 'rm.name',
-            $rawStockColumn,
-            $rawUnitColumn !== null ? 'rm.' . $rawUnitColumn . ' AS unit' : 'NULL AS unit',
-            $templateMaterialsTable,
-            $rawInventoryTable,
-            $materialIdColumn
-        ));
-        $materialsStmt->execute([$templateId]);
-        $materials = $materialsStmt->fetchAll();
 
         // تجهيز جداول أدوات التعبئة
         $templatePackagingTable = batchCreationTableExists($pdo, 'template_packaging')
@@ -433,7 +437,7 @@ function batchCreationCreate(int $templateId, int $units): array
             throw new RuntimeException('تعذر حفظ بيانات التشغيله');
         }
 
-        if (!empty($materials)) {
+        if ($canUpdateRawStock && !empty($materials)) {
             if (!batchCreationTableExists($pdo, 'batch_raw_materials')) {
                 throw new RuntimeException('جدول تفاصيل المواد الخام غير موجود');
             }
