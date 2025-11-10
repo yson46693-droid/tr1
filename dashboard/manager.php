@@ -439,31 +439,120 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 </div>
                 
             <?php elseif ($page === 'reports'): ?>
-                <h2><i class="bi bi-file-earmark-text me-2"></i><?php echo isset($lang['reports']) ? $lang['reports'] : 'التقارير'; ?></h2>
-                
+                <?php
+                $reportSections = [
+                    [
+                        'id' => 'reportsQuickTools',
+                        'label' => 'أدوات سريعة',
+                        'icon' => 'bi-lightning-charge-fill'
+                    ],
+                    [
+                        'id' => 'reportsProduction',
+                        'label' => 'تقارير الإنتاج',
+                        'icon' => 'bi-graph-up-arrow'
+                    ]
+                ];
+                ?>
+
+                <div class="page-header mb-4">
+                    <h2 class="mb-1"><i class="bi bi-file-earmark-text me-2"></i><?php echo isset($lang['reports']) ? $lang['reports'] : 'التقارير'; ?></h2>
+                    <p class="text-muted mb-0">اختر القسم المطلوب عبر الأزرار العلوية أو قم بالتمرير للاطلاع على كل التقارير.</p>
+                </div>
+
                 <div class="card shadow-sm mb-4">
-                    <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
-                        <div>
-                            <h5 class="mb-1"><i class="bi bi-file-earmark-text me-2"></i>أدوات سريعة</h5>
-                            <p class="text-muted mb-0">توليد تقرير مالي سريع بصيغة PDF أو Excel.</p>
-                        </div>
-                        <div class="d-flex gap-2 flex-wrap">
-                            <button class="btn btn-primary" onclick="if(typeof generatePDFReport === 'function') { generatePDFReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
-                                <i class="bi bi-file-pdf me-2"></i>توليد تقرير PDF
-                            </button>
-                            <button class="btn btn-outline-primary" onclick="if(typeof generateExcelReport === 'function') { generateExcelReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
-                                <i class="bi bi-file-earmark-spreadsheet me-2"></i>توليد تقرير Excel
-                            </button>
-                        </div>
+                    <div class="card-body d-flex flex-wrap gap-2 align-items-center justify-content-start reports-sections-nav">
+                        <?php foreach ($reportSections as $section): ?>
+                            <a class="btn btn-outline-primary reports-nav-link" href="#<?php echo htmlspecialchars($section['id']); ?>">
+                                <i class="bi <?php echo htmlspecialchars($section['icon']); ?> me-2"></i><?php echo htmlspecialchars($section['label']); ?>
+                            </a>
+                        <?php endforeach; ?>
                     </div>
                 </div>
-                
-                <?php 
-                $productionReportsModule = __DIR__ . '/../modules/manager/production_reports.php';
-                if (file_exists($productionReportsModule)) {
-                    include $productionReportsModule;
-                }
-                ?>
+
+                <section id="reportsQuickTools" class="report-section">
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-body d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
+                            <div>
+                                <h5 class="mb-1"><i class="bi bi-lightning-charge-fill me-2"></i>أدوات سريعة</h5>
+                                <p class="text-muted mb-0">توليد تقرير مالي سريع بصيغة PDF أو Excel.</p>
+                            </div>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button class="btn btn-primary" onclick="if(typeof generatePDFReport === 'function') { generatePDFReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
+                                    <i class="bi bi-file-pdf me-2"></i>توليد تقرير PDF
+                                </button>
+                                <button class="btn btn-outline-primary" onclick="if(typeof generateExcelReport === 'function') { generateExcelReport('financial', {}, event); } else { alert('دالة التقرير غير متاحة. يرجى التأكد من تحميل ملف reports.js'); }">
+                                    <i class="bi bi-file-earmark-spreadsheet me-2"></i>توليد تقرير Excel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section id="reportsProduction" class="report-section">
+                    <?php 
+                    $productionReportsModule = __DIR__ . '/../modules/manager/production_reports.php';
+                    if (file_exists($productionReportsModule)) {
+                        include $productionReportsModule;
+                    }
+                    ?>
+                </section>
+
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const navLinks = Array.from(document.querySelectorAll('.reports-nav-link'));
+                        const sections = Array.from(document.querySelectorAll('.report-section'));
+
+                        if (!navLinks.length || !sections.length) {
+                            return;
+                        }
+
+                        const setActiveLink = (targetId) => {
+                            navLinks.forEach((link) => {
+                                const isActive = link.getAttribute('href') === '#' + targetId;
+                                link.classList.toggle('active', isActive);
+                                link.classList.toggle('btn-primary', isActive);
+                                link.classList.toggle('text-white', isActive);
+                                link.classList.toggle('btn-outline-primary', !isActive);
+                            });
+                        };
+
+                        navLinks.forEach((link) => {
+                            link.addEventListener('click', function (event) {
+                                const targetId = this.getAttribute('href').replace('#', '');
+                                const targetSection = document.getElementById(targetId);
+                                if (!targetSection) {
+                                    return;
+                                }
+                                event.preventDefault();
+                                const headerOffset = 80;
+                                const elementPosition = targetSection.getBoundingClientRect().top + window.pageYOffset;
+                                const offsetPosition = elementPosition - headerOffset;
+                                window.scrollTo({
+                                    top: offsetPosition,
+                                    behavior: 'smooth'
+                                });
+                                setActiveLink(targetId);
+                            });
+                        });
+
+                        const observerOptions = {
+                            root: null,
+                            rootMargin: '-40% 0px -40% 0px',
+                            threshold: 0
+                        };
+
+                        const observer = new IntersectionObserver((entries) => {
+                            entries.forEach((entry) => {
+                                if (entry.isIntersecting) {
+                                    setActiveLink(entry.target.id);
+                                }
+                            });
+                        }, observerOptions);
+
+                        sections.forEach((section) => observer.observe(section));
+                        setActiveLink(sections[0].id);
+                    });
+                </script>
                 
             <?php elseif ($page === 'performance'): ?>
                 <h2><i class="bi bi-graph-up-arrow me-2"></i><?php echo isset($lang['performance']) ? $lang['performance'] : 'الأداء'; ?></h2>
