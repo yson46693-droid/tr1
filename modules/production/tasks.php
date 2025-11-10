@@ -507,6 +507,87 @@ $stats = [
     'overdue' => $buildStatsQuery("status != 'completed' AND due_date < CURDATE()")
 ];
 
+if (!function_exists('tasksNormalizeUtf8Value')) {
+    function tasksNormalizeUtf8Value($value)
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+
+        if (function_exists('mb_convert_encoding')) {
+            $converted = @mb_convert_encoding($value, 'UTF-8', 'UTF-8, ISO-8859-1, Windows-1256, Windows-1252');
+            if ($converted !== false) {
+                $value = $converted;
+            }
+        }
+
+        if (function_exists('mb_detect_encoding') && !mb_detect_encoding($value, 'UTF-8', true) && function_exists('iconv')) {
+            $converted = @iconv('Windows-1256', 'UTF-8//IGNORE', $value);
+            if ($converted !== false) {
+                $value = $converted;
+            }
+        }
+
+        if (function_exists('preg_replace')) {
+            $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value);
+        }
+
+        return $value;
+    }
+}
+
+if (!function_exists('tasksSanitizeForJsonEncoding')) {
+    function tasksSanitizeForJsonEncoding($data)
+    {
+        if (is_array($data)) {
+            $clean = [];
+            foreach ($data as $key => $value) {
+                $clean[$key] = tasksSanitizeForJsonEncoding($value);
+            }
+            return $clean;
+        }
+
+        if (is_object($data)) {
+            foreach (get_object_vars($data) as $property => $value) {
+                $data->$property = tasksSanitizeForJsonEncoding($value);
+            }
+            return $data;
+        }
+
+        if (is_string($data)) {
+            return tasksNormalizeUtf8Value($data);
+        }
+
+        return $data;
+    }
+}
+
+if (!function_exists('tasksSafeJsonEncode')) {
+    function tasksSafeJsonEncode($data): string
+    {
+        $options = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP;
+        $json = json_encode($data, $options);
+
+        if ($json === false) {
+            $cleanData = tasksSanitizeForJsonEncoding($data);
+            $json = json_encode($cleanData, $options);
+
+            if ($json === false) {
+                error_log('Tasks module JSON encode error: ' . json_last_error_msg());
+                return '[]';
+            }
+        }
+
+        if ($json === '' || $json === null || $json === 'null') {
+            return '[]';
+        }
+
+        return $json;
+    }
+}
+
+$tasksJson = tasksSafeJsonEncode($tasks);
+
 if (!function_exists('getTasksRetentionLimit')) {
     function getTasksRetentionLimit(): int {
         if (defined('TASKS_RETENTION_MAX_ROWS')) {
@@ -967,7 +1048,14 @@ if (!function_exists('enforceTasksRetentionLimit')) {
 <?php endif; ?>
 
 <script>
-let tasksData = <?php echo json_encode($tasks); ?>;
+let tasksData = <?php echo $tasksJson; ?>;
+if (!Array.isArray(tasksData)) {
+    if (tasksData && typeof tasksData === 'object') {
+        tasksData = Object.values(tasksData);
+    } else {
+        tasksData = [];
+    }
+}
 
 function toggleProductionFields() {
     const taskTypeInput = document.getElementById('task_type');
