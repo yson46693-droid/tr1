@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole(['accountant', 'manager']);
 
@@ -500,8 +501,8 @@ if (isset($_GET['edit'])) {
         </form>
         
         <!-- Suppliers Table -->
-        <div class="table-responsive">
-            <table class="table table-striped table-hover">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>#</th>
@@ -662,8 +663,8 @@ $historyTypeLabels = [
                 <i class="bi bi-inbox me-2"></i>لا توجد حركات مالية مسجلة بعد.
             </div>
         <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>#</th>

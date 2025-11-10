@@ -368,88 +368,109 @@ if ($page === 'sales_collections') {
                     </div>
                 </div>
                 <script>
-                    document.addEventListener('DOMContentLoaded', function () {
-                        const defaultTab = '<?php echo $activeCombinedTab === 'collections' ? 'collections' : 'sales'; ?>';
-                        if (defaultTab === 'collections') {
-                            const tabTrigger = document.getElementById('collections-tab');
-                            if (tabTrigger && window.bootstrap && typeof window.bootstrap.Tab === 'function') {
-                                const tab = new bootstrap.Tab(tabTrigger);
-                                tab.show();
+                    (function () {
+                        const assetsBaseUrl = '<?php echo rtrim(ASSETS_URL, '/'); ?>';
+
+                        function initCombinedTabs() {
+                            const defaultTab = '<?php echo $activeCombinedTab === 'collections' ? 'collections' : 'sales'; ?>';
+                            if (defaultTab === 'collections') {
+                                const tabTrigger = document.getElementById('collections-tab');
+                                if (tabTrigger && window.bootstrap && typeof window.bootstrap.Tab === 'function') {
+                                    const tab = new bootstrap.Tab(tabTrigger);
+                                    tab.show();
+                                }
                             }
                         }
- 
-                         const assetsBaseUrl = '<?php echo rtrim(ASSETS_URL, '/'); ?>';
-                         const printableButtons = document.querySelectorAll('[data-report-target]');
- 
-                         printableButtons.forEach(function(button) {
-                             button.addEventListener('click', function() {
-                                 const targetId = this.getAttribute('data-report-target');
-                                 const reportTitle = this.getAttribute('data-report-title') || '';
-                                 openPrintableReport(targetId, reportTitle, assetsBaseUrl);
-                             });
-                         });
-                    });
- 
-                     function openPrintableReport(targetId, reportTitle, assetsBaseUrl) {
-                         if (!targetId) {
-                             console.warn('Missing target for printable report.');
-                             return;
-                         }
- 
-                         const section = document.getElementById(targetId);
-                         if (!section) {
-                             console.warn('Printable section not found:', targetId);
-                             return;
-                         }
- 
-                         const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=768');
-                         if (!printWindow) {
-                             alert('يرجى السماح بالنوافذ المنبثقة لإنشاء التقرير');
-                             return;
-                         }
- 
-                         const doc = printWindow.document;
-                         const pageDirection = document.documentElement.getAttribute('dir') || 'rtl';
-                         const pageLang = document.documentElement.getAttribute('lang') || 'ar';
- 
-                         const sanitizedTitle = typeof reportTitle === 'string' ? reportTitle : '';
-                         const generatedAt = new Date().toLocaleString('ar-EG', { hour12: false });
-                         const stylesheets = [
-                             'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
-                             assetsBaseUrl + '/css/homeline-dashboard.css',
-                             assetsBaseUrl + '/css/tables.css',
-                             assetsBaseUrl + '/css/cards.css'
-                         ];
- 
-                         doc.open();
-                         doc.write('<!DOCTYPE html><html lang="' + pageLang + '" dir="' + pageDirection + '"><head><meta charset="UTF-8">');
-                         doc.write('<title>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</title>');
-                         stylesheets.forEach(function(href) {
-                             doc.write('<link rel="stylesheet" href="' + href + '" media="all">');
-                         });
-                         doc.write('<style>body{background:#fff;color:#000;padding:24px;font-family:\'Segoe UI\',Tahoma,sans-serif;} .print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;} .print-header h1{font-size:1.5rem;margin-bottom:0;} .print-meta{font-size:0.9rem;color:#6c757d;} @media print{.print-controls{display:none!important;}}</style>');
-                         doc.write('</head><body>');
-                         doc.write('<div class="print-header text-center">');
-                         doc.write('<h1>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</h1>');
-                         doc.write('<div class="print-meta">' + escapeHtmlForPrint('تم الإنشاء في: ' + generatedAt) + '</div>');
-                         doc.write('</div>');
-                         doc.write('<div class="print-content">' + section.innerHTML + '</div>');
-                         doc.write('<script>window.addEventListener("load",function(){window.focus();window.print();});<' + '/script>');
-                         doc.write('</body></html>');
-                         doc.close();
-                     }
- 
-                     function escapeHtmlForPrint(value) {
-                         if (typeof value !== 'string') {
-                             return '';
-                         }
-                         return value
-                             .replace(/&/g, '&amp;')
-                             .replace(/</g, '&lt;')
-                             .replace(/>/g, '&gt;')
-                             .replace(/"/g, '&quot;')
-                             .replace(/'/g, '&#039;');
-                     }
+
+                        function handlePrintableButtons() {
+                            const printableButtons = document.querySelectorAll('[data-report-target]');
+                            if (!printableButtons.length) {
+                                return;
+                            }
+
+                            printableButtons.forEach(function (button) {
+                                button.addEventListener('click', function () {
+                                    const targetId = this.getAttribute('data-report-target');
+                                    const reportTitle = this.getAttribute('data-report-title') || '';
+                                    openPrintableReport(targetId, reportTitle, assetsBaseUrl);
+                                }, { once: false });
+                            });
+                        }
+
+                        function initPrintableReports() {
+                            initCombinedTabs();
+                            handlePrintableButtons();
+                        }
+
+                        if (document.readyState === 'loading') {
+                            document.addEventListener('DOMContentLoaded', initPrintableReports);
+                        } else {
+                            initPrintableReports();
+                        }
+
+                        window.openPrintableReport = openPrintableReport;
+                    })();
+
+                    function openPrintableReport(targetId, reportTitle, assetsBaseUrl) {
+                        if (!targetId) {
+                            console.warn('Missing target for printable report.');
+                            return;
+                        }
+
+                        const section = document.getElementById(targetId);
+                        if (!section) {
+                            console.warn('Printable section not found:', targetId);
+                            return;
+                        }
+
+                        const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=768');
+                        if (!printWindow) {
+                            alert('يرجى السماح بالنوافذ المنبثقة لإنشاء التقرير');
+                            return;
+                        }
+
+                        const doc = printWindow.document;
+                        const pageDirection = document.documentElement.getAttribute('dir') || 'rtl';
+                        const pageLang = document.documentElement.getAttribute('lang') || 'ar';
+
+                        const sanitizedTitle = typeof reportTitle === 'string' ? reportTitle : '';
+                        const generatedAt = new Date().toLocaleString('ar-EG', { hour12: false });
+                        const stylesheets = [
+                            'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
+                            assetsBaseUrl + '/css/homeline-dashboard.css',
+                            assetsBaseUrl + '/css/tables.css',
+                            assetsBaseUrl + '/css/cards.css'
+                        ];
+
+                        doc.open();
+                        doc.write('<!DOCTYPE html><html lang="' + pageLang + '" dir="' + pageDirection + '"><head><meta charset="UTF-8">');
+                        doc.write('<title>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</title>');
+                        stylesheets.forEach(function (href) {
+                            doc.write('<link rel="stylesheet" href="' + href + '" media="all">');
+                        });
+                        doc.write('<style>body{background:#fff;color:#000;padding:24px;font-family:\'Segoe UI\',Tahoma,sans-serif;} .print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;} .print-header h1{font-size:1.5rem;margin-bottom:0;} .print-meta{font-size:0.9rem;color:#6c757d;} @media print{.print-controls{display:none!important;}}</style>');
+                        doc.write('</head><body>');
+                        doc.write('<div class="print-header text-center">');
+                        doc.write('<h1>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</h1>');
+                        doc.write('<div class="print-meta">' + escapeHtmlForPrint('تم الإنشاء في: ' + generatedAt) + '</div>');
+                        doc.write('</div>');
+                        doc.write('<div class="print-content">' + section.innerHTML + '</div>');
+                        doc.write('<script>window.addEventListener("load",function(){window.focus();window.print();});<' + '/script>');
+                        doc.write('</body></html>');
+                        doc.close();
+                    }
+
+                    function escapeHtmlForPrint(value) {
+                        if (typeof value !== 'string') {
+                            return '';
+                        }
+                        return value
+                            .replace(/&/g, '&amp;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;')
+                            .replace(/"/g, '&quot;')
+                            .replace(/'/g, '&#039;');
+                    }
                 </script>
                 
             <?php elseif ($page === 'orders'): ?>

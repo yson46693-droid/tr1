@@ -1775,7 +1775,8 @@ if (!$error) {
         formatCurrency,
         elements,
         cart,
-        inventory
+        inventory,
+        currencySymbol
     };
     console.info('[POS] Initialized', {
         netTotal: elements.netTotal?.textContent,

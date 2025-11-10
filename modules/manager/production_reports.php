@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/consumption_reports.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -71,8 +72,8 @@ function renderConsumptionTable($items, $includeCategory = false)
         echo '<div class="table-responsive"><div class="text-center text-muted py-4">لا توجد بيانات</div></div>';
         return;
     }
-    echo '<div class="table-responsive">';
-    echo '<table class="table table-hover align-middle">';
+    echo '<div class="table-responsive dashboard-table-wrapper">';
+    echo '<table class="table dashboard-table align-middle">';
     echo '<thead class="table-light"><tr>';
     echo '<th>المادة</th>';
     if ($includeCategory) {
@@ -101,8 +102,8 @@ function renderPackagingDamageTable($items)
         echo '<div class="text-center text-muted py-4">لا توجد تسجيلات تالف في الفترة المحددة</div>';
         return;
     }
-    echo '<div class="table-responsive">';
-    echo '<table class="table table-hover align-middle">';
+    echo '<div class="table-responsive dashboard-table-wrapper">';
+    echo '<table class="table dashboard-table align-middle">';
     echo '<thead class="table-light"><tr>';
     echo '<th>أداة التعبئة</th><th>الكمية التالفة</th><th>عدد السجلات</th><th>آخر سبب</th><th>آخر تسجيل</th>';
     echo '</tr></thead><tbody>';
@@ -254,7 +255,7 @@ function renderCombinedReportTable(array $rows, array $totals)
     }
 
     echo '<div class="table-responsive">';
-    echo '<table class="table table-hover align-middle">';
+    echo '<table class="table dashboard-table align-middle">';
     echo '<thead class="table-light"><tr>';
     echo '<th>النوع</th><th>العنصر</th><th>الفئة / التفاصيل</th><th>الوارد</th><th>الاستهلاك</th><th>الصافي</th><th>الحركات</th><th>معلومات إضافية</th>';
     echo '</tr></thead><tbody>';

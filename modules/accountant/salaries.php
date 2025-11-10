@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/salary_calculator.php';
 require_once __DIR__ . '/../../includes/approval_system.php';
 require_once __DIR__ . '/../../includes/notifications.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireAnyRole(['accountant', 'manager']);
 
@@ -758,8 +759,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
         </div>
         
         <!-- جدول الرواتب -->
-        <div class="table-responsive">
-            <table class="table table-striped table-hover">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                 <thead>
                     <tr>
                         <th>#</th>
@@ -965,8 +966,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
             <h5 class="mb-0">رواتب <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?></h5>
         </div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>المستخدم</th>
@@ -1062,8 +1063,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
             <h5 class="mb-0"><i class="bi bi-hourglass-split me-2"></i>طلبات تعديل رواتب معلقة (<?php echo count($pendingModifications); ?>)</h5>
         </div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-sm">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table dashboard-table--compact align-middle">
                     <thead>
                         <tr>
                             <th>المستخدم</th>
@@ -1192,8 +1193,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                 <p>يمكنك طلب سلفة جديدة باستخدام الزر أعلاه</p>
             </div>
         <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-hover">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>#</th>

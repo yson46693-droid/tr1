@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/notifications.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/security.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -633,8 +634,8 @@ if (!function_exists('enforceTasksRetentionLimit')) {
             <span class="text-muted small">آخر 10 مهام</span>
         </div>
         <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle mb-0">
                     <thead class="table-light">
                         <tr>
                             <th>العنوان</th>

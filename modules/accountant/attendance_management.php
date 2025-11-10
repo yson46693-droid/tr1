@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/attendance.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole(['accountant', 'manager']);
 
@@ -192,8 +193,8 @@ if ($selectedUserId > 0) {
             <h5 class="mb-0">سجلات الحضور - <?php echo htmlspecialchars($selectedUser['full_name'] ?? $selectedUser['username']); ?></h5>
         </div>
         <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>التاريخ</th>
@@ -251,9 +252,9 @@ if ($selectedUserId > 0) {
         <div class="card-header bg-primary text-white">
             <h5 class="mb-0">إحصائيات الحضور - <?php echo date('F Y', strtotime($selectedMonth . '-01')); ?></h5>
         </div>
-        <div class="card-body">
-            <div class="table-responsive">
-                <table class="table table-striped table-hover">
+    <div class="card-body">
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>المستخدم</th>
