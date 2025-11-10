@@ -99,6 +99,38 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
     }
     
     // 2. التحقق من المواد الخام
+    $templateRow = $db->queryOne(
+        "SELECT honey_quantity, details_json 
+         FROM product_templates 
+         WHERE id = ?",
+        [$templateId]
+    );
+
+    $rawMaterialsDetails = [];
+    if (!empty($templateRow['details_json'])) {
+        try {
+            $decodedDetails = json_decode($templateRow['details_json'], true, 512, JSON_THROW_ON_ERROR);
+            if (!empty($decodedDetails['raw_materials']) && is_array($decodedDetails['raw_materials'])) {
+                foreach ($decodedDetails['raw_materials'] as $rawDetail) {
+                    if (!is_array($rawDetail)) {
+                        continue;
+                    }
+                    $rawNameKey = '';
+                    if (!empty($rawDetail['name'])) {
+                        $rawNameKey = mb_strtolower(trim((string)$rawDetail['name']), 'UTF-8');
+                    } elseif (!empty($rawDetail['material_name'])) {
+                        $rawNameKey = mb_strtolower(trim((string)$rawDetail['material_name']), 'UTF-8');
+                    }
+                    if ($rawNameKey !== '') {
+                        $rawMaterialsDetails[$rawNameKey] = $rawDetail;
+                    }
+                }
+            }
+        } catch (Throwable $decodeError) {
+            error_log('checkMaterialsAvailability: failed decoding details_json -> ' . $decodeError->getMessage());
+        }
+    }
+
     $rawMaterials = $db->query(
         "SELECT material_name, quantity_per_unit, unit 
          FROM product_template_raw_materials 
@@ -109,6 +141,11 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
     foreach ($rawMaterials as $raw) {
         $materialName = $raw['material_name'];
         $requiredQuantity = floatval($raw['quantity_per_unit']) * $productionQuantity;
+        $normalizedName = mb_strtolower(trim((string)$materialName), 'UTF-8');
+        $rawDetail = $rawMaterialsDetails[$normalizedName] ?? null;
+        $materialTypeMeta = $rawDetail['type'] ?? null;
+        $materialSupplierMeta = isset($rawDetail['supplier_id']) ? (int)$rawDetail['supplier_id'] : null;
+        $materialUnit = $raw['unit'] ?? ($rawDetail['unit'] ?? 'كجم');
         
         // البحث عن المادة في جدول المنتجات
         $product = $db->queryOne(
@@ -124,21 +161,104 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity) {
                     'required' => $requiredQuantity,
                     'available' => $availableQuantity,
                     'type' => 'مواد خام',
-                    'unit' => $raw['unit'] ?? 'كجم'
+                    'unit' => $materialUnit
                 ];
             }
         } else {
-            $missingMaterials[] = [
-                'name' => $materialName,
-                'type' => 'مواد خام',
-                'unit' => $raw['unit'] ?? 'كجم'
-            ];
+            $resolved = false;
+            $availableQuantity = 0.0;
+
+            $checkStock = function(string $table, string $column, ?int $supplierId = null) use ($db) {
+                $sql = "SELECT SUM({$column}) AS total_quantity FROM {$table}";
+                $params = [];
+                if ($supplierId) {
+                    $sql .= " WHERE supplier_id = ?";
+                    $params[] = $supplierId;
+                }
+                $stockRow = $db->queryOne($sql, $params);
+                return (float)($stockRow['total_quantity'] ?? 0);
+            };
+
+            $materialTypeMeta = $materialTypeMeta ?: 'other';
+
+            switch ($materialTypeMeta) {
+                case 'honey_raw':
+                case 'honey_filtered':
+                case 'honey':
+                    $honeyStockExists = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
+                    if (!empty($honeyStockExists)) {
+                        $column = ($materialTypeMeta === 'honey_raw') ? 'raw_honey_quantity' : 'filtered_honey_quantity';
+                        $availableQuantity = $checkStock('honey_stock', $column, $materialSupplierMeta);
+                        $resolved = true;
+                    }
+                    break;
+                case 'olive_oil':
+                    $oliveTableExists = $db->queryOne("SHOW TABLES LIKE 'olive_oil_stock'");
+                    if (!empty($oliveTableExists)) {
+                        $availableQuantity = $checkStock('olive_oil_stock', 'quantity', $materialSupplierMeta);
+                        $resolved = true;
+                    }
+                    break;
+                case 'beeswax':
+                    $beeswaxTableExists = $db->queryOne("SHOW TABLES LIKE 'beeswax_stock'");
+                    if (!empty($beeswaxTableExists)) {
+                        $availableQuantity = $checkStock('beeswax_stock', 'weight', $materialSupplierMeta);
+                        $resolved = true;
+                    }
+                    break;
+                case 'derivatives':
+                    $derivativesTableExists = $db->queryOne("SHOW TABLES LIKE 'derivatives_stock'");
+                    if (!empty($derivativesTableExists)) {
+                        $availableQuantity = $checkStock('derivatives_stock', 'weight', $materialSupplierMeta);
+                        $resolved = true;
+                    }
+                    break;
+                case 'nuts':
+                    $nutsTableExists = $db->queryOne("SHOW TABLES LIKE 'nuts_stock'");
+                    if (!empty($nutsTableExists)) {
+                        $availableQuantity = $checkStock('nuts_stock', 'quantity', $materialSupplierMeta);
+                        $resolved = true;
+                    }
+                    break;
+                default:
+                    if ($materialSupplierMeta) {
+                        $genericStockTableExists = $db->queryOne("SHOW TABLES LIKE 'raw_materials'");
+                        if (!empty($genericStockTableExists)) {
+                            $stockRow = $db->queryOne(
+                                "SELECT SUM(quantity) AS total_quantity 
+                                 FROM raw_materials 
+                                 WHERE supplier_id = ?",
+                                [$materialSupplierMeta]
+                            );
+                            $availableQuantity = (float)($stockRow['total_quantity'] ?? 0);
+                            $resolved = true;
+                        }
+                    }
+                    break;
+            }
+
+            if ($resolved) {
+                if ($availableQuantity < $requiredQuantity) {
+                    $insufficientMaterials[] = [
+                        'name' => $materialName,
+                        'required' => $requiredQuantity,
+                        'available' => $availableQuantity,
+                        'type' => 'مواد خام',
+                        'unit' => $materialUnit
+                    ];
+                }
+            } else {
+                $missingMaterials[] = [
+                    'name' => $materialName,
+                    'type' => 'مواد خام',
+                    'unit' => $materialUnit
+                ];
+            }
         }
     }
     
     // 3. التحقق من العسل (من القالب)
-    $template = $db->queryOne("SELECT honey_quantity FROM product_templates WHERE id = ?", [$templateId]);
-    $honeyQuantity = floatval($template['honey_quantity'] ?? 0);
+    $honeyQuantity = floatval($templateRow['honey_quantity'] ?? 0);
     if ($honeyQuantity > 0) {
         $requiredHoney = $honeyQuantity * $productionQuantity;
         
