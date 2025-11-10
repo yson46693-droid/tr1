@@ -117,6 +117,7 @@ $translations = [
     'sales_page_coming_soon' => 'Sales page - coming soon',
     'customers_page_coming_soon' => 'Customers page - coming soon',
     'collections_page_coming_soon' => 'Collections page - coming soon',
+    'sales_pos' => 'Sales POS',
     'product' => 'Product',
     'quantity' => 'Quantity',
     'price' => 'Price',
