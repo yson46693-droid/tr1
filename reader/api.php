@@ -161,19 +161,38 @@ if ($db) {
 }
 
 try {
-    $batch = $db->queryOne(
-        "SELECT 
-            b.*,
-            COALESCE(fp.product_name, p.name) AS product_name,
-            p.category AS product_category,
-            fp.quantity_produced
-         FROM batches b
-         LEFT JOIN finished_products fp ON fp.batch_id = b.id
-         LEFT JOIN products p ON p.id = b.product_id
-         WHERE b.batch_number = ?
-         LIMIT 1",
-        [$batchNumber]
-    );
+    $batch = null;
+    $batchQueryError = null;
+
+    try {
+        $batch = $db->queryOne(
+            "SELECT 
+                b.*,
+                COALESCE(fp.product_name, p.name) AS product_name,
+                p.category AS product_category,
+                fp.quantity_produced
+             FROM batches b
+             LEFT JOIN finished_products fp ON fp.batch_id = b.id
+             LEFT JOIN products p ON p.id = b.product_id
+             WHERE b.batch_number = ?
+             LIMIT 1",
+            [$batchNumber]
+        );
+    } catch (Throwable $primaryQueryError) {
+        $batchQueryError = $primaryQueryError;
+        error_log('Reader primary batch query error: ' . $primaryQueryError->getMessage());
+    }
+
+    if (!$batch) {
+        try {
+            $batch = $db->queryOne(
+                "SELECT * FROM batches WHERE batch_number = ? LIMIT 1",
+                [$batchNumber]
+            );
+        } catch (Throwable $fallbackQueryError) {
+            error_log('Reader fallback batch query error: ' . $fallbackQueryError->getMessage());
+        }
+    }
 
     if (!$batch) {
         http_response_code(404);
@@ -195,7 +214,7 @@ try {
         exit;
     }
 
-    $batchId = (int) ($batch['id'] ?? 0);
+    $batchId = isset($batch['id']) ? (int) $batch['id'] : 0;
 
     $statusLabels = [
         'in_production' => 'قيد الإنتاج',
@@ -205,58 +224,96 @@ try {
     ];
 
     $packagingDetails = [];
-    try {
-        $packagingDetails = $db->query(
-            "SELECT 
-                bp.id,
-                bp.quantity_used,
-                COALESCE(bp.packaging_name, pm.name) AS name,
-                COALESCE(bp.unit, pm.unit) AS unit
-             FROM batch_packaging bp
-             LEFT JOIN packaging_materials pm ON pm.id = bp.packaging_material_id
-             WHERE bp.batch_id = ?",
-            [$batchId]
-        );
-    } catch (Throwable $packagingError) {
-        error_log('Reader packaging query error: ' . $packagingError->getMessage());
-        $packagingDetails = [];
+    if ($batchId > 0 && readerTableExists($db, 'batch_packaging')) {
+        $hasPackagingMaterials = readerTableExists($db, 'packaging_materials');
+        $selectColumns = [
+            'bp.id',
+            'bp.quantity_used',
+        ];
+        if ($hasPackagingMaterials) {
+            $selectColumns[] = 'COALESCE(bp.packaging_name, pm.name) AS name';
+            $selectColumns[] = 'COALESCE(bp.unit, pm.unit) AS unit';
+        } else {
+            $selectColumns[] = 'bp.packaging_name AS name';
+            $selectColumns[] = 'bp.unit AS unit';
+        }
+
+        $query = "SELECT " . implode(', ', $selectColumns) . " FROM batch_packaging bp";
+        if ($hasPackagingMaterials) {
+            $query .= " LEFT JOIN packaging_materials pm ON pm.id = bp.packaging_material_id";
+        }
+        $query .= " WHERE bp.batch_id = ?";
+
+        try {
+            $packagingDetails = $db->query($query, [$batchId]);
+        } catch (Throwable $packagingError) {
+            error_log('Reader packaging query error: ' . $packagingError->getMessage());
+            $packagingDetails = [];
+        }
     }
 
     $rawMaterials = [];
-    try {
-        $rawMaterials = $db->query(
-            "SELECT 
-                brm.id,
-                brm.quantity_used,
-                COALESCE(brm.material_name, rm.name) AS name,
-                COALESCE(brm.unit, rm.unit) AS unit
-             FROM batch_raw_materials brm
-             LEFT JOIN raw_materials rm ON rm.id = brm.raw_material_id
-             WHERE brm.batch_id = ?",
-            [$batchId]
-        );
-    } catch (Throwable $rawError) {
-        error_log('Reader raw materials query error: ' . $rawError->getMessage());
-        $rawMaterials = [];
+    if ($batchId > 0 && readerTableExists($db, 'batch_raw_materials')) {
+        $hasRawMaterials = readerTableExists($db, 'raw_materials');
+        $selectColumns = [
+            'brm.id',
+            'brm.quantity_used',
+        ];
+        if ($hasRawMaterials) {
+            $selectColumns[] = 'COALESCE(brm.material_name, rm.name) AS name';
+            $selectColumns[] = 'COALESCE(brm.unit, rm.unit) AS unit';
+        } else {
+            $selectColumns[] = 'brm.material_name AS name';
+            $selectColumns[] = 'brm.unit AS unit';
+        }
+
+        $query = "SELECT " . implode(', ', $selectColumns) . " FROM batch_raw_materials brm";
+        if ($hasRawMaterials) {
+            $query .= " LEFT JOIN raw_materials rm ON rm.id = brm.raw_material_id";
+        }
+        $query .= " WHERE brm.batch_id = ?";
+
+        try {
+            $rawMaterials = $db->query($query, [$batchId]);
+        } catch (Throwable $rawError) {
+            error_log('Reader raw materials query error: ' . $rawError->getMessage());
+            $rawMaterials = [];
+        }
     }
 
     $workersDetails = [];
-    try {
-        $workersDetails = $db->query(
-            "SELECT 
-                bw.id,
-                bw.employee_id,
-                COALESCE(e.name, u.full_name, u.username) AS name,
-                u.role
-             FROM batch_workers bw
-             LEFT JOIN employees e ON e.id = bw.employee_id
-             LEFT JOIN users u ON u.id = bw.employee_id
-             WHERE bw.batch_id = ?",
-            [$batchId]
-        );
-    } catch (Throwable $workersError) {
-        error_log('Reader workers query error: ' . $workersError->getMessage());
-        $workersDetails = [];
+    if ($batchId > 0 && readerTableExists($db, 'batch_workers')) {
+        try {
+            $joinEmployees = readerTableExists($db, 'employees');
+            $joinUsers = readerTableExists($db, 'users');
+
+            $selectParts = [
+                'bw.id',
+                'bw.employee_id',
+            ];
+            if ($joinEmployees) {
+                $selectParts[] = 'e.name AS employee_name';
+            }
+            if ($joinUsers) {
+                $selectParts[] = 'u.full_name';
+                $selectParts[] = 'u.username';
+                $selectParts[] = 'u.role';
+            }
+
+            $query = "SELECT " . implode(', ', $selectParts) . " FROM batch_workers bw";
+            if ($joinEmployees) {
+                $query .= " LEFT JOIN employees e ON e.id = bw.employee_id";
+            }
+            if ($joinUsers) {
+                $query .= " LEFT JOIN users u ON u.id = bw.employee_id";
+            }
+            $query .= " WHERE bw.batch_id = ?";
+
+            $workersDetails = $db->query($query, [$batchId]);
+        } catch (Throwable $workersError) {
+            error_log('Reader workers query error: ' . $workersError->getMessage());
+            $workersDetails = [];
+        }
     }
 
     $packagingFormatted = array_map(static function (array $row) {
@@ -281,7 +338,7 @@ try {
         return [
             'assignment_id' => $row['id'] ?? null,
             'worker_id' => $row['employee_id'] ?? null,
-            'full_name' => $row['name'] ?? null,
+            'full_name' => $row['employee_name'] ?? $row['full_name'] ?? $row['username'] ?? null,
             'role' => $row['role'] ?? 'عامل إنتاج',
         ];
     }, $workersDetails);
@@ -336,6 +393,30 @@ try {
         'success' => false,
         'message' => 'حدث خطأ أثناء معالجة الطلب.'
     ], JSON_UNESCAPED_UNICODE);
+}
+
+if (!function_exists('readerTableExists')) {
+    function readerTableExists($dbInstance, string $table): bool
+    {
+        static $cache = [];
+        $table = trim($table);
+        if ($table === '') {
+            return false;
+        }
+        if (array_key_exists($table, $cache)) {
+            return $cache[$table];
+        }
+
+        try {
+            $result = $dbInstance->queryOne("SHOW TABLES LIKE ?", [$table]);
+            $cache[$table] = !empty($result);
+        } catch (Throwable $e) {
+            error_log('Reader table exists check error for ' . $table . ': ' . $e->getMessage());
+            $cache[$table] = false;
+        }
+
+        return $cache[$table];
+    }
 }
 
 if (!function_exists('getReaderAccessLogMaxRows')) {

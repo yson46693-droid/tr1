@@ -7,7 +7,7 @@ const RUNTIME_CACHE_NAME = 'batch-reader-runtime';
 const PRECACHE_ASSETS = [
   './',
   './index.php',
-  './manifest.json',
+  './manifest.php',
   './assets/icon.svg',
   './assets/icon-192.png',
   './assets/icon-512.png'
