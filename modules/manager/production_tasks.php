@@ -468,12 +468,33 @@ if (!function_exists('enforceTasksRetentionLimit')) {
 ?>
 
 <style>
-#pageLoader {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-}
+    body #pageLoader,
+    html #pageLoader {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+    }
 </style>
+<script>
+(function () {
+    function hidePageLoader() {
+        const loader = document.getElementById('pageLoader');
+        if (!loader) {
+            return;
+        }
+        loader.classList.add('hidden');
+        loader.setAttribute('aria-hidden', 'true');
+        loader.style.display = 'none';
+        loader.style.visibility = 'hidden';
+        loader.style.opacity = '0';
+    }
+
+    hidePageLoader();
+    document.addEventListener('readystatechange', hidePageLoader);
+    window.addEventListener('load', hidePageLoader);
+    window.addEventListener('pageshow', hidePageLoader);
+})();
+</script>
 
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
