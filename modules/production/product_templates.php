@@ -2,7 +2,9 @@
 /**
  * صفحة قوالب المنتجات - نموذج مبسط
  */
-
+if (!defined('ACCESS_ALLOWED')) {
+    die('Direct access not allowed');
+}
 
 
 require_once __DIR__ . '/../../includes/config.php';
@@ -25,6 +27,9 @@ if ($sessionSuccess) {
     $success = $sessionSuccess;
 }
 
+ensureProductTemplatesExtendedSchema($db);
+syncAllUnifiedTemplatesToProductTemplates($db);
+
 // إنشاء الجداول إذا لم تكن موجودة
 try {
     $templateTableCheck = $db->queryOne("SHOW TABLES LIKE 'product_templates'");
@@ -35,13 +40,20 @@ try {
               `id` int(11) NOT NULL AUTO_INCREMENT,
               `product_name` varchar(255) NOT NULL COMMENT 'اسم المنتج',
               `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية العسل بالجرام',
+              `template_type` varchar(50) DEFAULT 'general' COMMENT 'نوع القالب',
+              `source_template_id` int(11) DEFAULT NULL COMMENT 'معرّف القالب في النظام القديم (إن وُجد)',
+              `main_supplier_id` int(11) DEFAULT NULL COMMENT 'المورد الرئيسى للقالب',
+              `notes` text DEFAULT NULL COMMENT 'ملاحظات إضافية',
+              `details_json` longtext DEFAULT NULL COMMENT 'بيانات إضافية بتنسيق JSON',
               `status` enum('active','inactive') DEFAULT 'active',
               `created_by` int(11) NOT NULL,
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
               `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
               PRIMARY KEY (`id`),
               KEY `created_by` (`created_by`),
-              KEY `status` (`status`)
+              KEY `status` (`status`),
+              KEY `source_template_id` (`source_template_id`),
+              KEY `main_supplier_id` (`main_supplier_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         ");
         
@@ -220,9 +232,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // إنشاء القالب
                 $result = $db->execute(
-                    "INSERT INTO product_templates (product_name, honey_quantity, created_by, status) 
-                     VALUES (?, ?, ?, 'active')",
-                    [$productName, $honeyQuantity, $currentUser['id']]
+                    "INSERT INTO product_templates (product_name, honey_quantity, created_by, status, template_type, main_supplier_id, notes, details_json) 
+                     VALUES (?, ?, ?, 'active', ?, NULL, NULL, NULL)",
+                    [$productName, $honeyQuantity, $currentUser['id'], 'legacy']
                 );
                 
                 $templateId = $result['insert_id'];
@@ -286,16 +298,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// الحصول على القوالب
+// الحصول على القوالب بعد مزامنة النظام الموحد
 $templates = $db->query(
     "SELECT pt.*, 
-            u.full_name as creator_name,
-            (SELECT COUNT(*) FROM product_template_packaging WHERE template_id = pt.id) as packaging_count,
-            (SELECT COUNT(*) FROM product_template_raw_materials WHERE template_id = pt.id) as raw_materials_count
+            u.full_name as creator_name
      FROM product_templates pt
      LEFT JOIN users u ON pt.created_by = u.id
      ORDER BY pt.created_at DESC"
 );
+
+foreach ($templates as &$template) {
+    $templateId = (int)($template['id'] ?? 0);
+
+    // أدوات التعبئة
+    $packagingDetails = $db->query(
+        "SELECT packaging_material_id, packaging_name, quantity_per_unit 
+         FROM product_template_packaging 
+         WHERE template_id = ?",
+        [$templateId]
+    );
+    $template['packaging_details'] = $packagingDetails;
+    $template['packaging_count'] = count($packagingDetails);
+
+    // المواد الخام
+    $rawMaterialsRows = $db->query(
+        "SELECT material_name, quantity_per_unit, unit 
+         FROM product_template_raw_materials 
+         WHERE template_id = ?",
+        [$templateId]
+    );
+
+    $materialDetails = [];
+    foreach ($rawMaterialsRows as $raw) {
+        $materialDetails[] = [
+            'material_name' => $raw['material_name'],
+            'quantity_per_unit' => (float)($raw['quantity_per_unit'] ?? 0),
+            'unit' => $raw['unit'] ?? 'وحدة'
+        ];
+    }
+
+    if (empty($materialDetails) && (float)($template['honey_quantity'] ?? 0) > 0) {
+        $materialDetails[] = [
+            'material_name' => 'عسل',
+            'quantity_per_unit' => (float)$template['honey_quantity'],
+            'unit' => 'جرام'
+        ];
+    }
+
+    $template['material_details'] = $materialDetails;
+    $template['raw_materials_count'] = count($materialDetails);
+    $template['template_type'] = $template['template_type'] ?: 'general';
+    $template['products_count'] = 1;
+}
+unset($template);
 
 // الحصول على أدوات التعبئة
 $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
@@ -362,21 +417,11 @@ $lang = isset($translations) ? $translations : [];
         <h5 class="mb-0">قائمة القوالب (<?php echo count($templates); ?>)</h5>
     </div>
     
-    <?php $packagingNameExpression = getColumnSelectExpression('product_template_packaging', 'packaging_name'); ?>
     <div class="row g-4">
         <?php foreach ($templates as $template): ?>
             <?php
-            // الحصول على أدوات التعبئة
-            $packaging = $db->query(
-                "SELECT {$packagingNameExpression} FROM product_template_packaging WHERE template_id = ?",
-                [$template['id']]
-            );
-            
-            // الحصول على المواد الخام الأخرى
-            $rawMaterials = $db->query(
-                "SELECT material_name, quantity_per_unit, unit FROM product_template_raw_materials WHERE template_id = ?",
-                [$template['id']]
-            );
+            $packaging = $template['packaging_details'] ?? [];
+            $rawMaterials = $template['material_details'] ?? [];
             ?>
             <div class="col-lg-4 col-md-6">
                 <div class="card shadow-sm h-100 template-card" style="border-top: 4px solid #0d6efd; transition: transform 0.2s, box-shadow 0.2s;">

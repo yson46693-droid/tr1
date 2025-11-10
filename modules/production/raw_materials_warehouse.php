@@ -2321,6 +2321,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'main_supplier_id' => $mainSupplierId
                     ]);
 
+                    try {
+                        ensureProductTemplatesExtendedSchema($db);
+                        syncUnifiedTemplateToProductTemplate($db, $templateId);
+                    } catch (Exception $syncError) {
+                        error_log("Unified template sync error: " . $syncError->getMessage());
+                    }
+
                     preventDuplicateSubmission(
                         'تم إنشاء قالب المنتج بنجاح',
                         ['page' => 'raw_materials_warehouse'],

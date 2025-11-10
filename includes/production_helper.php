@@ -372,6 +372,232 @@ function calculateProductionCost($productionId) {
 }
 
 /**
+ * التأكد من الأعمدة الإضافية لجداول قوالب المنتجات.
+ */
+function ensureProductTemplatesExtendedSchema($db): void
+{
+    static $ensured = false;
+
+    if ($ensured) {
+        return;
+    }
+
+    $columnAdjustments = [
+        'template_type' => "ALTER TABLE `product_templates` ADD COLUMN `template_type` varchar(50) DEFAULT 'general' AFTER `honey_quantity`",
+        'source_template_id' => "ALTER TABLE `product_templates` ADD COLUMN `source_template_id` int(11) DEFAULT NULL AFTER `template_type`",
+        'main_supplier_id' => "ALTER TABLE `product_templates` ADD COLUMN `main_supplier_id` int(11) DEFAULT NULL AFTER `source_template_id`",
+        'notes' => "ALTER TABLE `product_templates` ADD COLUMN `notes` text DEFAULT NULL AFTER `main_supplier_id`",
+        'details_json' => "ALTER TABLE `product_templates` ADD COLUMN `details_json` longtext DEFAULT NULL AFTER `notes`",
+    ];
+
+    foreach ($columnAdjustments as $column => $alterSql) {
+        try {
+            $columnExists = $db->queryOne("SHOW COLUMNS FROM product_templates LIKE ?", [$column]);
+            if (empty($columnExists)) {
+                $db->execute($alterSql);
+            }
+        } catch (Exception $e) {
+            error_log('ensureProductTemplatesExtendedSchema: failed altering column ' . $column . ' -> ' . $e->getMessage());
+        }
+    }
+
+    // فهارس إضافية
+    try {
+        $sourceIndex = $db->queryOne("SHOW INDEX FROM product_templates WHERE Key_name = 'source_template_id'");
+        if (empty($sourceIndex)) {
+            $db->execute("ALTER TABLE `product_templates` ADD KEY `source_template_id` (`source_template_id`)");
+        }
+    } catch (Exception $e) {
+        error_log('ensureProductTemplatesExtendedSchema: failed adding index source_template_id -> ' . $e->getMessage());
+    }
+
+    try {
+        $mainSupplierIndex = $db->queryOne("SHOW INDEX FROM product_templates WHERE Key_name = 'main_supplier_id'");
+        if (empty($mainSupplierIndex)) {
+            $db->execute("ALTER TABLE `product_templates` ADD KEY `main_supplier_id` (`main_supplier_id`)");
+        }
+    } catch (Exception $e) {
+        error_log('ensureProductTemplatesExtendedSchema: failed adding index main_supplier_id -> ' . $e->getMessage());
+    }
+
+    // تعيين قيمة افتراضية لأنواع القوالب القديمة
+    try {
+        $db->execute("UPDATE product_templates SET template_type = 'legacy' WHERE (template_type IS NULL OR template_type = '')");
+    } catch (Exception $e) {
+        error_log('ensureProductTemplatesExtendedSchema: failed normalising template_type -> ' . $e->getMessage());
+    }
+
+    $ensured = true;
+}
+
+/**
+ * مزامنة قالب موحد إلى جداول product_templates والملحقات.
+ */
+function syncUnifiedTemplateToProductTemplate($db, int $unifiedTemplateId)
+{
+    ensureProductTemplatesExtendedSchema($db);
+
+    $template = $db->queryOne(
+        "SELECT * FROM unified_product_templates WHERE id = ?",
+        [$unifiedTemplateId]
+    );
+
+    if (!$template) {
+        return null;
+    }
+
+    $rawMaterials = [];
+    if (productionColumnExists('template_raw_materials', 'template_id')) {
+        $rawMaterials = $db->query(
+            "SELECT material_type, material_name, supplier_id, honey_variety, quantity, unit
+             FROM template_raw_materials
+             WHERE template_id = ?",
+            [$unifiedTemplateId]
+        );
+    }
+
+    $packagingItems = [];
+    if (productionColumnExists('template_packaging', 'template_id')) {
+        $packagingItems = $db->query(
+            "SELECT tp.packaging_material_id, tp.quantity_per_unit,
+                    pm.name AS packaging_name_db, pm.unit AS packaging_unit
+             FROM template_packaging tp
+             LEFT JOIN packaging_materials pm ON pm.id = tp.packaging_material_id
+             WHERE tp.template_id = ?",
+            [$unifiedTemplateId]
+        );
+    }
+
+    $honeyQuantity = 0.0;
+    foreach ($rawMaterials as $material) {
+        if (in_array($material['material_type'], ['honey_raw', 'honey_filtered'], true)) {
+            $honeyQuantity += (float)($material['quantity'] ?? 0);
+        }
+    }
+
+    $templateType = 'unified';
+    $createdBy = (int)($template['created_by'] ?? 0);
+    $status = $template['status'] ?? 'active';
+    $mainSupplierId = $template['main_supplier_id'] ?? null;
+    $notes = $template['notes'] ?? null;
+    $detailsJson = $template['form_payload'] ?? null;
+
+    $existing = $db->queryOne(
+        "SELECT id FROM product_templates WHERE source_template_id = ? LIMIT 1",
+        [$unifiedTemplateId]
+    );
+
+    if ($existing) {
+        $productTemplateId = (int)$existing['id'];
+        $db->execute(
+            "UPDATE product_templates 
+             SET product_name = ?, honey_quantity = ?, status = ?, template_type = ?, main_supplier_id = ?, notes = ?, details_json = ?, updated_at = NOW()
+             WHERE id = ?",
+            [
+                $template['product_name'],
+                $honeyQuantity,
+                $status,
+                $templateType,
+                $mainSupplierId,
+                $notes,
+                $detailsJson,
+                $productTemplateId
+            ]
+        );
+    } else {
+        $result = $db->execute(
+            "INSERT INTO product_templates (product_name, honey_quantity, status, created_by, template_type, source_template_id, main_supplier_id, notes, details_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                $template['product_name'],
+                $honeyQuantity,
+                $status,
+                $createdBy,
+                $templateType,
+                $unifiedTemplateId,
+                $mainSupplierId,
+                $notes,
+                $detailsJson
+            ]
+        );
+        $productTemplateId = (int)$result['insert_id'];
+    }
+
+    // تحديث المواد الخام
+    $db->execute("DELETE FROM product_template_raw_materials WHERE template_id = ?", [$productTemplateId]);
+    foreach ($rawMaterials as $material) {
+        $materialName = trim((string)($material['material_name'] ?? ''));
+        if ($materialName === '') {
+            $materialName = match ($material['material_type']) {
+                'honey_raw', 'honey_filtered' => 'عسل',
+                'olive_oil' => 'زيت زيتون',
+                'beeswax' => 'شمع عسل',
+                'derivatives' => 'مشتق',
+                'nuts' => 'مكسرات',
+                default => 'مادة خام',
+            };
+        }
+
+        $quantity = (float)($material['quantity'] ?? 0);
+        if ($quantity <= 0) {
+            continue;
+        }
+
+        $unit = $material['unit'] ?? 'وحدة';
+
+        $db->execute(
+            "INSERT INTO product_template_raw_materials (template_id, material_name, quantity_per_unit, unit) 
+             VALUES (?, ?, ?, ?)",
+            [$productTemplateId, $materialName, $quantity, $unit]
+        );
+    }
+
+    // تحديث أدوات التعبئة
+    $db->execute("DELETE FROM product_template_packaging WHERE template_id = ?", [$productTemplateId]);
+    foreach ($packagingItems as $packaging) {
+        $packagingId = (int)($packaging['packaging_material_id'] ?? 0);
+        $quantityPerUnit = (float)($packaging['quantity_per_unit'] ?? 0);
+        if ($packagingId <= 0 || $quantityPerUnit <= 0) {
+            continue;
+        }
+
+        $packagingName = $packaging['packaging_name_db'] ?? '';
+        if ($packagingName === '') {
+            $fallback = $db->queryOne("SELECT name FROM packaging_materials WHERE id = ?", [$packagingId]);
+            $packagingName = $fallback['name'] ?? ('أداة تعبئة #' . $packagingId);
+        }
+
+        $db->execute(
+            "INSERT INTO product_template_packaging (template_id, packaging_material_id, packaging_name, quantity_per_unit)
+             VALUES (?, ?, ?, ?)",
+            [$productTemplateId, $packagingId, $packagingName, $quantityPerUnit]
+        );
+    }
+
+    return $productTemplateId;
+}
+
+/**
+ * مزامنة جميع القوالب الموحدة الموجودة إلى product_templates.
+ */
+function syncAllUnifiedTemplatesToProductTemplates($db): void
+{
+    ensureProductTemplatesExtendedSchema($db);
+
+    if (!productionColumnExists('unified_product_templates', 'id')) {
+        return;
+    }
+
+    $templates = $db->query("SELECT id FROM unified_product_templates");
+    foreach ($templates as $template) {
+        try {
+            syncUnifiedTemplateToProductTemplate($db, (int)$template['id']);
+        } catch (Exception $e) {
+            error_log('syncAllUnifiedTemplatesToProductTemplates: ' . $e->getMessage());
+        }
+    }
+}
+/**
  * الحصول على تقرير الإنتاجية
  */
 function getProductivityReport($userId = null, $dateFrom = null, $dateTo = null) {

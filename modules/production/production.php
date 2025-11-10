@@ -24,6 +24,9 @@ $db = db();
 $error = '';
 $success = '';
 
+ensureProductTemplatesExtendedSchema($db);
+syncAllUnifiedTemplatesToProductTemplates($db);
+
 /**
  * التحقق من توفر المكونات المستخدمة في صناعة المنتج
  */
