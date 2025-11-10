@@ -392,7 +392,7 @@ function ensureProductTemplatesExtendedSchema($db): void
 
     foreach ($columnAdjustments as $column => $alterSql) {
         try {
-            $columnExists = $db->queryOne("SHOW COLUMNS FROM product_templates LIKE ?", [$column]);
+            $columnExists = $db->queryOne("SHOW COLUMNS FROM `product_templates` LIKE '{$column}'");
             if (empty($columnExists)) {
                 $db->execute($alterSql);
             }
@@ -403,7 +403,7 @@ function ensureProductTemplatesExtendedSchema($db): void
 
     // فهارس إضافية
     try {
-        $sourceIndex = $db->queryOne("SHOW INDEX FROM product_templates WHERE Key_name = 'source_template_id'");
+        $sourceIndex = $db->queryOne("SHOW INDEX FROM `product_templates` WHERE Key_name = 'source_template_id'");
         if (empty($sourceIndex)) {
             $db->execute("ALTER TABLE `product_templates` ADD KEY `source_template_id` (`source_template_id`)");
         }
@@ -412,7 +412,7 @@ function ensureProductTemplatesExtendedSchema($db): void
     }
 
     try {
-        $mainSupplierIndex = $db->queryOne("SHOW INDEX FROM product_templates WHERE Key_name = 'main_supplier_id'");
+        $mainSupplierIndex = $db->queryOne("SHOW INDEX FROM `product_templates` WHERE Key_name = 'main_supplier_id'");
         if (empty($mainSupplierIndex)) {
             $db->execute("ALTER TABLE `product_templates` ADD KEY `main_supplier_id` (`main_supplier_id`)");
         }

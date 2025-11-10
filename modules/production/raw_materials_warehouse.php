@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/honey_varieties.php';
+require_once __DIR__ . '/../../includes/production_helper.php';
 
 if (!function_exists('buildRawMaterialsReportHtmlDocument')) {
     /**
