@@ -747,9 +747,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } else {
                         $packagingNameExpression = "COALESCE(pm.name, CONCAT('أداة تعبئة #', tp.packaging_material_id)) AS packaging_name";
                     }
+                    $packagingProductColumnSql = productionColumnExists('packaging_materials', 'product_id')
+                        ? 'pm.product_id'
+                        : 'NULL';
                     $packagingItems = $db->query(
                         "SELECT tp.id, tp.packaging_material_id, {$packagingNameExpression}, tp.quantity_per_unit,
-                                pm.name as packaging_db_name, pm.unit as packaging_unit, pm.product_id as packaging_product_id
+                                pm.name as packaging_db_name, pm.unit as packaging_unit, {$packagingProductColumnSql} as packaging_product_id
                          FROM template_packaging tp 
                          LEFT JOIN packaging_materials pm ON pm.id = tp.packaging_material_id
                          WHERE tp.template_id = ?",
@@ -959,9 +962,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $legacyPackagingNameExpression = $legacyHasPackagingNameColumn
                         ? 'ptp.packaging_name AS packaging_name'
                         : "COALESCE(pm.name, CONCAT('أداة تعبئة #', ptp.packaging_material_id)) AS packaging_name";
+                    $legacyPackagingProductColumnSql = productionColumnExists('packaging_materials', 'product_id')
+                        ? 'pm.product_id'
+                        : 'NULL';
                     $packagingMaterials = $db->query(
                         "SELECT ptp.id, ptp.packaging_material_id, {$legacyPackagingNameExpression}, ptp.quantity_per_unit,
-                                pm.name as packaging_db_name, pm.unit as packaging_unit, pm.product_id as packaging_product_id
+                                pm.name as packaging_db_name, pm.unit as packaging_unit, {$legacyPackagingProductColumnSql} as packaging_product_id
                          FROM product_template_packaging ptp
                          LEFT JOIN packaging_materials pm ON pm.id = ptp.packaging_material_id
                          WHERE ptp.template_id = ?",
