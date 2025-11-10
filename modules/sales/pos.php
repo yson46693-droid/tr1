@@ -903,13 +903,6 @@ if (!$error) {
             </div>
         </section>
 
-        <?php if (empty($vehicleInventory)): ?>
-            <div class="pos-empty">
-                <i class="bi bi-box"></i>
-                <h5 class="mt-3 mb-2">لا يوجد مخزون متاح حالياً</h5>
-                <p class="mb-0">اطلب تزويد السيارة بالمنتجات لبدء البيع من نقطة البيع الميدانية.</p>
-            </div>
-        <?php else: ?>
             <section class="pos-content">
                 <div class="pos-panel" style="grid-column: span 7;">
                     <div class="pos-panel-header">
@@ -919,7 +912,7 @@ if (!$error) {
                         </div>
                         <div class="pos-search">
                             <i class="bi bi-search"></i>
-                            <input type="text" id="posInventorySearch" class="form-control" placeholder="بحث سريع عن منتج...">
+                        <input type="text" id="posInventorySearch" class="form-control" placeholder="بحث سريع عن منتج..."<?php echo empty($vehicleInventory) ? ' disabled' : ''; ?>>
                         </div>
                     </div>
                     <div class="pos-product-grid" id="posProductGrid">
@@ -1147,7 +1140,6 @@ if (!$error) {
                     </div>
                 </div>
             </section>
-        <?php endif; ?>
     </div>
 <?php endif; ?>
 
