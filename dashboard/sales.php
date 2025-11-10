@@ -37,25 +37,17 @@ $pageTitle = isset($lang['sales_dashboard']) ? $lang['sales_dashboard'] : 'لو�
                         $todaySales = $db->queryOne(
                             "SELECT COALESCE(SUM(total), 0) as total 
                              FROM sales 
-                             WHERE DATE(date) = CURDATE() AND status = 'approved'"
+                             WHERE DATE(date) = CURDATE()"
                         );
                         
                         $monthSales = $db->queryOne(
                             "SELECT COALESCE(SUM(total), 0) as total 
                              FROM sales 
-                             WHERE MONTH(date) = MONTH(NOW()) AND YEAR(date) = YEAR(NOW()) AND status = 'approved'"
-                        );
-                        
-                        $pendingSales = $db->queryOne(
-                            "SELECT COUNT(*) as count 
-                             FROM sales 
-                             WHERE status = 'pending' AND salesperson_id = ?",
-                            [$currentUser['id']]
+                             WHERE MONTH(date) = MONTH(NOW()) AND YEAR(date) = YEAR(NOW())"
                         );
                     } else {
                         $todaySales = ['total' => 0];
                         $monthSales = ['total' => 0];
-                        $pendingSales = ['count' => 0];
                     }
                     
                     $customersCount = ['count' => 0];
@@ -105,17 +97,6 @@ $pageTitle = isset($lang['sales_dashboard']) ? $lang['sales_dashboard'] : 'لو�
                         <div class="stat-card-title">مبيعات الشهر</div>
                         <div class="stat-card-value"><?php echo formatCurrency($monthSales['total'] ?? 0); ?></div>
                         <div class="stat-card-description">هذا الشهر</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-card-header">
-                            <div class="stat-card-icon orange">
-                                <i class="bi bi-clock-history"></i>
-                            </div>
-                        </div>
-                        <div class="stat-card-title">مبيعات معلقة</div>
-                        <div class="stat-card-value"><?php echo $pendingSales['count'] ?? 0; ?></div>
-                        <div class="stat-card-description">في انتظار الموافقة</div>
                     </div>
                     
                     <div class="stat-card">
@@ -178,6 +159,13 @@ $pageTitle = isset($lang['sales_dashboard']) ? $lang['sales_dashboard'] : 'لو�
                                 </tr>
                             </thead>
                             <tbody>
+                                <?php 
+                                $statusMap = [
+                                    'approved' => ['class' => 'success', 'label' => 'مكتمل'],
+                                    'pending' => ['class' => 'info', 'label' => 'مسجل'],
+                                    'rejected' => ['class' => 'danger', 'label' => 'ملغي'],
+                                ];
+                                ?>
                                 <?php foreach ($recentSales as $sale): ?>
                                 <tr>
                                     <td><?php echo formatDate($sale['date']); ?></td>
@@ -186,14 +174,13 @@ $pageTitle = isset($lang['sales_dashboard']) ? $lang['sales_dashboard'] : 'لو�
                                     <td><?php echo $sale['quantity']; ?></td>
                                     <td><?php echo formatCurrency($sale['total']); ?></td>
                                     <td>
-                                        <span class="badge bg-<?php 
-                                            echo $sale['status'] === 'approved' ? 'success' : 
-                                                ($sale['status'] === 'pending' ? 'warning' : 'danger'); 
-                                        ?>">
-                                            <?php 
-                                            echo $sale['status'] === 'approved' ? 'موافق عليه' : 
-                                                ($sale['status'] === 'pending' ? 'في الانتظار' : 'مرفوض'); 
-                                            ?>
+                                        <?php 
+                                        $statusKey = strtolower($sale['status'] ?? '');
+                                        $badgeClass = $statusMap[$statusKey]['class'] ?? 'secondary';
+                                        $badgeLabel = $statusMap[$statusKey]['label'] ?? htmlspecialchars($sale['status'] ?? 'غير محدد');
+                                        ?>
+                                        <span class="badge bg-<?php echo $badgeClass; ?>">
+                                            <?php echo $badgeLabel; ?>
                                         </span>
                                     </td>
                                 </tr>
