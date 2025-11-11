@@ -1116,7 +1116,7 @@ document.addEventListener('DOMContentLoaded', function () {
         'pending': 'معلقة',
         'rejected': 'مرفوضة'
     };
-    const batchDetailsFallbackBase = <?php echo json_encode(getRelativeUrl('production.php?page=batch_numbers&batch_number=')); ?>;
+    let batchDetailsIsLoading = false;
 
     function formatDateValue(value) {
         return value ? value : '—';
@@ -1259,21 +1259,25 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    function showBatchDetailsModal(batchNumber, productName, fallbackUrl) {
+    function showBatchDetailsModal(batchNumber, productName) {
+        if (batchDetailsIsLoading) {
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                const existingModal = document.getElementById('batchDetailsModal');
+                if (existingModal) {
+                    bootstrap.Modal.getOrCreateInstance(existingModal).show();
+                }
+            }
+            return;
+        }
+
         if (typeof bootstrap === 'undefined' || typeof bootstrap.Modal === 'undefined') {
-            const targetUrl = fallbackUrl && fallbackUrl.length
-                ? fallbackUrl
-                : `${batchDetailsFallbackBase}${encodeURIComponent(batchNumber)}`;
-            window.location.href = targetUrl;
+            alert('تعذر فتح تفاصيل التشغيلة حالياً. يرجى تحديث الصفحة ثم المحاولة مرة أخرى.');
             return;
         }
 
         const modalElement = document.getElementById('batchDetailsModal');
         if (!modalElement) {
-            const targetUrl = fallbackUrl && fallbackUrl.length
-                ? fallbackUrl
-                : `${batchDetailsFallbackBase}${encodeURIComponent(batchNumber)}`;
-            window.location.href = targetUrl;
+            alert('تعذر العثور على نافذة تفاصيل التشغيلة. يرجى تحديث الصفحة ثم المحاولة مرة أخرى.');
             return;
         }
 
@@ -1284,10 +1288,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         if (!loader || !errorAlert || !contentWrapper) {
             modalInstance.hide();
-            const targetUrl = fallbackUrl && fallbackUrl.length
-                ? fallbackUrl
-                : `${batchDetailsFallbackBase}${encodeURIComponent(batchNumber)}`;
-            window.location.href = targetUrl;
+            alert('تعذر تهيئة عرض تفاصيل التشغيلة. يرجى تحديث الصفحة والمحاولة لاحقاً.');
             return;
         }
 
@@ -1299,6 +1300,7 @@ document.addEventListener('DOMContentLoaded', function () {
         errorAlert.classList.add('d-none');
         errorAlert.textContent = '';
         contentWrapper.classList.add('d-none');
+        batchDetailsIsLoading = true;
 
         modalInstance.show();
 
@@ -1333,6 +1335,9 @@ document.addEventListener('DOMContentLoaded', function () {
             contentWrapper.classList.add('d-none');
             errorAlert.textContent = error.message || 'تعذر تحميل تفاصيل التشغيلة.';
             errorAlert.classList.remove('d-none');
+        })
+        .finally(() => {
+            batchDetailsIsLoading = false;
         });
     }
 
@@ -1342,9 +1347,10 @@ document.addEventListener('DOMContentLoaded', function () {
             const batchNumber = detailsButton.dataset.batch;
             if (batchNumber) {
                 event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
                 const productName = detailsButton.dataset.product || '';
-                const fallbackUrl = detailsButton.dataset.viewUrl || '';
-                showBatchDetailsModal(batchNumber, productName, fallbackUrl);
+                showBatchDetailsModal(batchNumber, productName);
             }
             return;
         }
