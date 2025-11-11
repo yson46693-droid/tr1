@@ -321,9 +321,21 @@ $salaryData = getSalarySummary($currentUser['id'], $selectedMonth, $selectedYear
 $advanceRequests = [];
 if (ensureSalaryAdvancesTable($db)) {
     $advanceRequests = $db->query(
-        "SELECT * FROM salary_advances 
-         WHERE user_id = ? 
-         ORDER BY created_at DESC 
+        "SELECT 
+            sa.*,
+            accountant.full_name AS accountant_name,
+            accountant.username AS accountant_username,
+            manager.full_name AS manager_name,
+            manager.username AS manager_username,
+            s.month AS deducted_salary_month,
+            s.year AS deducted_salary_year,
+            s.total_amount AS deducted_salary_total
+         FROM salary_advances sa
+         LEFT JOIN users accountant ON sa.accountant_approved_by = accountant.id
+         LEFT JOIN users manager ON sa.manager_approved_by = manager.id
+         LEFT JOIN salaries s ON sa.deducted_from_salary_id = s.id
+         WHERE sa.user_id = ?
+         ORDER BY sa.created_at DESC 
          LIMIT 10",
         [$currentUser['id']]
     );
@@ -1212,97 +1224,222 @@ $lang = isset($translations) ? $translations : [];
             </div>
             <?php endif; ?>
 
-            <!-- قسم طلبات السلف في نفس الجدول -->
+            <!-- قسم طلبات السلف -->
             <?php if (!empty($advanceRequests)): ?>
-            <!-- Separator -->
             <div class="salary-row section-header">
                 <div class="salary-cell" style="grid-column: 1 / -1;">
                     <span class="icon-wrapper">
                         <i class="bi bi-list-check"></i>
                     </span>
                     سجل طلبات السلف (آخر 10 طلبات)
+                    <small class="text-muted d-block mt-1">يتم عرض أحدث 10 طلبات سلفة لسهولة المتابعة.</small>
                 </div>
             </div>
 
-            <?php 
-            $counter = 1;
-            foreach ($advanceRequests as $request): 
-                $statusClass = '';
-                $statusIcon = '';
-                $statusText = '';
-                
-                switch($request['status']) {
-                    case 'pending':
-                        $statusClass = 'warning';
-                        $statusIcon = 'hourglass-split';
-                        $statusText = 'قيد الانتظار';
-                        break;
-                    case 'accountant_approved':
-                        $statusClass = 'info';
-                        $statusIcon = 'check-circle';
-                        $statusText = 'تم الاستلام (بانتظار المدير)';
-                        break;
-                    case 'manager_approved':
-                        $statusClass = 'success';
-                        $statusIcon = 'check-circle-fill';
-                        $statusText = 'تمت الموافقة';
-                        break;
-                    case 'rejected':
-                        $statusClass = 'danger';
-                        $statusIcon = 'x-circle-fill';
-                        $statusText = 'مرفوض';
-                        break;
+            <?php
+            $formatUserName = function ($fullName, $username) {
+                if (!empty($fullName)) {
+                    return $fullName;
                 }
-                
-                // استخدام request_date بدلاً من requested_month
-                $requestDate = isset($request['request_date']) ? $request['request_date'] : '';
-            ?>
-            
-            <!-- Request Header -->
-            <div class="salary-row" style="background: #f8f9fa;">
-                <div class="salary-cell" style="grid-column: 1 / -1; padding: 8px 20px;">
-                    <small style="color: #6c757d;">
-                        <i class="bi bi-receipt me-1"></i>
-                        طلب #<?php echo $counter++; ?> - <?php echo date('Y-m-d', strtotime($request['created_at'])); ?>
-                    </small>
-                </div>
-            </div>
+                if (!empty($username)) {
+                    return $username;
+                }
+                return null;
+            };
 
-            <!-- المبلغ والتاريخ في صف واحد -->
-            <div class="salary-row">
-                <div class="salary-cell label">
-                    <i class="bi bi-currency-exchange me-2"></i>المبلغ / التاريخ
-                </div>
-                <div class="salary-cell value">
-                    <span class="salary-amount primary"><?php echo formatCurrency($request['amount']); ?></span>
-                    <span class="salary-description"><?php echo $requestDate ? date('Y-m-d', strtotime($requestDate)) : '-'; ?></span>
-                </div>
-            </div>
+            $formatDateValue = function ($value, $format = 'Y-m-d H:i') {
+                if (empty($value) || $value === '0000-00-00' || $value === '0000-00-00 00:00:00') {
+                    return null;
+                }
+                $timestamp = strtotime($value);
+                if ($timestamp === false) {
+                    return null;
+                }
+                return date($format, $timestamp);
+            };
 
-            <!-- الحالة والسبب في صف واحد -->
-            <div class="salary-row">
-                <div class="salary-cell label">
-                    <i class="bi bi-flag me-2"></i>الحالة / السبب
-                </div>
-                <div class="salary-cell value">
-                    <span class="salary-amount <?php echo $statusClass; ?>">
-                        <i class="bi bi-<?php echo $statusIcon; ?> me-2"></i><?php echo $statusText; ?>
-                    </span>
-                    <span class="salary-description" style="font-size: 12px;">
-                        <?php 
-                        if ($request['status'] === 'rejected' && !empty($request['notes'])) {
-                            echo 'سبب الرفض: ' . htmlspecialchars($request['notes']);
-                        } elseif (!empty($request['reason'])) {
-                            echo 'السبب: ' . htmlspecialchars($request['reason']);
-                        } else {
-                            echo '—';
+            $statusThemes = [
+                'pending' => [
+                    'label' => 'قيد الانتظار',
+                    'hint' => 'بانتظار مراجعة المحاسب لاعتماد الطلب.',
+                    'card_class' => 'advance-card--pending',
+                    'badge_class' => 'bg-warning text-dark',
+                    'icon' => 'hourglass-split'
+                ],
+                'accountant_approved' => [
+                    'label' => 'تمت مراجعته من المحاسب',
+                    'hint' => 'بانتظار موافقة المدير النهائية.',
+                    'card_class' => 'advance-card--accountant',
+                    'badge_class' => 'bg-info text-dark',
+                    'icon' => 'clipboard-check'
+                ],
+                'manager_approved' => [
+                    'label' => 'تمت الموافقة النهائية',
+                    'hint' => 'سيتم خصم السلفة من الراتب المحدد عند توفره.',
+                    'card_class' => 'advance-card--approved',
+                    'badge_class' => 'bg-success text-white',
+                    'icon' => 'check-circle-fill'
+                ],
+                'rejected' => [
+                    'label' => 'مرفوض',
+                    'hint' => 'راجع سبب الرفض قبل إرسال طلب جديد.',
+                    'card_class' => 'advance-card--rejected',
+                    'badge_class' => 'bg-danger text-white',
+                    'icon' => 'x-octagon-fill'
+                ]
+            ];
+
+            $requesterName = $formatUserName($currentUser['full_name'] ?? null, $currentUser['username'] ?? null);
+            $counter = 1;
+
+            foreach ($advanceRequests as $request):
+                $statusKey = $request['status'] ?? 'pending';
+                $theme = $statusThemes[$statusKey] ?? $statusThemes['pending'];
+
+                $createdAtFormatted = $formatDateValue($request['created_at'] ?? null);
+                $requestDateFormatted = $formatDateValue($request['request_date'] ?? null, 'Y-m-d');
+                $accountantApprovedAt = $formatDateValue($request['accountant_approved_at'] ?? null);
+                $managerApprovedAt = $formatDateValue($request['manager_approved_at'] ?? null);
+
+                $accountantName = $formatUserName($request['accountant_name'] ?? null, $request['accountant_username'] ?? null);
+                $managerName = $formatUserName($request['manager_name'] ?? null, $request['manager_username'] ?? null);
+
+                $reasonText = 'لم يتم تقديم سبب للطلب.';
+                $reasonIsRejection = false;
+                if ($statusKey === 'rejected' && !empty($request['notes'])) {
+                    $reasonText = 'سبب الرفض: ' . $request['notes'];
+                    $reasonIsRejection = true;
+                } elseif (!empty($request['reason'])) {
+                    $reasonText = $request['reason'];
+                }
+
+                $deductionSummary = '';
+                if (!empty($request['deducted_from_salary_id'])) {
+                    if (!empty($request['deducted_salary_month']) && !empty($request['deducted_salary_year'])) {
+                        $deductionSummary = 'تم خصم السلفة من راتب شهر ' .
+                            sprintf('%02d', (int)$request['deducted_salary_month']) . '/' . (int)$request['deducted_salary_year'];
+                        if (!empty($request['deducted_salary_total'])) {
+                            $deductionSummary .= ' - إجمالي الراتب: ' . formatCurrency($request['deducted_salary_total']);
                         }
-                        ?>
-                    </span>
+                    } else {
+                        $deductionSummary = 'تم خصم السلفة ضمن الراتب رقم #' . (int)$request['deducted_from_salary_id'];
+                    }
+                }
+
+                $timelineSteps = [];
+                $timelineSteps[] = [
+                    'title' => 'تقديم الطلب',
+                    'meta' => $createdAtFormatted,
+                    'description' => $requesterName ? 'بواسطة ' . $requesterName : '',
+                    'state' => 'is-done'
+                ];
+
+                if (!empty($accountantApprovedAt) || in_array($statusKey, ['accountant_approved', 'manager_approved', 'rejected'], true)) {
+                    $timelineSteps[] = [
+                        'title' => 'اعتماد المحاسب',
+                        'meta' => $accountantApprovedAt,
+                        'description' => $accountantName ? 'بواسطة ' . $accountantName : '',
+                        'state' => $statusKey === 'pending' ? 'is-pending' : (in_array($statusKey, ['manager_approved'], true) ? 'is-success' : 'is-warning')
+                    ];
+                } else {
+                    $timelineSteps[] = [
+                        'title' => 'قيد مراجعة المحاسب',
+                        'meta' => null,
+                        'description' => 'بانتظار اعتماد المحاسب.',
+                        'state' => 'is-warning'
+                    ];
+                }
+
+                if ($statusKey === 'manager_approved') {
+                    $timelineSteps[] = [
+                        'title' => 'اعتماد المدير',
+                        'meta' => $managerApprovedAt,
+                        'description' => $managerName ? 'بواسطة ' . $managerName : '',
+                        'state' => 'is-success'
+                    ];
+                } elseif ($statusKey === 'rejected') {
+                    $timelineSteps[] = [
+                        'title' => 'تم رفض الطلب',
+                        'meta' => $managerApprovedAt ?? $accountantApprovedAt,
+                        'description' => !empty($request['notes']) ? 'سبب الرفض: ' . $request['notes'] : 'تم رفض الطلب من قبل الإدارة.',
+                        'state' => 'is-danger'
+                    ];
+                }
+            ?>
+            <div class="salary-row advance-history-row">
+                <div class="salary-cell" style="grid-column: 1 / -1; padding: 0;">
+                    <article class="advance-request-card <?php echo $theme['card_class']; ?>">
+                        <header class="advance-request-card__header">
+                            <div class="advance-request-card__title">
+                                <span class="advance-request-card__number">طلب #<?php echo $counter++; ?></span>
+                                <?php if ($createdAtFormatted): ?>
+                                <span class="advance-request-card__date">
+                                    <i class="bi bi-calendar-event me-1"></i><?php echo htmlspecialchars($createdAtFormatted); ?>
+                                </span>
+                                <?php endif; ?>
+                            </div>
+                            <span class="advance-request-card__status badge <?php echo $theme['badge_class']; ?>">
+                                <i class="bi bi-<?php echo $theme['icon']; ?> me-1"></i><?php echo $theme['label']; ?>
+                            </span>
+                        </header>
+
+                        <div class="advance-request-card__meta">
+                            <div class="advance-request-card__meta-item">
+                                <strong>قيمة السلفة</strong>
+                                <span><?php echo formatCurrency($request['amount']); ?></span>
+                            </div>
+                            <div class="advance-request-card__meta-item">
+                                <strong>تاريخ الطلب</strong>
+                                <span><?php echo $requestDateFormatted ? htmlspecialchars($requestDateFormatted) : '—'; ?></span>
+                            </div>
+                            <div class="advance-request-card__meta-item">
+                                <strong>رقم الطلب</strong>
+                                <span>#<?php echo (int)$request['id']; ?></span>
+                            </div>
+                        </div>
+
+                        <div class="advance-request-card__hint">
+                            <?php echo htmlspecialchars($theme['hint']); ?>
+                        </div>
+
+                        <div class="advance-request-card__reason<?php echo $reasonIsRejection ? ' is-rejected' : ''; ?>">
+                            <?php echo htmlspecialchars($reasonText); ?>
+                        </div>
+
+                        <?php if (!empty($deductionSummary)): ?>
+                        <div class="advance-request-card__deduction">
+                            <i class="bi bi-receipt-cutoff me-2"></i>
+                            <span><?php echo htmlspecialchars($deductionSummary); ?></span>
+                        </div>
+                        <?php endif; ?>
+
+                        <ul class="advance-timeline">
+                            <?php foreach ($timelineSteps as $step): ?>
+                            <li class="advance-timeline__item <?php echo $step['state']; ?>">
+                                <span class="advance-timeline__title"><?php echo htmlspecialchars($step['title']); ?></span>
+                                <?php if (!empty($step['meta'])): ?>
+                                <span class="advance-timeline__meta"><?php echo htmlspecialchars($step['meta']); ?></span>
+                                <?php endif; ?>
+                                <?php if (!empty($step['description'])): ?>
+                                <div class="advance-timeline__description"><?php echo htmlspecialchars($step['description']); ?></div>
+                                <?php endif; ?>
+                            </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </article>
                 </div>
             </div>
-
             <?php endforeach; ?>
+            <?php else: ?>
+            <div class="salary-row">
+                <div class="salary-cell" style="grid-column: 1 / -1;">
+                    <div class="advance-empty-state">
+                        <i class="bi bi-inboxes"></i>
+                        <div>لا توجد طلبات سلفة سابقة.</div>
+                        <small>استخدم النموذج بالأعلى لإرسال طلب سلفة جديد.</small>
+                    </div>
+                </div>
+            </div>
             <?php endif; ?>
 
         </div><!-- End salary-grid -->

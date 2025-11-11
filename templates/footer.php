@@ -17,7 +17,12 @@ if (!defined('ACCESS_ALLOWED')) {
                 </div>
                 <div class="col-md-6 text-center text-md-end">
                     <small class="text-muted">
-                        <?php echo APP_NAME; ?> v<?php echo APP_VERSION; ?>
+                        <?php
+                        $appInfo = APP_NAME === COMPANY_NAME
+                            ? 'v' . APP_VERSION
+                            : APP_NAME . ' v' . APP_VERSION;
+                        echo $appInfo;
+                        ?>
                     </small>
                 </div>
             </div>

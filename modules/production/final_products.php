@@ -471,7 +471,15 @@ $lang = isset($translations) ? $translations : [];
                                 <td><?php echo $workersDisplay; ?></td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">
-                                        <?php if ($viewUrl): ?>
+                                        <?php if ($batchNumber): ?>
+                                            <button type="button"
+                                                    class="btn btn-primary js-batch-details"
+                                                    data-batch="<?php echo htmlspecialchars($batchNumber); ?>"
+                                                    data-product="<?php echo htmlspecialchars($finishedRow['product_name'] ?? ''); ?>"
+                                                    data-view-url="<?php echo htmlspecialchars($viewUrl ?? ''); ?>">
+                                                <i class="bi bi-eye"></i> عرض تفاصيل التشغيلة
+                                            </button>
+                                        <?php elseif ($viewUrl): ?>
                                             <a class="btn btn-primary" href="<?php echo htmlspecialchars($viewUrl); ?>">
                                                 <i class="bi bi-eye"></i> عرض تفاصيل التشغيلة
                                             </a>
@@ -503,8 +511,264 @@ $lang = isset($translations) ? $translations : [];
     </div>
 </div>
 
+<div class="modal fade" id="batchDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">تفاصيل التشغيلة</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div id="batchDetailsLoading" class="d-flex justify-content-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">جارٍ التحميل...</span>
+                    </div>
+                </div>
+                <div id="batchDetailsError" class="alert alert-danger d-none" role="alert"></div>
+                <div id="batchDetailsContent" class="d-none">
+                    <div id="batchSummarySection" class="mb-4"></div>
+                    <div id="batchMaterialsSection" class="mb-4"></div>
+                    <div id="batchRawMaterialsSection" class="mb-4"></div>
+                    <div id="batchWorkersSection" class="mb-0"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-document.addEventListener('click', function (event) {
+    const batchDetailsEndpoint = <?php echo json_encode(getRelativeUrl('reader/api.php')); ?>;
+    const statusLabelsMap = {
+        'in_production': 'قيد الإنتاج',
+        'completed': 'مكتملة',
+        'archived': 'مؤرشفة',
+        'cancelled': 'ملغاة',
+        'in_stock': 'في المخزون',
+        'sold': 'مباعة',
+        'expired': 'منتهية الصلاحية',
+        'approved': 'موافق عليها',
+        'pending': 'معلقة',
+        'rejected': 'مرفوضة'
+    };
+    const batchDetailsFallbackBase = <?php echo json_encode(getRelativeUrl('production.php?page=batch_numbers&batch_number=')); ?>;
+
+    function formatDateValue(value) {
+        return value ? value : '—';
+    }
+
+    function formatQuantity(value, unit) {
+        if (value === null || value === undefined || value === '') {
+            return '';
+        }
+        const numeric = Number(value);
+        const formatted = Number.isFinite(numeric)
+            ? numeric.toLocaleString('ar-EG')
+            : value;
+        return unit ? `${formatted} ${unit}` : `${formatted}`;
+    }
+
+    function renderBatchDetails(data) {
+        const summarySection = document.getElementById('batchSummarySection');
+        const materialsSection = document.getElementById('batchMaterialsSection');
+        const rawMaterialsSection = document.getElementById('batchRawMaterialsSection');
+        const workersSection = document.getElementById('batchWorkersSection');
+
+        const batchNumber = data.batch_number ?? '—';
+        const summaryRows = [
+            ['رقم التشغيلة', batchNumber],
+            ['المنتج', data.product_name ?? '—'],
+            ['تاريخ الإنتاج', formatDateValue(data.production_date)],
+            ['الكمية المنتجة', data.quantity_produced ?? data.quantity ?? '—']
+        ];
+
+        if (data.status) {
+            const statusLabel = statusLabelsMap[data.status] ?? data.status;
+            summaryRows.push(['الحالة', statusLabel]);
+        }
+        if (data.honey_supplier_name) {
+            summaryRows.push(['مورد العسل', data.honey_supplier_name]);
+        }
+        if (data.packaging_supplier_name) {
+            summaryRows.push(['مورد التعبئة', data.packaging_supplier_name]);
+        }
+        if (data.notes) {
+            summaryRows.push(['ملاحظات', data.notes]);
+        }
+
+        summarySection.innerHTML = `
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h6 class="mb-0"><i class="bi bi-info-circle me-2"></i>ملخص التشغيلة</h6>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive dashboard-table-wrapper">
+                        <table class="table dashboard-table dashboard-table--compact align-middle mb-0">
+                            <tbody>
+                                ${summaryRows.map(([label, value]) => `
+                                    <tr>
+                                        <th class="w-25">${label}</th>
+                                        <td>${value}</td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const packagingItems = Array.isArray(data.packaging_materials) ? data.packaging_materials : [];
+        if (packagingItems.length > 0) {
+            materialsSection.innerHTML = `
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0"><i class="bi bi-box-seam me-2"></i>مواد التعبئة المستخدمة</h6>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            ${packagingItems.map(item => `
+                                <li class="mb-2">
+                                    <strong>${item.name ?? '—'}</strong>
+                                    <div class="text-muted small">
+                                        ${formatQuantity(item.quantity_used, item.unit ?? '')}
+                                        ${item.supplier_name ? ` • المورد: ${item.supplier_name}` : ''}
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+        } else {
+            materialsSection.innerHTML = '';
+        }
+
+        const rawItems = Array.isArray(data.raw_materials) ? data.raw_materials : [];
+        if (rawItems.length > 0) {
+            rawMaterialsSection.innerHTML = `
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0"><i class="bi bi-droplet-half me-2"></i>المواد الخام المستخدمة</h6>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            ${rawItems.map(item => `
+                                <li class="mb-2">
+                                    <strong>${item.name ?? '—'}</strong>
+                                    <div class="text-muted small">
+                                        ${formatQuantity(item.quantity_used, item.unit ?? '')}
+                                        ${item.supplier_name ? ` • المورد: ${item.supplier_name}` : ''}
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+        } else {
+            rawMaterialsSection.innerHTML = '';
+        }
+
+        const workers = Array.isArray(data.workers) ? data.workers : [];
+        if (workers.length > 0) {
+            workersSection.innerHTML = `
+                <div class="card shadow-sm">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0"><i class="bi bi-people-fill me-2"></i>فريق الإنتاج</h6>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            ${workers.map(worker => `
+                                <li class="mb-2">
+                                    <strong>${worker.full_name ?? worker.username ?? '—'}</strong>
+                                    <div class="text-muted small">${worker.role ?? 'عامل إنتاج'}</div>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+        } else {
+            workersSection.innerHTML = '';
+        }
+    }
+
+    function showBatchDetailsModal(batchNumber, productName, fallbackUrl) {
+        if (typeof bootstrap === 'undefined' || typeof bootstrap.Modal === 'undefined') {
+            const targetUrl = fallbackUrl && fallbackUrl.length
+                ? fallbackUrl
+                : `${batchDetailsFallbackBase}${encodeURIComponent(batchNumber)}`;
+            window.location.href = targetUrl;
+            return;
+        }
+
+        const modalElement = document.getElementById('batchDetailsModal');
+        const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement);
+        const loader = document.getElementById('batchDetailsLoading');
+        const errorAlert = document.getElementById('batchDetailsError');
+        const contentWrapper = document.getElementById('batchDetailsContent');
+
+        modalElement.querySelector('.modal-title').textContent = productName
+            ? `تفاصيل التشغيلة - ${productName}`
+            : 'تفاصيل التشغيلة';
+
+        loader.classList.remove('d-none');
+        errorAlert.classList.add('d-none');
+        errorAlert.textContent = '';
+        contentWrapper.classList.add('d-none');
+
+        modalInstance.show();
+
+        fetch(batchDetailsEndpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({ batch_number: batchNumber })
+        })
+        .then(async (response) => {
+            const contentType = response.headers.get('content-type') || '';
+            const isJson = contentType.includes('application/json');
+            const payload = isJson ? await response.json() : null;
+
+            if (!response.ok || !payload) {
+                const message = payload?.message ?? 'تعذر تحميل تفاصيل التشغيلة.';
+                throw new Error(message);
+            }
+
+            if (!payload.success || !payload.batch) {
+                throw new Error(payload.message ?? 'تعذر تحميل تفاصيل التشغيلة.');
+            }
+
+            loader.classList.add('d-none');
+            contentWrapper.classList.remove('d-none');
+            renderBatchDetails(payload.batch);
+        })
+        .catch((error) => {
+            loader.classList.add('d-none');
+            contentWrapper.classList.add('d-none');
+            errorAlert.textContent = error.message || 'تعذر تحميل تفاصيل التشغيلة.';
+            errorAlert.classList.remove('d-none');
+        });
+    }
+
+    document.addEventListener('click', function (event) {
+        const detailsButton = event.target.closest('.js-batch-details');
+        if (detailsButton) {
+            const batchNumber = detailsButton.dataset.batch;
+            if (batchNumber) {
+                event.preventDefault();
+                const productName = detailsButton.dataset.product || '';
+                const fallbackUrl = detailsButton.dataset.viewUrl || '';
+                showBatchDetailsModal(batchNumber, productName, fallbackUrl);
+            }
+            return;
+        }
+
     const copyButton = event.target.closest('.js-copy-batch');
     if (!copyButton) {
         return;

@@ -244,7 +244,7 @@
 }
 
 .table-card-body tbody tr:hover {
-    background: var(--gray-50);
+    background: inherit;
 }
 
 .table-card-body tbody tr:last-child td {

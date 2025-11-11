@@ -85,6 +85,6 @@
 }
 
 [data-theme="dark"] .table-card-body table tbody tr:hover {
-    background: var(--gray-100);
+    background: inherit;
 }
 

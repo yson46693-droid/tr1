@@ -36,12 +36,12 @@
 }
 
 .table tbody tr {
-    transition: background-color 0.15s ease, transform 0.1s ease;
+    transition: none !important;
 }
 
 .table tbody tr:hover {
-    background-color: var(--bg-hover, #f8f9fa);
-    transform: scale(1.001);
+    background-color: inherit !important;
+    transform: none !important;
 }
 
 .table.table-no-hover tbody tr {
@@ -59,12 +59,13 @@
 }
 
 .table-striped tbody tr:nth-of-type(odd):hover {
-    background-color: var(--bg-hover, #e9ecef);
+    background-color: var(--bg-secondary, #f8f9fa) !important;
 }
 
 .table-hover tbody tr:hover {
-    background-color: var(--bg-hover, #f8f9fa);
-    cursor: pointer;
+    background-color: inherit !important;
+    cursor: default !important;
+    transform: none !important;
 }
 
 /* ===== Table Responsive Container ===== */
@@ -101,7 +102,7 @@
 }
 
 .table-warning:hover {
-    background-color: #ffeaa7 !important;
+    background-color: #fff3cd !important;
 }
 
 .table-danger {
@@ -323,7 +324,8 @@
     }
     
     .table tbody tr:hover {
-        background-color: var(--bg-hover-dark, #374151);
+        background-color: inherit !important;
+        transform: none !important;
     }
     
     .table-striped tbody tr:nth-of-type(odd) {
@@ -331,7 +333,7 @@
     }
     
     .table-striped tbody tr:nth-of-type(odd):hover {
-        background-color: var(--bg-hover-dark, #4b5563);
+        background-color: var(--bg-secondary-dark, #374151) !important;
     }
 }
 

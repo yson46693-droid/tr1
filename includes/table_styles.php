@@ -62,7 +62,7 @@ if (!defined('GLOBAL_TABLE_STYLES_RENDERED')) {
         }
 
         .dashboard-table tbody tr {
-            transition: background-color 0.18s ease, transform 0.18s ease;
+            transition: none;
             background: var(--global-table-row-bg);
         }
 
@@ -71,8 +71,8 @@ if (!defined('GLOBAL_TABLE_STYLES_RENDERED')) {
         }
 
         .dashboard-table tbody tr:hover {
-            background: var(--global-table-row-hover-bg);
-            transform: translateY(-1px);
+            background: inherit;
+            transform: none;
         }
 
         .dashboard-table--no-hover tbody tr {
