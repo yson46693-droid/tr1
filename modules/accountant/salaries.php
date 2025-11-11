@@ -1176,7 +1176,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
     </div>
 </div>
 
-<?php elseif ($view === 'advances'): ?>
+<?php if ($view === 'advances'): ?>
 <!-- قسم السلف -->
 <div class="card shadow-sm">
     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">

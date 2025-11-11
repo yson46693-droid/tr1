@@ -45,6 +45,154 @@ if ($sessionSuccess !== null) {
     $success = $sessionSuccess;
 }
 
+// تحديد المسار الأساسي للروابط بناءً على دور المستخدم
+$currentRole = strtolower((string)($currentUser['role'] ?? 'sales'));
+$customersBaseScript = 'sales.php';
+if ($currentRole === 'manager') {
+    $customersBaseScript = 'manager.php';
+} elseif ($currentRole === 'accountant') {
+    $customersBaseScript = 'accountant.php';
+}
+$customersPageBase = $customersBaseScript . '?page=customers';
+
+// بيانات قسم مناديب المبيعات
+$delegateSearch = '';
+$delegates = [];
+$delegateCustomersMap = [];
+$delegateSummary = [
+    'total_delegates'      => 0,
+    'total_customers'      => 0,
+    'debtor_customers'     => 0,
+    'total_debt'           => 0.0,
+    'active_delegates'     => 0,
+    'inactive_delegates'   => 0,
+];
+
+if ($section === 'delegates' && !$isSalesUser) {
+    $delegateSearch = trim($_GET['delegate_search'] ?? '');
+    $searchFilterSql = '';
+    $searchParams = [];
+
+    if ($delegateSearch !== '') {
+        $searchLike = '%' . $delegateSearch . '%';
+        $searchFilterSql = "
+            AND (
+                u.full_name LIKE ?
+                OR u.username LIKE ?
+                OR u.email LIKE ?
+                OR u.phone LIKE ?
+            )";
+        $searchParams = [$searchLike, $searchLike, $searchLike, $searchLike];
+    }
+
+    try {
+        $delegatesQuery = "
+            SELECT 
+                u.id,
+                u.full_name,
+                u.username,
+                u.email,
+                u.phone,
+                u.status,
+                u.last_login_at,
+                COALESCE(COUNT(c.id), 0) AS customer_count,
+                COALESCE(SUM(CASE WHEN c.balance > 0 THEN 1 ELSE 0 END), 0) AS debtor_count,
+                COALESCE(SUM(CASE WHEN c.balance > 0 THEN c.balance ELSE 0 END), 0) AS total_debt,
+                COALESCE(MAX(c.updated_at), MAX(c.created_at)) AS last_activity_at
+            FROM users u
+            LEFT JOIN customers c ON c.created_by = u.id
+            WHERE u.role = 'sales'
+              {$searchFilterSql}
+            GROUP BY u.id, u.full_name, u.username, u.email, u.phone, u.status, u.last_login_at
+            ORDER BY customer_count DESC, u.full_name ASC
+        ";
+
+        $delegates = $db->query($delegatesQuery, $searchParams);
+
+        if (!empty($delegates)) {
+            $delegateIds = array_map(static function ($delegate) {
+                return (int)($delegate['id'] ?? 0);
+            }, $delegates);
+            $delegateIds = array_filter($delegateIds);
+
+            foreach ($delegates as $delegateRow) {
+                $delegateStatus = strtolower((string)($delegateRow['status'] ?? 'inactive'));
+                $delegateSummary['total_delegates']++;
+                if ($delegateStatus === 'active') {
+                    $delegateSummary['active_delegates']++;
+                } else {
+                    $delegateSummary['inactive_delegates']++;
+                }
+                $delegateSummary['total_customers'] += (int)($delegateRow['customer_count'] ?? 0);
+                $delegateSummary['debtor_customers'] += (int)($delegateRow['debtor_count'] ?? 0);
+                $delegateSummary['total_debt'] += (float)($delegateRow['total_debt'] ?? 0.0);
+            }
+
+            if (!empty($delegateIds)) {
+                $placeholders = implode(',', array_fill(0, count($delegateIds), '?'));
+                $customersByDelegate = $db->query(
+                    "
+                        SELECT 
+                            c.id,
+                            c.name,
+                            c.phone,
+                            c.address,
+                            c.balance,
+                            c.status,
+                            c.latitude,
+                            c.longitude,
+                            c.created_at,
+                            c.updated_at,
+                            c.created_by
+                        FROM customers c
+                        WHERE c.created_by IN ({$placeholders})
+                        ORDER BY c.name ASC
+                    ",
+                    $delegateIds
+                );
+
+                foreach ($customersByDelegate as $customerRow) {
+                    $ownerId = (int)($customerRow['created_by'] ?? 0);
+                    if ($ownerId <= 0) {
+                        continue;
+                    }
+                    if (!isset($delegateCustomersMap[$ownerId])) {
+                        $delegateCustomersMap[$ownerId] = [];
+                    }
+                    $delegateCustomersMap[$ownerId][] = [
+                        'id'                   => (int)($customerRow['id'] ?? 0),
+                        'name'                 => (string)($customerRow['name'] ?? ''),
+                        'phone'                => (string)($customerRow['phone'] ?? ''),
+                        'address'              => (string)($customerRow['address'] ?? ''),
+                        'balance'              => (float)($customerRow['balance'] ?? 0.0),
+                        'balance_formatted'    => formatCurrency((float)($customerRow['balance'] ?? 0.0)),
+                        'status'               => (string)($customerRow['status'] ?? ''),
+                        'latitude'             => $customerRow['latitude'] !== null ? (float)$customerRow['latitude'] : null,
+                        'longitude'            => $customerRow['longitude'] !== null ? (float)$customerRow['longitude'] : null,
+                        'created_at'           => (string)($customerRow['created_at'] ?? ''),
+                        'created_at_formatted' => formatDateTime($customerRow['created_at'] ?? ''),
+                        'updated_at'           => (string)($customerRow['updated_at'] ?? ''),
+                        'updated_at_formatted' => formatDateTime($customerRow['updated_at'] ?? ''),
+                    ];
+                }
+            }
+        }
+    } catch (Throwable $delegatesError) {
+        error_log('Delegates customers section error: ' . $delegatesError->getMessage());
+        $delegates = [];
+        $delegateCustomersMap = [];
+        $delegateSummary = [
+            'total_delegates'      => 0,
+            'total_customers'      => 0,
+            'debtor_customers'     => 0,
+            'total_debt'           => 0.0,
+            'active_delegates'     => 0,
+            'inactive_delegates'   => 0,
+        ];
+        $error = $error ?: 'تعذر تحميل بيانات مناديب المبيعات في الوقت الحالي. يرجى المحاولة لاحقاً.';
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = trim($_POST['action']);
 
@@ -470,12 +618,12 @@ $summaryTotalCustomers = $customerStats['total_count'] ?? $totalCustomers;
 <?php if (!$isSalesUser): ?>
     <ul class="nav nav-pills gap-2 mb-4">
         <li class="nav-item">
-            <a class="nav-link <?php echo $section === 'company' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl('sales.php?page=customers&section=company'); ?>">
+            <a class="nav-link <?php echo $section === 'company' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl($customersPageBase . '&section=company'); ?>">
                 <i class="bi bi-building me-2"></i>عملاء الشركة
             </a>
         </li>
         <li class="nav-item">
-            <a class="nav-link <?php echo $section === 'delegates' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl('sales.php?page=customers&section=delegates'); ?>">
+            <a class="nav-link <?php echo $section === 'delegates' ? 'active' : ''; ?>" href="<?php echo getRelativeUrl($customersPageBase . '&section=delegates'); ?>">
                 <i class="bi bi-people-fill me-2"></i>عملاء المندوبين
             </a>
         </li>
@@ -547,13 +695,577 @@ $collectionsLabel = $isSalesUser ? 'تحصيلاتي' : 'إجمالي التحص
 
 <?php else: ?>
 
-<div class="card shadow-sm border-0">
-    <div class="card-body text-center py-5">
-        <div class="display-5 text-muted mb-3"><i class="bi bi-tools"></i></div>
-        <h4 class="mb-2">قسم عملاء المندوبين</h4>
-        <p class="text-muted mb-0">هذا القسم قيد التطوير وسيتم توفيره قريبًا.</p>
+<?php elseif ($section === 'delegates' && !$isSalesUser): ?>
+
+<?php
+$delegatesSummaryTitle = 'ملخص مناديب المبيعات';
+$delegateCards = [
+    [
+        'label' => 'إجمالي المناديب',
+        'value' => number_format((int)$delegateSummary['total_delegates']),
+        'icon'  => 'bi-people-fill',
+        'class' => 'primary'
+    ],
+    [
+        'label' => 'المناديب النشطون',
+        'value' => number_format((int)$delegateSummary['active_delegates']),
+        'icon'  => 'bi-person-check-fill',
+        'class' => 'success'
+    ],
+    [
+        'label' => 'إجمالي العملاء',
+        'value' => number_format((int)$delegateSummary['total_customers']),
+        'icon'  => 'bi-people',
+        'class' => 'info'
+    ],
+    [
+        'label' => 'إجمالي ديون العملاء',
+        'value' => formatCurrency($delegateSummary['total_debt']),
+        'icon'  => 'bi-cash-stack',
+        'class' => 'warning'
+    ],
+];
+?>
+
+<div class="delegates-summary-grid mb-4">
+    <?php foreach ($delegateCards as $card): ?>
+        <div class="delegates-summary-card border-0 shadow-sm h-100 delegates-summary-card-<?php echo htmlspecialchars($card['class']); ?>">
+            <div class="delegates-summary-icon">
+                <i class="bi <?php echo htmlspecialchars($card['icon']); ?>"></i>
+            </div>
+            <div class="delegates-summary-content">
+                <div class="delegates-summary-label"><?php echo htmlspecialchars($card['label']); ?></div>
+                <div class="delegates-summary-value"><?php echo htmlspecialchars($card['value']); ?></div>
+            </div>
+        </div>
+    <?php endforeach; ?>
+</div>
+
+<div class="card shadow-sm mb-4 delegates-search-card">
+    <div class="card-body">
+        <form method="GET" action="" class="row g-2 g-md-3 align-items-end">
+            <input type="hidden" name="page" value="customers">
+            <input type="hidden" name="section" value="delegates">
+            <div class="col-md-10">
+                <label class="form-label fw-semibold text-muted">البحث عن مندوب</label>
+                <input
+                    type="text"
+                    class="form-control"
+                    name="delegate_search"
+                    value="<?php echo htmlspecialchars($delegateSearch); ?>"
+                    placeholder="ابحث باسم المندوب، البريد، الهاتف..."
+                >
+            </div>
+            <div class="col-md-2 d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-grow-1">
+                    <i class="bi bi-search me-2"></i>بحث
+                </button>
+                <?php if ($delegateSearch !== ''): ?>
+                    <a class="btn btn-outline-secondary" href="<?php echo getRelativeUrl($customersPageBase . '&section=delegates'); ?>">
+                        <i class="bi bi-x-lg"></i>
+                    </a>
+                <?php endif; ?>
+            </div>
+        </form>
     </div>
 </div>
+
+<div class="card shadow-sm delegates-list-card">
+    <div class="card-header bg-primary text-white">
+        <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2">
+            <h5 class="mb-0">
+                <i class="bi bi-people-fill me-2"></i>مناديب المبيعات
+                (<?php echo number_format((int)$delegateSummary['total_delegates']); ?>)
+            </h5>
+            <span class="small text-white-50">إجمالي العملاء: <?php echo number_format((int)$delegateSummary['total_customers']); ?></span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive dashboard-table-wrapper delegates-table-container">
+            <table class="table dashboard-table align-middle">
+                <thead>
+                    <tr>
+                        <th>المندوب</th>
+                        <th>التواصل</th>
+                        <th>عدد العملاء</th>
+                        <th>العملاء المدينون</th>
+                        <th>إجمالي الديون</th>
+                        <th>آخر نشاط</th>
+                        <th>الحالة</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($delegates)): ?>
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                لا توجد بيانات للمندوبين حالياً.
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <?php foreach ($delegates as $delegate): ?>
+                            <?php
+                            $delegateId = (int)($delegate['id'] ?? 0);
+                            $statusRaw = strtolower((string)($delegate['status'] ?? 'inactive'));
+                            $statusBadgeClass = 'secondary';
+                            $statusLabel = 'غير محدد';
+
+                            if ($statusRaw === 'active') {
+                                $statusBadgeClass = 'success';
+                                $statusLabel = 'نشط';
+                            } elseif (in_array($statusRaw, ['inactive', 'suspended', 'disabled'], true)) {
+                                $statusBadgeClass = 'secondary';
+                                $statusLabel = 'غير نشط';
+                            } elseif ($statusRaw === 'pending') {
+                                $statusBadgeClass = 'warning';
+                                $statusLabel = 'بانتظار التفعيل';
+                            }
+
+                            $delegateCustomers = $delegateCustomersMap[$delegateId] ?? [];
+                            $delegateCustomersJson = htmlspecialchars(
+                                json_encode($delegateCustomers, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                                ENT_QUOTES,
+                                'UTF-8'
+                            );
+
+                            $lastActivity = $delegate['last_activity_at'] ?? null;
+                            $lastActivityFormatted = $lastActivity ? formatDateTime($lastActivity) : '—';
+
+                            $contactInfoParts = [];
+                            if (!empty($delegate['phone'])) {
+                                $contactInfoParts[] = htmlspecialchars($delegate['phone']);
+                            }
+                            if (!empty($delegate['email'])) {
+                                $contactInfoParts[] = htmlspecialchars($delegate['email']);
+                            }
+                            $contactInfo = !empty($contactInfoParts) ? implode('<br>', $contactInfoParts) : '<span class="text-muted">غير متوفر</span>';
+                            ?>
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold text-primary"><?php echo htmlspecialchars($delegate['full_name'] ?: $delegate['username'] ?: '—'); ?></div>
+                                    <div class="text-muted small"><?php echo htmlspecialchars($delegate['username'] ?? ''); ?></div>
+                                </td>
+                                <td><?php echo $contactInfo; ?></td>
+                                <td>
+                                    <span class="badge bg-primary-subtle text-primary fw-semibold">
+                                        <?php echo number_format((int)($delegate['customer_count'] ?? 0)); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-warning-subtle text-warning fw-semibold">
+                                        <?php echo number_format((int)($delegate['debtor_count'] ?? 0)); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo formatCurrency($delegate['total_debt'] ?? 0); ?></td>
+                                <td><?php echo htmlspecialchars($lastActivityFormatted); ?></td>
+                                <td>
+                                    <span class="badge bg-<?php echo $statusBadgeClass; ?>">
+                                        <?php echo htmlspecialchars($statusLabel); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <button
+                                        type="button"
+                                        class="btn btn-sm btn-outline-primary view-delegate-customers-btn"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#delegateCustomersModal"
+                                        data-delegate-id="<?php echo $delegateId; ?>"
+                                        data-delegate-name="<?php echo htmlspecialchars($delegate['full_name'] ?: $delegate['username'] ?: '—', ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-delegate-customers="<?php echo $delegateCustomersJson; ?>"
+                                        data-total-customers="<?php echo (int)($delegate['customer_count'] ?? 0); ?>"
+                                        data-total-debt="<?php echo htmlspecialchars(formatCurrency($delegate['total_debt'] ?? 0), ENT_QUOTES, 'UTF-8'); ?>"
+                                    >
+                                        <i class="bi bi-eye me-1"></i>عرض العملاء
+                                    </button>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="delegateCustomersModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-people me-2"></i>عملاء المندوب</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div class="text-muted small fw-semibold">المندوب</div>
+                    <div class="fs-5 fw-bold delegate-modal-name">-</div>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-sm-6 col-lg-3">
+                        <div class="delegate-modal-stat">
+                            <div class="delegate-modal-stat-label">عدد العملاء</div>
+                            <div class="delegate-modal-stat-value delegate-modal-total-customers">0</div>
+                        </div>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <div class="delegate-modal-stat">
+                            <div class="delegate-modal-stat-label">إجمالي الديون</div>
+                            <div class="delegate-modal-stat-value delegate-modal-total-debt">0</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="table-responsive delegate-modal-table">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>العميل</th>
+                                <th>رقم الهاتف</th>
+                                <th>العنوان</th>
+                                <th>الرصيد</th>
+                                <th>آخر تحديث</th>
+                                <th>الحالة</th>
+                                <th>الإجراءات</th>
+                            </tr>
+                        </thead>
+                        <tbody class="delegate-modal-body">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-4">
+                                    لا توجد بيانات متاحة.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .delegates-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+    }
+
+    .delegates-summary-card {
+        border-radius: 18px;
+        padding: 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        position: relative;
+        overflow: hidden;
+        background: #fff;
+    }
+
+    .delegates-summary-icon {
+        height: 52px;
+        width: 52px;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.4rem;
+        color: #fff;
+        flex-shrink: 0;
+    }
+
+    .delegates-summary-card-primary .delegates-summary-icon {
+        background: linear-gradient(135deg, #2563eb, #3b82f6);
+    }
+
+    .delegates-summary-card-success .delegates-summary-icon {
+        background: linear-gradient(135deg, #16a34a, #22c55e);
+    }
+
+    .delegates-summary-card-info .delegates-summary-icon {
+        background: linear-gradient(135deg, #0ea5e9, #38bdf8);
+    }
+
+    .delegates-summary-card-warning .delegates-summary-icon {
+        background: linear-gradient(135deg, #f59e0b, #fbbf24);
+    }
+
+    .delegates-summary-content {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+    }
+
+    .delegates-summary-label {
+        font-size: 0.9rem;
+        color: #6b7280;
+        font-weight: 600;
+    }
+
+    .delegates-summary-value {
+        font-size: 1.4rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .delegates-search-card .card-body {
+        padding: 1.35rem 1.5rem;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(59, 130, 246, 0));
+    }
+
+    .delegates-search-card .form-control {
+        border-radius: 0.95rem;
+        height: 52px;
+        font-weight: 500;
+    }
+
+    .delegates-search-card .btn {
+        height: 52px;
+        border-radius: 0.95rem;
+        font-weight: 600;
+    }
+
+    .delegates-list-card .card-header {
+        padding: 1.1rem 1.5rem;
+        border-radius: 18px 18px 0 0;
+    }
+
+    .delegates-list-card .card-body {
+        padding: 1.35rem 1.25rem;
+    }
+
+    .delegates-table-container.table-responsive {
+        border-radius: 18px;
+        overflow-x: auto;
+    }
+
+    .delegates-table-container table {
+        min-width: 920px;
+    }
+
+    .delegate-modal-stat {
+        border: 1px solid rgba(99, 102, 241, 0.2);
+        border-radius: 14px;
+        padding: 0.85rem 1rem;
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(59, 130, 246, 0.04));
+    }
+
+    .delegate-modal-stat-label {
+        font-size: 0.8rem;
+        color: #6b7280;
+        font-weight: 600;
+    }
+
+    .delegate-modal-stat-value {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: #1d4ed8;
+    }
+
+    .delegate-location-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+    }
+
+    @media (max-width: 992px) {
+        .delegates-summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        }
+
+        .delegates-search-card .card-body {
+            padding: 1.1rem 1.25rem 1.25rem;
+        }
+
+        .delegates-search-card .col-md-10,
+        .delegates-search-card .col-md-2 {
+            flex: 0 0 100%;
+            max-width: 100%;
+        }
+    }
+
+    @media (max-width: 768px) {
+        .delegates-list-card .card-body {
+            padding: 1.1rem 0.75rem 1rem;
+        }
+
+        .delegates-table-container table {
+            min-width: 820px;
+            font-size: 0.95rem;
+        }
+    }
+
+    @media (max-width: 576px) {
+        .delegates-summary-card {
+            border-radius: 16px;
+        }
+
+        .delegates-list-card .card-header {
+            border-radius: 16px 16px 0 0;
+        }
+
+        .delegates-list-card .card-body {
+            padding: 1rem 0.5rem 0.9rem;
+        }
+
+        .delegates-table-container table {
+            min-width: 720px;
+            font-size: 0.88rem;
+        }
+    }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var delegatesModal = document.getElementById('delegateCustomersModal');
+    if (!delegatesModal) {
+        return;
+    }
+
+    var nameElement = delegatesModal.querySelector('.delegate-modal-name');
+    var totalCustomersElement = delegatesModal.querySelector('.delegate-modal-total-customers');
+    var totalDebtElement = delegatesModal.querySelector('.delegate-modal-total-debt');
+    var tableBody = delegatesModal.querySelector('.delegate-modal-body');
+
+    function renderEmptyState(message) {
+        if (!tableBody) {
+            return;
+        }
+        tableBody.innerHTML = '';
+        var emptyRow = document.createElement('tr');
+        var emptyCell = document.createElement('td');
+        emptyCell.colSpan = 7;
+        emptyCell.className = 'text-center text-muted py-4';
+        emptyCell.textContent = message || 'لا توجد بيانات متاحة.';
+        emptyRow.appendChild(emptyCell);
+        tableBody.appendChild(emptyRow);
+    }
+
+    function createBadge(status) {
+        var badge = document.createElement('span');
+        var normalized = (status || '').toString().toLowerCase();
+        var badgeClass = 'bg-secondary';
+        var label = 'غير محدد';
+
+        if (normalized === 'active') {
+            badgeClass = 'bg-success';
+            label = 'نشط';
+        } else if (normalized === 'inactive') {
+            badgeClass = 'bg-secondary';
+            label = 'غير نشط';
+        } else if (normalized === 'suspended') {
+            badgeClass = 'bg-danger';
+            label = 'موقوف';
+        } else if (normalized === 'pending') {
+            badgeClass = 'bg-warning text-dark';
+            label = 'بانتظار التفعيل';
+        }
+
+        badge.className = 'badge ' + badgeClass;
+        badge.textContent = label;
+        return badge;
+    }
+
+    function buildCustomerRow(customer) {
+        var row = document.createElement('tr');
+
+        var nameCell = document.createElement('td');
+        var nameStrong = document.createElement('strong');
+        nameStrong.textContent = customer.name || '—';
+        nameCell.appendChild(nameStrong);
+        row.appendChild(nameCell);
+
+        var phoneCell = document.createElement('td');
+        phoneCell.textContent = customer.phone || '—';
+        row.appendChild(phoneCell);
+
+        var addressCell = document.createElement('td');
+        addressCell.textContent = customer.address || '—';
+        row.appendChild(addressCell);
+
+        var balanceCell = document.createElement('td');
+        balanceCell.textContent = customer.balance_formatted || customer.balance || '0';
+        row.appendChild(balanceCell);
+
+        var updatedCell = document.createElement('td');
+        updatedCell.textContent = customer.updated_at_formatted || customer.created_at_formatted || '—';
+        row.appendChild(updatedCell);
+
+        var statusCell = document.createElement('td');
+        statusCell.appendChild(createBadge(customer.status || ''));
+        row.appendChild(statusCell);
+
+        var actionsCell = document.createElement('td');
+        if (customer.latitude !== null && customer.longitude !== null) {
+            var mapLink = document.createElement('a');
+            mapLink.className = 'btn btn-sm btn-outline-info delegate-location-link';
+            mapLink.href = 'https://www.google.com/maps?q='
+                + encodeURIComponent(String(customer.latitude) + ',' + String(customer.longitude))
+                + '&hl=ar&z=16';
+            mapLink.target = '_blank';
+            mapLink.rel = 'noopener';
+            mapLink.innerHTML = '<i class="bi bi-geo-alt"></i>عرض الموقع';
+            actionsCell.appendChild(mapLink);
+        } else {
+            var noLocation = document.createElement('span');
+            noLocation.className = 'text-muted small';
+            noLocation.textContent = 'لا يوجد موقع';
+            actionsCell.appendChild(noLocation);
+        }
+        row.appendChild(actionsCell);
+
+        return row;
+    }
+
+    delegatesModal.addEventListener('show.bs.modal', function (event) {
+        var triggerButton = event.relatedTarget;
+        if (!triggerButton || !tableBody || !nameElement || !totalCustomersElement || !totalDebtElement) {
+            return;
+        }
+
+        var delegateName = triggerButton.getAttribute('data-delegate-name') || '-';
+        var customersJson = triggerButton.getAttribute('data-delegate-customers') || '[]';
+        var totalCustomers = parseInt(triggerButton.getAttribute('data-total-customers') || '0', 10) || 0;
+        var totalDebt = triggerButton.getAttribute('data-total-debt') || '0';
+
+        nameElement.textContent = delegateName;
+        totalCustomersElement.textContent = totalCustomers.toLocaleString('ar-EG');
+        totalDebtElement.textContent = totalDebt;
+
+        var customersData = [];
+        try {
+            customersData = JSON.parse(customersJson);
+        } catch (parseError) {
+            console.warn('Unable to parse delegate customers payload.', parseError);
+            customersData = [];
+        }
+
+        tableBody.innerHTML = '';
+
+        if (!Array.isArray(customersData) || customersData.length === 0) {
+            renderEmptyState('لا توجد عملاء مرتبطة بهذا المندوب حالياً.');
+            return;
+        }
+
+        customersData.forEach(function (customer) {
+            tableBody.appendChild(buildCustomerRow(customer || {}));
+        });
+    });
+
+    delegatesModal.addEventListener('hidden.bs.modal', function () {
+        if (nameElement) {
+            nameElement.textContent = '-';
+        }
+        if (totalCustomersElement) {
+            totalCustomersElement.textContent = '0';
+        }
+        if (totalDebtElement) {
+            totalDebtElement.textContent = '0';
+        }
+        renderEmptyState('لا توجد بيانات متاحة.');
+    });
+});
+</script>
 
 <?php endif; ?>
 
