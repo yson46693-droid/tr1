@@ -201,6 +201,90 @@ function getAttendancePhotoAbsolutePath($relativePath) {
 }
 
 /**
+ * التأكد من وجود جدول سجلات إشعارات الحضور/الانصراف لمنع التكرار
+ */
+function ensureAttendanceEventNotificationLogTable(): void
+{
+    static $tableEnsured = false;
+
+    if ($tableEnsured) {
+        return;
+    }
+
+    try {
+        $db = db();
+        $db->execute("
+            CREATE TABLE IF NOT EXISTS `attendance_event_notification_logs` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `user_id` int(11) NOT NULL,
+              `attendance_record_id` int(11) DEFAULT NULL,
+              `event_type` enum('checkin','checkout') NOT NULL,
+              `sent_date` date NOT NULL,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `unique_user_event_date` (`user_id`,`event_type`,`sent_date`),
+              KEY `attendance_record_idx` (`attendance_record_id`),
+              CONSTRAINT `attendance_event_log_user_fk` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `attendance_event_log_record_fk` FOREIGN KEY (`attendance_record_id`) REFERENCES `attendance_records` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+        $tableEnsured = true;
+    } catch (Exception $e) {
+        error_log('Failed to ensure attendance event notification log table: ' . $e->getMessage());
+    }
+}
+
+/**
+ * التحقق من إرسال إشعار الحضور/الانصراف للمستخدم في يوم معين
+ */
+function hasAttendanceEventNotificationBeenSent(int $userId, string $eventType, string $sentDate): bool
+{
+    if (!in_array($eventType, ['checkin', 'checkout'], true)) {
+        return false;
+    }
+
+    ensureAttendanceEventNotificationLogTable();
+
+    try {
+        $db = db();
+        $row = $db->queryOne(
+            "SELECT id FROM attendance_event_notification_logs WHERE user_id = ? AND event_type = ? AND sent_date = ? LIMIT 1",
+            [$userId, $eventType, $sentDate]
+        );
+
+        return !empty($row);
+    } catch (Exception $e) {
+        error_log('Failed to check attendance event notification log: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * تسجيل إرسال إشعار الحضور/الانصراف للمستخدم
+ */
+function markAttendanceEventNotificationSent(int $userId, string $eventType, string $sentDate, ?int $attendanceRecordId = null): void
+{
+    if (!in_array($eventType, ['checkin', 'checkout'], true)) {
+        return;
+    }
+
+    ensureAttendanceEventNotificationLogTable();
+
+    try {
+        $db = db();
+        $db->execute(
+            "INSERT INTO attendance_event_notification_logs (user_id, attendance_record_id, event_type, sent_date)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE attendance_record_id = VALUES(attendance_record_id), updated_at = CURRENT_TIMESTAMP",
+            [$userId, $attendanceRecordId, $eventType, $sentDate]
+        );
+    } catch (Exception $e) {
+        error_log('Failed to mark attendance event notification sent: ' . $e->getMessage());
+    }
+}
+
+/**
  * تسجيل حضور مع صورة
  */
 function recordAttendanceCheckIn($userId, $photoBase64 = null) {
@@ -238,56 +322,65 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
     $userName = $user['full_name'] ?? $user['username'];
     $role = $user['role'] ?? 'unknown';
     
-    // إرسال إشعار واحد فقط عبر Telegram (صورة مع جميع البيانات)
+    // إرسال إشعار واحد فقط عبر Telegram (صورة مع جميع البيانات) مع منع التكرار
     $photoDeleted = false;
+    $telegramEnabled = isTelegramConfigured();
 
-    if (isTelegramConfigured()) {
-        $delayText = $delayMinutes > 0 ? "⏰ تأخير: {$delayMinutes} دقيقة" : "✅ في الوقت";
-        
-        // إذا كانت الصورة متوفرة، أرسلها مع البيانات
-        if ($photoBase64 && !empty(trim($photoBase64))) {
-            try {
-                $caption = "🔔 <b>تسجيل حضور جديد</b>\n\n";
-                $caption .= "👤 <b>الاسم:</b> {$userName}\n";
-                $caption .= "🏷️ <b>الدور:</b> " . formatRoleName($role) . "\n";
-                $caption .= "📅 <b>التاريخ:</b> " . formatArabicDate($now) . "\n";
-                $caption .= "🕐 <b>الوقت:</b> " . formatArabicTime($now) . "\n";
-                $caption .= "{$delayText}";
-                
-                $photoForTelegram = $savedPhotoAbsolute ?: $photoBase64;
-                $sendAsBase64 = !$savedPhotoAbsolute;
+    if ($telegramEnabled) {
+        $alreadySent = hasAttendanceEventNotificationBeenSent($userId, 'checkin', $today);
 
-                error_log("Check-in: Sending photo with data to Telegram for user {$userId}");
-                $telegramResult = sendTelegramPhoto($photoForTelegram, $caption, null, $sendAsBase64);
-                
-                if ($telegramResult) {
-                    error_log("Attendance check-in sent to Telegram successfully for user {$userId}");
-                    if ($savedPhotoAbsolute && file_exists($savedPhotoAbsolute)) {
-                        @unlink($savedPhotoAbsolute);
-                        $savedPhotoAbsolute = null;
-                        $photoDeleted = true;
-                    }
-                } else {
-                    error_log("Failed to send attendance check-in to Telegram for user {$userId}");
-                }
-            } catch (Exception $e) {
-                error_log("Error sending attendance check-in to Telegram: " . $e->getMessage());
-            }
+        if ($alreadySent) {
+            error_log("Skipping duplicate attendance check-in notification for user {$userId} on {$today}");
         } else {
-            // إذا لم تكن هناك صورة، أرسل رسالة نصية فقط (مرة واحدة)
-            try {
-                $message = "🔔 <b>تسجيل حضور جديد</b>\n\n";
-                $message .= "👤 <b>الاسم:</b> {$userName}\n";
-                $message .= "🏷️ <b>الدور:</b> " . formatRoleName($role) . "\n";
-                $message .= "📅 <b>التاريخ:</b> " . formatArabicDate($now) . "\n";
-                $message .= "🕐 <b>الوقت:</b> " . formatArabicTime($now) . "\n";
-                $message .= "{$delayText}\n";
-                $message .= "⚠️ <i>لم يتم التقاط صورة</i>";
-                
-                sendTelegramMessage($message);
-                error_log("Check-in notification (no photo) sent to Telegram for user {$userId}");
-            } catch (Exception $e) {
-                error_log("Error sending check-in notification to Telegram: " . $e->getMessage());
+            $delayText = $delayMinutes > 0 ? "⏰ تأخير: {$delayMinutes} دقيقة" : "✅ في الوقت";
+
+            // إذا كانت الصورة متوفرة، أرسلها مع البيانات
+            if ($photoBase64 && !empty(trim($photoBase64))) {
+                try {
+                    $caption = "🔔 <b>تسجيل حضور جديد</b>\n\n";
+                    $caption .= "👤 <b>الاسم:</b> {$userName}\n";
+                    $caption .= "🏷️ <b>الدور:</b> " . formatRoleName($role) . "\n";
+                    $caption .= "📅 <b>التاريخ:</b> " . formatArabicDate($now) . "\n";
+                    $caption .= "🕐 <b>الوقت:</b> " . formatArabicTime($now) . "\n";
+                    $caption .= "{$delayText}";
+                    
+                    $photoForTelegram = $savedPhotoAbsolute ?: $photoBase64;
+                    $sendAsBase64 = !$savedPhotoAbsolute;
+
+                    error_log("Check-in: Sending photo with data to Telegram for user {$userId}");
+                    $telegramResult = sendTelegramPhoto($photoForTelegram, $caption, null, $sendAsBase64);
+                    
+                    if ($telegramResult) {
+                        markAttendanceEventNotificationSent($userId, 'checkin', $today, $recordId);
+                        error_log("Attendance check-in sent to Telegram successfully for user {$userId}");
+                        if ($savedPhotoAbsolute && file_exists($savedPhotoAbsolute)) {
+                            @unlink($savedPhotoAbsolute);
+                            $savedPhotoAbsolute = null;
+                            $photoDeleted = true;
+                        }
+                    } else {
+                        error_log("Failed to send attendance check-in to Telegram for user {$userId}");
+                    }
+                } catch (Exception $e) {
+                    error_log("Error sending attendance check-in to Telegram: " . $e->getMessage());
+                }
+            } else {
+                // إذا لم تكن هناك صورة، أرسل رسالة نصية فقط (مرة واحدة)
+                try {
+                    $message = "🔔 <b>تسجيل حضور جديد</b>\n\n";
+                    $message .= "👤 <b>الاسم:</b> {$userName}\n";
+                    $message .= "🏷️ <b>الدور:</b> " . formatRoleName($role) . "\n";
+                    $message .= "📅 <b>التاريخ:</b> " . formatArabicDate($now) . "\n";
+                    $message .= "🕐 <b>الوقت:</b> " . formatArabicTime($now) . "\n";
+                    $message .= "{$delayText}\n";
+                    $message .= "⚠️ <i>لم يتم التقاط صورة</i>";
+                    
+                    sendTelegramMessage($message);
+                    markAttendanceEventNotificationSent($userId, 'checkin', $today, $recordId);
+                    error_log("Check-in notification (no photo) sent to Telegram for user {$userId}");
+                } catch (Exception $e) {
+                    error_log("Error sending check-in notification to Telegram: " . $e->getMessage());
+                }
             }
         }
     }
@@ -410,58 +503,68 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
     $userName = $user['full_name'] ?? $user['username'];
     $role = $user['role'] ?? 'unknown';
     
-    // إرسال إشعار واحد فقط عبر Telegram (صورة مع جميع البيانات)
+    // إرسال إشعار واحد فقط عبر Telegram (صورة مع جميع البيانات) مع منع التكرار
     $checkoutPhotoDeleted = false;
+    $telegramEnabled = isTelegramConfigured();
+    $checkoutDate = date('Y-m-d');
 
-    if (isTelegramConfigured()) {
-        // إذا كانت الصورة متوفرة، أرسلها مع البيانات
-        if ($photoBase64 && !empty(trim($photoBase64))) {
-            try {
-                $caption = "🔔 <b>تسجيل انصراف جديد</b>\n\n";
-                $caption .= "👤 <b>الاسم:</b> {$userName}\n";
-                $caption .= "🏷️ <b>الدور:</b> {$role}\n";
-                $caption .= "📅 <b>التاريخ:</b> " . date('Y-m-d') . "\n";
-                $caption .= "🕐 <b>الوقت:</b> " . date('H:i:s') . "\n";
-                $caption .= "⏱️ <b>ساعات هذا التسجيل:</b> {$workHours} ساعة\n";
-                $caption .= "📊 <b>ساعات اليوم:</b> {$todayHours} ساعة\n";
-                $caption .= "📈 <b>ساعات الشهر:</b> {$monthHours} ساعة";
-                
-                $photoForTelegram = $checkoutPhotoAbsolute ?: $photoBase64;
-                $sendAsBase64 = !$checkoutPhotoAbsolute;
+    if ($telegramEnabled) {
+        $alreadySent = hasAttendanceEventNotificationBeenSent($userId, 'checkout', $checkoutDate);
 
-                error_log("Check-out: Sending photo with data to Telegram for user {$userId}");
-                $telegramResult = sendTelegramPhoto($photoForTelegram, $caption, null, $sendAsBase64);
-                
-                if ($telegramResult) {
-                    error_log("Attendance check-out sent to Telegram successfully for user {$userId}");
-                    if ($checkoutPhotoAbsolute && file_exists($checkoutPhotoAbsolute)) {
-                        @unlink($checkoutPhotoAbsolute);
-                        $checkoutPhotoAbsolute = null;
-                        $checkoutPhotoDeleted = true;
-                    }
-                } else {
-                    error_log("Failed to send attendance check-out to Telegram for user {$userId}");
-                }
-            } catch (Exception $e) {
-                error_log("Error sending attendance check-out to Telegram: " . $e->getMessage());
-            }
+        if ($alreadySent) {
+            error_log("Skipping duplicate attendance check-out notification for user {$userId} on {$checkoutDate}");
         } else {
-            // إذا لم تكن هناك صورة، أرسل رسالة نصية فقط (مرة واحدة)
-            try {
-                $message = "🔔 <b>تسجيل انصراف جديد</b>\n\n";
-                $message .= "👤 <b>الاسم:</b> {$userName}\n";
-                $message .= "🏷️ <b>الدور:</b> {$role}\n";
-                $message .= "📅 <b>التاريخ:</b> " . date('Y-m-d') . "\n";
-                $message .= "🕐 <b>الوقت:</b> " . date('H:i:s') . "\n";
-                $message .= "⏱️ <b>ساعات هذا التسجيل:</b> {$workHours} ساعة\n";
-                $message .= "📊 <b>ساعات اليوم:</b> {$todayHours} ساعة\n";
-                $message .= "📈 <b>ساعات الشهر:</b> {$monthHours} ساعة\n";
-                $message .= "⚠️ <i>لم يتم التقاط صورة</i>";
-                
-                sendTelegramMessage($message);
-                error_log("Check-out notification (no photo) sent to Telegram for user {$userId}");
-            } catch (Exception $e) {
-                error_log("Error sending check-out notification to Telegram: " . $e->getMessage());
+            // إذا كانت الصورة متوفرة، أرسلها مع البيانات
+            if ($photoBase64 && !empty(trim($photoBase64))) {
+                try {
+                    $caption = "🔔 <b>تسجيل انصراف جديد</b>\n\n";
+                    $caption .= "👤 <b>الاسم:</b> {$userName}\n";
+                    $caption .= "🏷️ <b>الدور:</b> {$role}\n";
+                    $caption .= "📅 <b>التاريخ:</b> {$checkoutDate}\n";
+                    $caption .= "🕐 <b>الوقت:</b> " . date('H:i:s') . "\n";
+                    $caption .= "⏱️ <b>ساعات هذا التسجيل:</b> {$workHours} ساعة\n";
+                    $caption .= "📊 <b>ساعات اليوم:</b> {$todayHours} ساعة\n";
+                    $caption .= "📈 <b>ساعات الشهر:</b> {$monthHours} ساعة";
+                    
+                    $photoForTelegram = $checkoutPhotoAbsolute ?: $photoBase64;
+                    $sendAsBase64 = !$checkoutPhotoAbsolute;
+
+                    error_log("Check-out: Sending photo with data to Telegram for user {$userId}");
+                    $telegramResult = sendTelegramPhoto($photoForTelegram, $caption, null, $sendAsBase64);
+                    
+                    if ($telegramResult) {
+                        markAttendanceEventNotificationSent($userId, 'checkout', $checkoutDate, $lastCheckIn['id']);
+                        error_log("Attendance check-out sent to Telegram successfully for user {$userId}");
+                        if ($checkoutPhotoAbsolute && file_exists($checkoutPhotoAbsolute)) {
+                            @unlink($checkoutPhotoAbsolute);
+                            $checkoutPhotoAbsolute = null;
+                            $checkoutPhotoDeleted = true;
+                        }
+                    } else {
+                        error_log("Failed to send attendance check-out to Telegram for user {$userId}");
+                    }
+                } catch (Exception $e) {
+                    error_log("Error sending attendance check-out to Telegram: " . $e->getMessage());
+                }
+            } else {
+                // إذا لم تكن هناك صورة، أرسل رسالة نصية فقط (مرة واحدة)
+                try {
+                    $message = "🔔 <b>تسجيل انصراف جديد</b>\n\n";
+                    $message .= "👤 <b>الاسم:</b> {$userName}\n";
+                    $message .= "🏷️ <b>الدور:</b> {$role}\n";
+                    $message .= "📅 <b>التاريخ:</b> {$checkoutDate}\n";
+                    $message .= "🕐 <b>الوقت:</b> " . date('H:i:s') . "\n";
+                    $message .= "⏱️ <b>ساعات هذا التسجيل:</b> {$workHours} ساعة\n";
+                    $message .= "📊 <b>ساعات اليوم:</b> {$todayHours} ساعة\n";
+                    $message .= "📈 <ب>ساعات الشهر:</b> {$monthHours} ساعة\n";
+                    $message .= "⚠️ <i>لم يتم التقاط صورة</i>";
+                    
+                    sendTelegramMessage($message);
+                    markAttendanceEventNotificationSent($userId, 'checkout', $checkoutDate, $lastCheckIn['id']);
+                    error_log("Check-out notification (no photo) sent to Telegram for user {$userId}");
+                } catch (Exception $e) {
+                    error_log("Error sending check-out notification to Telegram: " . $e->getMessage());
+                }
             }
         }
     }

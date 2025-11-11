@@ -912,6 +912,264 @@ $lang = isset($translations) ? $translations : [];
 .salary-row:last-child:not(.final-row) {
     border-bottom: none;
 }
+
+/* سجل طلبات السلف */
+.advance-history-row {
+    margin-top: 1rem;
+}
+
+.advance-history-row:first-of-type {
+    margin-top: 0;
+}
+
+.advance-request-card {
+    border-radius: 20px;
+    border: 1px solid #e4e9f2;
+    background: #ffffff;
+    padding: 1.5rem;
+    box-shadow: 0 18px 36px rgba(15, 42, 91, 0.08);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    position: relative;
+}
+
+.advance-request-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 22px 40px rgba(15, 42, 91, 0.12);
+}
+
+.advance-card--pending {
+    border-left: 6px solid #f0ad4e;
+}
+
+.advance-card--accountant {
+    border-left: 6px solid #0dcaf0;
+}
+
+.advance-card--approved {
+    border-left: 6px solid #198754;
+}
+
+.advance-card--rejected {
+    border-left: 6px solid #dc3545;
+}
+
+.advance-request-card__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.advance-request-card__title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.advance-request-card__number {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: #1b1f3b;
+}
+
+.advance-request-card__date {
+    font-size: 0.9rem;
+    color: #6c757d;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.advance-request-card__status {
+    font-weight: 600;
+    padding: 0.45rem 0.9rem;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.82rem;
+    letter-spacing: 0.3px;
+}
+
+.advance-request-card__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.advance-request-card__meta-item {
+    min-width: 150px;
+}
+
+.advance-request-card__meta-item strong {
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.advance-request-card__meta-item span {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1b1f3b;
+}
+
+.advance-request-card__hint {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-bottom: 1rem;
+}
+
+.advance-request-card__reason {
+    background: linear-gradient(135deg, rgba(102,126,234,0.08) 0%, rgba(118,75,162,0.08) 100%);
+    border-radius: 16px;
+    padding: 0.9rem 1.1rem;
+    font-size: 0.95rem;
+    color: #3d4465;
+    margin-bottom: 1rem;
+    line-height: 1.6;
+}
+
+.advance-request-card__reason.is-rejected {
+    background: linear-gradient(135deg, rgba(220,53,69,0.12) 0%, rgba(255,0,0,0.05) 100%);
+    color: #a71d2a;
+}
+
+.advance-request-card__deduction {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-size: 0.9rem;
+    color: #495057;
+    margin-bottom: 1.2rem;
+}
+
+.advance-timeline {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 1.5rem;
+    border-left: 2px solid #e3e7f3;
+}
+
+.advance-timeline__item {
+    position: relative;
+    padding-left: 0.6rem;
+    margin-bottom: 1rem;
+}
+
+.advance-timeline__item::before {
+    content: '';
+    position: absolute;
+    left: -1.05rem;
+    top: 0.2rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 50%;
+    background: #adb5bd;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 3px rgba(173, 181, 189, 0.2);
+}
+
+.advance-timeline__item.is-done::before {
+    background: #0d6efd;
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.18);
+}
+
+.advance-timeline__item.is-warning::before {
+    background: #f0ad4e;
+    box-shadow: 0 0 0 3px rgba(240, 173, 78, 0.2);
+}
+
+.advance-timeline__item.is-pending::before {
+    background: #ced4da;
+    box-shadow: 0 0 0 3px rgba(206, 212, 218, 0.25);
+}
+
+.advance-timeline__item.is-success::before {
+    background: #198754;
+    box-shadow: 0 0 0 3px rgba(25, 135, 84, 0.2);
+}
+
+.advance-timeline__item.is-danger::before {
+    background: #dc3545;
+    box-shadow: 0 0 0 3px rgba(220, 53, 69, 0.22);
+}
+
+.advance-timeline__title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #1b1f3b;
+    display: block;
+}
+
+.advance-timeline__meta {
+    display: block;
+    font-size: 0.78rem;
+    color: #72809d;
+    margin-top: 0.25rem;
+}
+
+.advance-timeline__description {
+    font-size: 0.85rem;
+    color: #5a607f;
+    margin-top: 0.35rem;
+    line-height: 1.5;
+}
+
+.advance-empty-state {
+    text-align: center;
+    padding: 2.25rem 1.5rem;
+    border: 2px dashed #d7dcec;
+    border-radius: 18px;
+    background: #f8f9fc;
+    color: #6c757d;
+}
+
+.advance-empty-state i {
+    font-size: 2.5rem;
+    margin-bottom: 0.85rem;
+    display: block;
+    color: #adb5bd;
+}
+
+.advance-empty-state small {
+    display: block;
+    margin-top: 0.4rem;
+    font-size: 0.8rem;
+    color: #9499b7;
+}
+
+@media (max-width: 768px) {
+    .advance-request-card {
+        padding: 1.25rem;
+    }
+
+    .advance-request-card__header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .advance-request-card__status {
+        align-self: flex-start;
+    }
+
+    .advance-request-card__meta {
+        flex-direction: column;
+        gap: 0.9rem;
+    }
+
+    .advance-timeline {
+        padding-left: 1rem;
+    }
+
+    .advance-timeline__item::before {
+        left: -0.95rem;
+    }
+}
 </style>
 
 <div class="salary-details-modern">
