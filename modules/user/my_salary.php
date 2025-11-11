@@ -320,25 +320,61 @@ $salaryData = getSalarySummary($currentUser['id'], $selectedMonth, $selectedYear
 // الحصول على طلبات السلفة من الجدول الموحد salary_advances
 $advanceRequests = [];
 if (ensureSalaryAdvancesTable($db)) {
-    $advanceRequests = $db->query(
-        "SELECT 
+    $salaryColumns = [];
+    $salaryMonthColumn = null;
+    $salaryYearColumn = null;
+    $salaryTotalColumn = null;
+
+    try {
+        $salaryColumns = $db->query("SHOW COLUMNS FROM salaries");
+    } catch (Throwable $salaryColumnsError) {
+        error_log('Failed to read salaries columns: ' . $salaryColumnsError->getMessage());
+    }
+
+    if (is_array($salaryColumns)) {
+        foreach ($salaryColumns as $column) {
+            $field = $column['Field'] ?? '';
+            if ($field === 'month' || $field === 'salary_month') {
+                $salaryMonthColumn = $salaryMonthColumn ?? $field;
+            } elseif ($field === 'year' || $field === 'salary_year') {
+                $salaryYearColumn = $salaryYearColumn ?? $field;
+            } elseif ($field === 'total_amount' || $field === 'amount' || $field === 'net_total') {
+                $salaryTotalColumn = $salaryTotalColumn ?? $field;
+            }
+        }
+    }
+
+    $salaryMonthSelect = $salaryMonthColumn
+        ? "s.{$salaryMonthColumn} AS deducted_salary_month"
+        : "NULL AS deducted_salary_month";
+
+    $salaryYearSelect = $salaryYearColumn
+        ? "s.{$salaryYearColumn} AS deducted_salary_year"
+        : "NULL AS deducted_salary_year";
+
+    $salaryTotalSelect = $salaryTotalColumn
+        ? "s.{$salaryTotalColumn} AS deducted_salary_total"
+        : "NULL AS deducted_salary_total";
+
+    $advanceSelectSql = "
+        SELECT 
             sa.*,
             accountant.full_name AS accountant_name,
             accountant.username AS accountant_username,
             manager.full_name AS manager_name,
             manager.username AS manager_username,
-            s.month AS deducted_salary_month,
-            s.year AS deducted_salary_year,
-            s.total_amount AS deducted_salary_total
-         FROM salary_advances sa
-         LEFT JOIN users accountant ON sa.accountant_approved_by = accountant.id
-         LEFT JOIN users manager ON sa.manager_approved_by = manager.id
-         LEFT JOIN salaries s ON sa.deducted_from_salary_id = s.id
-         WHERE sa.user_id = ?
-         ORDER BY sa.created_at DESC 
-         LIMIT 10",
-        [$currentUser['id']]
-    );
+            {$salaryMonthSelect},
+            {$salaryYearSelect},
+            {$salaryTotalSelect}
+        FROM salary_advances sa
+        LEFT JOIN users accountant ON sa.accountant_approved_by = accountant.id
+        LEFT JOIN users manager ON sa.manager_approved_by = manager.id
+        LEFT JOIN salaries s ON sa.deducted_from_salary_id = s.id
+        WHERE sa.user_id = ?
+        ORDER BY sa.created_at DESC 
+        LIMIT 10";
+
+    $advanceRequests = $db->query($advanceSelectSql, [$currentUser['id']]);
 }
 
 // الحصول على طلبات زيادة سعر الساعة

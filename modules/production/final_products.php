@@ -1214,10 +1214,27 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         const modalElement = document.getElementById('batchDetailsModal');
+        if (!modalElement) {
+            const targetUrl = fallbackUrl && fallbackUrl.length
+                ? fallbackUrl
+                : `${batchDetailsFallbackBase}${encodeURIComponent(batchNumber)}`;
+            window.location.href = targetUrl;
+            return;
+        }
+
         const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement);
         const loader = document.getElementById('batchDetailsLoading');
         const errorAlert = document.getElementById('batchDetailsError');
         const contentWrapper = document.getElementById('batchDetailsContent');
+
+        if (!loader || !errorAlert || !contentWrapper) {
+            modalInstance.hide();
+            const targetUrl = fallbackUrl && fallbackUrl.length
+                ? fallbackUrl
+                : `${batchDetailsFallbackBase}${encodeURIComponent(batchNumber)}`;
+            window.location.href = targetUrl;
+            return;
+        }
 
         modalElement.querySelector('.modal-title').textContent = productName
             ? `تفاصيل التشغيلة - ${productName}`
