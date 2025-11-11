@@ -641,6 +641,155 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ], JSON_UNESCAPED_UNICODE);
         }
         exit;
+    } elseif ($action === 'create_packaging_material') {
+        if (($currentUser['role'] ?? '') !== 'manager') {
+            $error = 'غير مصرح لك بإضافة أدوات التعبئة.';
+        } else {
+            if (!$usePackagingTable) {
+                try {
+                    $db->execute("
+                        CREATE TABLE IF NOT EXISTS `packaging_materials` (
+                          `id` int(11) NOT NULL AUTO_INCREMENT,
+                          `material_id` varchar(50) NOT NULL COMMENT 'معرف فريد مثل PKG-001',
+                          `name` varchar(255) NOT NULL COMMENT 'اسم الأداة',
+                          `type` varchar(100) DEFAULT NULL COMMENT 'نوع الأداة',
+                          `specifications` varchar(255) DEFAULT NULL COMMENT 'المواصفات',
+                          `quantity` decimal(15,4) NOT NULL DEFAULT 0.0000,
+                          `unit` varchar(50) DEFAULT NULL,
+                          `unit_price` decimal(15,2) DEFAULT 0.00,
+                          `status` enum('active','inactive') DEFAULT 'active',
+                          `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                          `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                          PRIMARY KEY (`id`),
+                          UNIQUE KEY `material_id` (`material_id`),
+                          KEY `type` (`type`),
+                          KEY `status` (`status`)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    ");
+                    $usePackagingTable = true;
+                } catch (Exception $initError) {
+                    $error = 'تعذّر تهيئة جدول أدوات التعبئة: ' . $initError->getMessage();
+                }
+            }
+
+            if (empty($error)) {
+                try {
+                    $aliasColumnCheck = $db->queryOne("SHOW COLUMNS FROM packaging_materials LIKE 'alias'");
+                    if (empty($aliasColumnCheck)) {
+                        $db->execute("ALTER TABLE `packaging_materials` ADD COLUMN `alias` VARCHAR(255) DEFAULT NULL AFTER `name`");
+                    }
+                } catch (Throwable $aliasInitError) {
+                    $error = 'تعذّر تجهيز جدول أدوات التعبئة: ' . $aliasInitError->getMessage();
+                }
+            }
+
+            $materialCode = trim((string)($_POST['material_id'] ?? ''));
+            $name = trim((string)($_POST['name'] ?? ''));
+            $typeValue = trim((string)($_POST['type'] ?? ''));
+            $unitValue = trim((string)($_POST['unit'] ?? ''));
+            $aliasValue = trim((string)($_POST['alias'] ?? ''));
+            $specificationsValue = trim((string)($_POST['specifications'] ?? ''));
+            $statusValue = (string)($_POST['status'] ?? 'active');
+            $initialQuantityRaw = $_POST['initial_quantity'] ?? 0;
+            $unitPriceRaw = $_POST['unit_price'] ?? 0;
+
+            $allowedStatuses = ['active', 'inactive'];
+            if (!in_array($statusValue, $allowedStatuses, true)) {
+                $statusValue = 'active';
+            }
+
+            $initialQuantity = is_numeric($initialQuantityRaw) ? floatval($initialQuantityRaw) : 0.0;
+            if (!is_finite($initialQuantity)) {
+                $initialQuantity = 0.0;
+            }
+            $initialQuantity = max(0.0, round($initialQuantity, 4));
+
+            $unitPrice = is_numeric($unitPriceRaw) ? floatval($unitPriceRaw) : 0.0;
+            if (!is_finite($unitPrice)) {
+                $unitPrice = 0.0;
+            }
+            $unitPrice = max(0.0, round($unitPrice, 2));
+
+            if (empty($error)) {
+                if ($materialCode === '') {
+                    $error = 'يرجى إدخال كود الأداة.';
+                } elseif (preg_match('/\s/u', $materialCode)) {
+                    $error = 'كود الأداة يجب ألا يحتوي على مسافات.';
+                } elseif (mb_strlen($materialCode, 'UTF-8') > 50) {
+                    $error = 'كود الأداة يتجاوز الحد الأقصى للطول (50 حرفاً).';
+                } elseif ($name === '') {
+                    $error = 'يرجى إدخال اسم الأداة.';
+                }
+            }
+
+            if (empty($error)) {
+                try {
+                    $db->beginTransaction();
+
+                    $duplicate = $db->queryOne(
+                        "SELECT id FROM packaging_materials WHERE material_id = ? LIMIT 1",
+                        [$materialCode]
+                    );
+
+                    if ($duplicate) {
+                        throw new Exception('يوجد أداة تعبئة أخرى بنفس الكود.');
+                    }
+
+                    $insertResult = $db->execute(
+                        "INSERT INTO packaging_materials 
+                         (material_id, name, alias, type, specifications, quantity, unit, unit_price, status, created_at) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                        [
+                            $materialCode,
+                            $name,
+                            $aliasValue !== '' ? $aliasValue : null,
+                            $typeValue !== '' ? $typeValue : null,
+                            $specificationsValue !== '' ? $specificationsValue : null,
+                            $initialQuantity,
+                            $unitValue !== '' ? $unitValue : null,
+                            $unitPrice,
+                            $statusValue
+                        ]
+                    );
+
+                    $newId = isset($insertResult['insert_id']) && $insertResult['insert_id'] > 0
+                        ? (int)$insertResult['insert_id']
+                        : (int)$db->getLastInsertId();
+
+                    logAudit(
+                        $currentUser['id'],
+                        'create_packaging_material',
+                        'packaging_materials',
+                        $newId,
+                        null,
+                        [
+                            'material_id' => $materialCode,
+                            'name' => $name,
+                            'initial_quantity' => $initialQuantity,
+                            'unit' => $unitValue !== '' ? $unitValue : null,
+                            'status' => $statusValue
+                        ]
+                    );
+
+                    $db->commit();
+
+                    $successMessage = sprintf('تم إضافة أداة التعبئة "%s" بنجاح.', $name);
+                    $redirectParams = ['page' => 'packaging_warehouse'];
+                    foreach (['search', 'material_id', 'date_from', 'date_to'] as $param) {
+                        if (!empty($_GET[$param])) {
+                            $redirectParams[$param] = $_GET[$param];
+                        }
+                    }
+
+                    preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+                } catch (Exception $e) {
+                    if ($db->inTransaction()) {
+                        $db->rollBack();
+                    }
+                    $error = 'حدث خطأ أثناء إضافة الأداة: ' . $e->getMessage();
+                }
+            }
+        }
     } elseif ($action === 'use_packaging_material') {
         header('Content-Type: application/json; charset=utf-8');
 
@@ -1651,6 +1800,17 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
     <h2 class="mb-0"><i class="bi bi-box-seam me-2"></i>مخزن أدوات التعبئة</h2>
     <div class="d-flex flex-wrap gap-2">
+        <?php if (($currentUser['role'] ?? '') === 'manager'): ?>
+            <button
+                type="button"
+                class="btn btn-primary"
+                data-bs-toggle="modal"
+                data-bs-target="#createMaterialModal"
+            >
+                <i class="bi bi-plus-circle me-1"></i>
+                إضافة أداة جديدة
+            </button>
+        <?php endif; ?>
         <button
             type="button"
             class="btn btn-outline-secondary"
@@ -2103,6 +2263,122 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
     </div>
 </div>
 
+<?php if (($currentUser['role'] ?? '') === 'manager'): ?>
+<div class="modal fade" id="createMaterialModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form method="POST" id="createMaterialForm">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إضافة أداة تعبئة جديدة</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="action" value="create_packaging_material">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">كود الأداة <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="material_id"
+                                   required
+                                   maxlength="50"
+                                   placeholder="مثال: PKG-001">
+                            <small class="text-muted">يجب أن يكون الكود فريداً ولا يتكرر مع أدوات أخرى.</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">اسم الأداة <span class="text-danger">*</span></label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="name"
+                                   required
+                                   maxlength="255"
+                                   placeholder="اسم الأداة">
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label class="form-label">الفئة / النوع</label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="type"
+                                   maxlength="100"
+                                   placeholder="مثال: عبوات زجاج">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">الوحدة</label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="unit"
+                                   maxlength="50"
+                                   placeholder="مثال: قطعة">
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label class="form-label">الكمية الابتدائية</label>
+                            <div class="input-group">
+                                <input type="number"
+                                       class="form-control"
+                                       name="initial_quantity"
+                                       step="0.01"
+                                       min="0"
+                                       value="0"
+                                       placeholder="0.00">
+                                <span class="input-group-text initial-quantity-unit-label">وحدة</span>
+                            </div>
+                            <small class="text-muted">يمكن تعديل الكمية لاحقاً من خلال زر "إضافة كمية".</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">سعر الوحدة (اختياري)</label>
+                            <div class="input-group">
+                                <span class="input-group-text">ج.م</span>
+                                <input type="number"
+                                       class="form-control"
+                                       name="unit_price"
+                                       step="0.01"
+                                       min="0"
+                                       placeholder="0.00">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label class="form-label">الاسم المستعار (اختياري)</label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="alias"
+                                   maxlength="255"
+                                   placeholder="اسم مختصر للأداة">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">الحالة</label>
+                            <select class="form-select" name="status">
+                                <option value="active" selected>نشطة</option>
+                                <option value="inactive">غير نشطة</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <label class="form-label">المواصفات / الملاحظات</label>
+                        <textarea class="form-control"
+                                  name="specifications"
+                                  rows="3"
+                                  maxlength="500"
+                                  placeholder="أضف معلومات تساعد في التعرف على الأداة (اختياري)"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle me-2"></i>حفظ الأداة
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="modal fade" id="packagingReportModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-md">
         <div class="modal-content">
@@ -2357,6 +2633,38 @@ document.addEventListener('DOMContentLoaded', function () {
     const reportModalElement = document.getElementById('packagingReportModal');
     const viewButton = document.getElementById('packagingReportViewBtn');
     const printButton = document.getElementById('packagingReportPrintBtn');
+    const createMaterialForm = document.getElementById('createMaterialForm');
+    const createMaterialModal = document.getElementById('createMaterialModal');
+
+    if (createMaterialForm) {
+        const unitInput = createMaterialForm.querySelector('input[name="unit"]');
+        const unitSuffix = createMaterialForm.querySelector('.initial-quantity-unit-label');
+
+        const refreshUnitSuffix = () => {
+            if (!unitSuffix) {
+                return;
+            }
+            const unitValue = unitInput ? unitInput.value.trim() : '';
+            unitSuffix.textContent = unitValue !== '' ? unitValue : 'وحدة';
+        };
+
+        refreshUnitSuffix();
+
+        if (unitInput) {
+            unitInput.addEventListener('input', refreshUnitSuffix);
+        }
+
+        createMaterialForm.addEventListener('reset', () => {
+            setTimeout(refreshUnitSuffix, 0);
+        });
+
+        if (createMaterialModal) {
+            createMaterialModal.addEventListener('hidden.bs.modal', () => {
+                createMaterialForm.reset();
+                refreshUnitSuffix();
+            });
+        }
+    }
 
     const openInNewTab = (url) => {
         if (!url) {

@@ -4,25 +4,13 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
 session_start([
-    'cookie_lifetime' => 0,
+    'cookie_lifetime' => 315360000, // 10 years
     'cookie_httponly' => true,
     'cookie_secure' => isset($_SERVER['HTTPS']),
     'use_strict_mode' => true,
 ]);
 
-$sessionTimeout = 15 * 60; // 15 minutes
 $now = time();
-
-if (isset($_SESSION['reader_last_activity']) && ($now - $_SESSION['reader_last_activity']) > $sessionTimeout) {
-    session_unset();
-    session_destroy();
-    echo json_encode([
-        'success' => false,
-        'message' => 'انتهت صلاحية الجلسة. يرجى إعادة تحميل الصفحة.'
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
 $_SESSION['reader_last_activity'] = $now;
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
