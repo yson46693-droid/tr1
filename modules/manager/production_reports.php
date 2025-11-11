@@ -336,6 +336,22 @@ $csrfToken = generateCSRFToken();
 <div class="card shadow-sm mb-4">
     <div class="card-body py-3">
         <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-primary js-report-nav" type="button" data-target="#productionReportsBlock">
+                <i class="bi bi-graph-up-arrow me-1"></i>
+                تقارير الإنتاج
+            </button>
+            <button class="btn btn-outline-primary js-report-nav" type="button" data-target="#financialReportsSection">
+                <i class="bi bi-cash-coin me-1"></i>
+                تقارير مالية
+            </button>
+        </div>
+    </div>
+</div>
+
+<section id="productionReportsBlock" class="mb-5">
+<div class="card shadow-sm mb-4">
+    <div class="card-body py-3">
+        <div class="d-flex flex-wrap gap-2">
             <button class="btn btn-outline-primary js-report-nav" type="button" data-target="#productionReportsSection">
                 <i class="bi bi-gear-wide-connected me-1"></i>
                 إعداد التقرير
@@ -522,6 +538,79 @@ $recordsCount = count($combinedRows);
         <?php renderCombinedReportTable($combinedRows, $combinedTotals); ?>
     </div>
 </div>
+</section>
+
+<section id="financialReportsSection" class="mb-5">
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-1"><i class="bi bi-cash-stack me-2"></i>تقارير مالية</h2>
+            <p class="text-muted mb-0">نظرة عامة على المعاملات والتحصيلات المالية</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            <a class="btn btn-outline-secondary" href="<?php echo htmlspecialchars(getDashboardUrl('accountant')); ?>?page=collections">
+                <i class="bi bi-wallet2 me-1"></i>
+                ملف التحصيلات
+            </a>
+            <a class="btn btn-outline-secondary" href="<?php echo htmlspecialchars(getDashboardUrl('accountant')); ?>?page=invoices">
+                <i class="bi bi-receipt me-1"></i>
+                إدارة الفواتير
+            </a>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-3 col-sm-6">
+            <div class="card shadow-sm h-100 border-success-subtle">
+                <div class="card-body">
+                    <div class="text-muted small mb-1">إجمالي الدخل (الشهر الحالي)</div>
+                    <div class="fs-4 fw-semibold text-success">—</div>
+                    <small class="text-muted d-block mt-2">يتم جلب البيانات من قسم المحاسبة</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="card shadow-sm h-100 border-danger-subtle">
+                <div class="card-body">
+                    <div class="text-muted small mb-1">إجمالي المصروفات (الشهر الحالي)</div>
+                    <div class="fs-4 fw-semibold text-danger">—</div>
+                    <small class="text-muted d-block mt-2">تأكد من تسجيل جميع المصروفات في النظام</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="card shadow-sm h-100 border-warning-subtle">
+                <div class="card-body">
+                    <div class="text-muted small mb-1">الفواتير المستحقة</div>
+                    <div class="fs-4 fw-semibold text-warning">—</div>
+                    <small class="text-muted d-block mt-2">راجع قائمة الفواتير لتسريع التحصيل</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-3 col-sm-6">
+            <div class="card shadow-sm h-100 border-primary-subtle">
+                <div class="card-body">
+                    <div class="text-muted small mb-1">آخر تحديث مالي</div>
+                    <div class="fs-4 fw-semibold text-primary">—</div>
+                    <small class="text-muted d-block mt-2">سيتم إظهار آخر عملية مالية تمت</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-info-circle me-2"></i>ملاحظات</span>
+        </div>
+        <div class="card-body">
+            <p class="mb-2">تعمل هذه الصفحة كمنصة موحدة لعرض التقارير المالية. لتمكين عرض الأرقام تلقائياً:</p>
+            <ul class="mb-0 text-muted small">
+                <li>تأكد من تسجيل جميع العمليات المالية في قسم المحاسبة.</li>
+                <li>استخدم أقسام التحصيلات والفواتير لتحديث الأرصدة والمستحقات.</li>
+                <li>يمكن تطوير تقارير مخصصة وربطها هنا حسب احتياج الإدارة.</li>
+            </ul>
+        </div>
+    </div>
+</section>
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
