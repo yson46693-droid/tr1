@@ -729,26 +729,40 @@ document.addEventListener('DOMContentLoaded', function () {
 <!-- البحث -->
 <div class="card shadow-sm mb-4">
     <div class="card-body">
-        <form method="GET" action="" class="row g-3">
+        <form method="GET" action="" class="row g-2 g-md-3 align-items-end">
             <input type="hidden" name="page" value="customers">
             <?php if ($section): ?>
                 <input type="hidden" name="section" value="<?php echo htmlspecialchars($section); ?>">
             <?php endif; ?>
-            <div class="col-md-8">
-                <input type="text" class="form-control" name="search" 
-                       value="<?php echo htmlspecialchars($search); ?>" 
-                       placeholder="ابحث بالاسم، رقم الهاتف، أو العنوان...">
+            <div class="col-12 col-md-6 col-lg-5">
+                <label for="customerSearch" class="visually-hidden">بحث عن العملاء</label>
+                <div class="input-group input-group-sm shadow-sm">
+                    <span class="input-group-text bg-light text-muted border-end-0">
+                        <i class="bi bi-search"></i>
+                    </span>
+                    <input
+                        type="text"
+                        class="form-control border-start-0"
+                        id="customerSearch"
+                        name="search"
+                        value="<?php echo htmlspecialchars($search); ?>"
+                        placeholder="بحث سريع بالاسم أو الهاتف"
+                        autocomplete="off"
+                    >
+                </div>
             </div>
-            <div class="col-md-2">
-                <select class="form-select" name="debt_status">
+            <div class="col-6 col-md-3 col-lg-3">
+                <label for="debtStatusFilter" class="visually-hidden">تصفية حسب حالة الديون</label>
+                <select class="form-select form-select-sm shadow-sm" id="debtStatusFilter" name="debt_status">
                     <option value="all" <?php echo $debtStatus === 'all' ? 'selected' : ''; ?>>الكل</option>
                     <option value="debtor" <?php echo $debtStatus === 'debtor' ? 'selected' : ''; ?>>مدين</option>
                     <option value="clear" <?php echo $debtStatus === 'clear' ? 'selected' : ''; ?>>غير مدين</option>
                 </select>
             </div>
-            <div class="col-md-2">
-                <button type="submit" class="btn btn-primary w-100">
-                    <i class="bi bi-search me-2"></i>بحث
+            <div class="col-6 col-md-3 col-lg-2 d-grid">
+                <button type="submit" class="btn btn-primary btn-sm">
+                    <i class="bi bi-search me-1"></i>
+                    <span>بحث</span>
                 </button>
             </div>
         </form>
