@@ -301,9 +301,21 @@ $finishedProductsTableExists = $db->queryOne("SHOW TABLES LIKE 'finished_product
 if (!empty($finishedProductsTableExists)) {
     try {
         $finishedProductsRows = $db->query("
-            SELECT id, batch_number, product_name, production_date, expiry_date, quantity_produced
-            FROM finished_products
-            ORDER BY id DESC
+            SELECT 
+                fp.id,
+                fp.batch_id,
+                fp.batch_number,
+                fp.product_id,
+                COALESCE(pr.name, fp.product_name) AS product_name,
+                fp.production_date,
+                fp.quantity_produced,
+                GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
+            FROM finished_products fp
+            LEFT JOIN products pr ON fp.product_id = pr.id
+            LEFT JOIN batch_workers bw ON fp.batch_id = bw.batch_id
+            LEFT JOIN users u ON bw.employee_id = u.id
+            GROUP BY fp.id
+            ORDER BY fp.production_date DESC, fp.id DESC
             LIMIT 150
         ");
         $finishedProductsCount = is_array($finishedProductsRows) ? count($finishedProductsRows) : 0;
@@ -389,8 +401,17 @@ require_once __DIR__ . '/../../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = isset($translations) ? $translations : [];
 ?>
 
-<div class="page-header mb-4 d-flex justify-content-between align-items-center flex-wrap">
-    <h2 class="mb-0"><i class="bi bi-boxes me-2"></i>المنتجات النهائية</h2>
+<div class="page-header mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h2 class="mb-0"><i class="bi bi-boxes me-2"></i>جدول المنتجات</h2>
+    <div class="d-flex flex-wrap gap-2">
+        <?php
+        $transferUrl = getDashboardUrl('sales') . '?page=vehicle_inventory';
+        ?>
+        <a class="btn btn-outline-primary" href="<?php echo htmlspecialchars($transferUrl); ?>">
+            <i class="bi bi-arrow-left-right me-1"></i>
+            نقل منتجات بين المخازن
+        </a>
+    </div>
 </div>
 
 <?php if ($error): ?>
@@ -409,284 +430,128 @@ $lang = isset($translations) ? $translations : [];
     </div>
 <?php endif; ?>
 
-<?php if (!empty($finishedProductsTableExists)): ?>
-    <div class="card shadow-sm mb-4">
-        <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">
-                <i class="bi bi-archive-fill me-2"></i>
-                سجل التشغيلات المكتملة
-            </h5>
-            <span class="badge bg-light text-dark">
-                <?php echo number_format($finishedProductsCount); ?> تشغيلة
-            </span>
-        </div>
-        <div class="card-body">
-            <?php if (!empty($finishedProductsRows)): ?>
-                <div class="table-responsive">
-                    <table class="table table-striped align-middle mb-0">
-                        <thead class="table-light">
-                            <tr>
-                                <th>رقم التشغيله</th>
-                                <th>المنتج</th>
-                                <th>تاريخ الإنتاج</th>
-                                <th>تاريخ الانتهاء</th>
-                                <th>الكمية المنتجة</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <?php foreach ($finishedProductsRows as $finishedRow): ?>
-                                <tr>
-                                    <td><?php echo htmlspecialchars($finishedRow['batch_number'] ?? '-'); ?></td>
-                                    <td><?php echo htmlspecialchars($finishedRow['product_name'] ?? '-'); ?></td>
-                                    <td><?php echo !empty($finishedRow['production_date']) ? htmlspecialchars(formatDate($finishedRow['production_date'])) : '-'; ?></td>
-                                    <td><?php echo !empty($finishedRow['expiry_date']) ? htmlspecialchars(formatDate($finishedRow['expiry_date'])) : '-'; ?></td>
-                                    <td><?php echo number_format((float)($finishedRow['quantity_produced'] ?? 0), 2); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-            <?php else: ?>
-                <div class="alert alert-info mb-0">
-                    <i class="bi bi-info-circle me-2"></i>
-                    لا توجد منتجات نهائية مسجلة حتى الآن.
-                </div>
-            <?php endif; ?>
-        </div>
-    </div>
-<?php endif; ?>
-
-<div class="row g-3 mb-4">
-    <div class="col-lg-6 col-md-6 col-sm-6">
-        <div class="card shadow-sm h-100">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-card-icon green">
-                    <i class="bi bi-box-arrow-in-down"></i>
-                </div>
-                <div class="ms-3">
-                    <div class="text-muted small">إجمالي الكمية المتاحة</div>
-                    <div class="h5 mb-0"><?php echo number_format($totalAvailableSum, 2); ?></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3 col-sm-6">
-        <div class="card shadow-sm h-100">
-            <div class="card-body d-flex align-items-center">
-                <div class="stat-card-icon blue">
-                    <i class="bi bi-graph-up-arrow"></i>
-                </div>
-                <div class="ms-3">
-                    <div class="text-muted small">إجمالي الإنتاج</div>
-                    <div class="h5 mb-0"><?php echo number_format($totalProducedSum, 2); ?></div>
-                    <div class="text-muted small mt-1"><i class="bi bi-flag me-1"></i>عمليات الإنتاج: <?php echo number_format($totalProductionCountSum); ?></div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- جدول المنتجات النهائية -->
 <div class="card shadow-sm">
     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-list-ul me-2"></i>المنتجات النهائية (<?php echo $totalProducts; ?>)</h5>
+        <h5 class="mb-0"><i class="bi bi-archive-fill me-2"></i>جدول المنتجات</h5>
+        <span class="badge bg-light text-dark">
+            <?php echo number_format($finishedProductsCount); ?> عنصر
+        </span>
     </div>
     <div class="card-body">
-        <div class="table-responsive-lg dashboard-table-wrapper mobile-production-table-wrapper">
-            <table class="table dashboard-table align-middle">
-                <thead class="table-light">
-                    <tr>
-                        <th style="min-width:200px;">المنتج</th>
-                        <th style="min-width:200px;">ملخص الإنتاج</th>
-                        <th style="min-width:180px;">الفترة الزمنية</th>
-                        <th style="min-width:180px;">العمال المشاركون</th>
-                        <th style="min-width:280px;">سجلات الإنتاج التفصيلية</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php if (empty($finalProducts)): ?>
+        <?php if (!empty($finishedProductsRows)): ?>
+            <div class="table-responsive dashboard-table-wrapper">
+                <table class="table dashboard-table dashboard-table--no-hover align-middle mb-0">
+                    <thead class="table-light">
                         <tr>
-                            <td colspan="5" class="text-center text-muted py-4">
-                                لا توجد منتجات نهائية
-                            </td>
+                            <th>رقم التشغيله</th>
+                            <th>معرّف المنتج</th>
+                            <th>اسم المنتج</th>
+                            <th>تاريخ الإنتاج</th>
+                            <th>الكمية المنتجة</th>
+                            <th>العمال المشاركون</th>
+                            <th>إجراءات</th>
                         </tr>
-                    <?php else: ?>
-                        <?php foreach ($finalProducts as $product): ?>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($finishedProductsRows as $finishedRow): ?>
                             <?php
-                            $productId = (int)($product['product_id'] ?? 0);
-                            $availableQty = (float)($product['available_quantity'] ?? 0);
-                            $producedQty = (float)($product['total_produced'] ?? 0);
-                            $unitPrice = isset($product['unit_price']) ? (float)$product['unit_price'] : 0.0;
-                            $productionCount = (int)($product['production_count'] ?? 0);
-                            $estimatedValue = $unitPrice > 0 ? $unitPrice * $availableQty : 0.0;
-                            $details = $productDetailsMap[$productId] ?? [];
-                            $workersRaw = $product['workers'] ?? '';
-                            $workersList = array_filter(array_map('trim', explode(',', (string)$workersRaw)));
+                                $batchNumber = $finishedRow['batch_number'] ?? '';
+                                $productIdValue = $finishedRow['product_id'] ?? null;
+                                $workersList = array_filter(array_map('trim', explode(',', (string)($finishedRow['workers'] ?? ''))));
+                                $workersDisplay = !empty($workersList)
+                                    ? implode('، ', array_map('htmlspecialchars', $workersList))
+                                    : 'غير محدد';
+                                $viewUrl = $batchNumber
+                                    ? getRelativeUrl('production.php?page=batch_numbers&batch_number=' . urlencode($batchNumber))
+                                    : null;
                             ?>
                             <tr>
+                                <td><?php echo htmlspecialchars($batchNumber ?: '—'); ?></td>
+                                <td><?php echo $productIdValue !== null ? htmlspecialchars((string)$productIdValue) : '—'; ?></td>
+                                <td><?php echo htmlspecialchars($finishedRow['product_name'] ?? 'غير محدد'); ?></td>
+                                <td><?php echo !empty($finishedRow['production_date']) ? htmlspecialchars(formatDate($finishedRow['production_date'])) : '—'; ?></td>
+                                <td><?php echo number_format((float)($finishedRow['quantity_produced'] ?? 0), 2); ?></td>
+                                <td><?php echo $workersDisplay; ?></td>
                                 <td>
-                                    <div class="fw-semibold"><?php echo htmlspecialchars($product['product_name'] ?? 'غير محدد'); ?></div>
-                                    <?php if (!empty($product['product_category'])): ?>
-                                        <div class="text-muted small mt-1">
-                                            <i class="bi bi-tag me-1"></i><?php echo htmlspecialchars($product['product_category']); ?>
-                                        </div>
-                                    <?php endif; ?>
-                                    <div class="text-muted small mt-1">
-                                        <i class="bi bi-hash me-1"></i>معرّف المنتج: <?php echo $productId; ?>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <?php if ($viewUrl): ?>
+                                            <a class="btn btn-primary" href="<?php echo htmlspecialchars($viewUrl); ?>">
+                                                <i class="bi bi-eye"></i> عرض
+                                            </a>
+                                        <?php endif; ?>
+                                        <?php if ($batchNumber): ?>
+                                        <button type="button"
+                                                class="btn btn-outline-secondary js-copy-batch"
+                                                data-batch="<?php echo htmlspecialchars($batchNumber); ?>">
+                                            <i class="bi bi-clipboard"></i>
+                                            <span class="d-none d-sm-inline">نسخ الرقم</span>
+                                        </button>
+                                        <?php endif; ?>
+                                        <?php if (!$viewUrl && !$batchNumber): ?>
+                                            <span class="text-muted small">—</span>
+                                        <?php endif; ?>
                                     </div>
-                                    <?php if ($unitPrice > 0): ?>
-                                        <div class="text-muted small">
-                                            <i class="bi bi-cash-stack me-1"></i>سعر الوحدة: <?php echo formatCurrency($unitPrice); ?>
-                                        </div>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <div><strong>المتوفر حالياً: <?php echo number_format($availableQty, 2); ?></strong></div>
-                                    <div class="text-muted small">
-                                        <i class="bi bi-box-seam me-1"></i>إجمالي الإنتاج: <?php echo number_format($producedQty, 2); ?>
-                                    </div>
-                                    <div class="text-muted small">
-                                        <i class="bi bi-recycle me-1"></i>عدد العمليات: <?php echo number_format($productionCount); ?>
-                                    </div>
-                                    <?php if ($productionCount > 0): ?>
-                                        <div class="text-muted small">
-                                            <i class="bi bi-calculator me-1"></i>متوسط إنتاج العملية: <?php echo number_format($producedQty / $productionCount, 2); ?>
-                                        </div>
-                                    <?php endif; ?>
-                                    <?php if ($estimatedValue > 0): ?>
-                                        <div class="text-success small fw-semibold mt-1">
-                                            <i class="bi bi-wallet2 me-1"></i>القيمة التقديرية: <?php echo formatCurrency($estimatedValue); ?>
-                                        </div>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <div>
-                                        <i class="bi bi-calendar-week me-1"></i>أول إنتاج:
-                                        <strong><?php echo $product['first_production_date'] ? formatDate($product['first_production_date']) : '—'; ?></strong>
-                                    </div>
-                                    <div class="mt-1">
-                                        <i class="bi bi-calendar-check me-1"></i>آخر إنتاج:
-                                        <strong><?php echo $product['last_production_date'] ? formatDate($product['last_production_date']) : '—'; ?></strong>
-                                    </div>
-                                </td>
-                                <td>
-                                    <?php if (!empty($workersList) && trim($workersRaw) !== 'غير محدد'): ?>
-                                        <ul class="mb-0 ps-3 text-muted small">
-                                            <?php foreach ($workersList as $workerName): ?>
-                                                <li><i class="bi bi-person-workspace me-1"></i><?php echo htmlspecialchars($workerName); ?></li>
-                                            <?php endforeach; ?>
-                                        </ul>
-                                    <?php else: ?>
-                                        <span class="text-muted small">غير محدد</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td>
-                                    <?php if (empty($details)): ?>
-                                        <span class="text-muted small">لا توجد سجلات إنتاج مفصلة</span>
-                                    <?php else: ?>
-                                        <div class="d-flex flex-column gap-2">
-                                            <?php foreach ($details as $detail): ?>
-                                                <?php
-                                                $status = $detail['status'] ?? 'completed';
-                                                $badgeClass = match ($status) {
-                                                    'completed' => 'bg-success',
-                                                    'approved' => 'bg-primary',
-                                                    'pending' => 'bg-warning text-dark',
-                                                    'rejected' => 'bg-danger',
-                                                    default => 'bg-secondary'
-                                                };
-                                                $statusText = $statusLabels[$status] ?? $status;
-                                                ?>
-                                                <div class="border rounded px-3 py-2 bg-light">
-                                                    <div class="d-flex justify-content-between align-items-center">
-                                                        <span class="fw-semibold"><?php echo $detail['date'] ? formatDate($detail['date']) : '—'; ?></span>
-                                                        <span class="badge <?php echo $badgeClass; ?>"><?php echo htmlspecialchars($statusText); ?></span>
-                                                    </div>
-                                                    <div class="text-muted small mt-2">
-                                                        <div><i class="bi bi-box-seam me-1"></i>الكمية: <?php echo number_format($detail['quantity'], 2); ?></div>
-                                                        <div><i class="bi bi-person me-1"></i>العامل: <?php echo htmlspecialchars($detail['worker']); ?></div>
-                                                        <?php if (!empty($detail['line_name'])): ?>
-                                                            <div><i class="bi bi-diagram-3 me-1"></i>خط الإنتاج: <?php echo htmlspecialchars($detail['line_name']); ?></div>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
-                    <?php endif; ?>
-                </tbody>
-            </table>
-        </div>
-
-        <!-- Pagination -->
-        <?php if ($totalPages > 1): ?>
-        <nav aria-label="Page navigation" class="mt-3">
-            <ul class="pagination justify-content-center flex-wrap">
-                <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $pageNum - 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">
-                        <i class="bi bi-chevron-right"></i>
-                    </a>
-                </li>
-                
-                <?php
-                $startPage = max(1, $pageNum - 2);
-                $endPage = min($totalPages, $pageNum + 2);
-                
-                if ($startPage > 1): ?>
-                    <li class="page-item"><a class="page-link" href="<?php echo $baseQueryString; ?>&p=1<?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">1</a></li>
-                    <?php if ($startPage > 2): ?>
-                        <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif; ?>
-                <?php endif; ?>
-                
-                <?php for ($i = $startPage; $i <= $endPage; $i++): ?>
-                    <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
-                        <a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $i; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>"><?php echo $i; ?></a>
-                    </li>
-                <?php endfor; ?>
-                
-                <?php if ($endPage < $totalPages): ?>
-                    <?php if ($endPage < $totalPages - 1): ?>
-                        <li class="page-item disabled"><span class="page-link">...</span></li>
-                    <?php endif; ?>
-                    <li class="page-item"><a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $totalPages; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>"><?php echo $totalPages; ?></a></li>
-                <?php endif; ?>
-                
-                <li class="page-item <?php echo $pageNum >= $totalPages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="<?php echo $baseQueryString; ?>&p=<?php echo $pageNum + 1; ?><?php echo $search ? '&search=' . urlencode($search) : ''; ?><?php echo $productId ? '&product_id=' . $productId : ''; ?><?php echo $dateFrom ? '&date_from=' . $dateFrom : ''; ?><?php echo $dateTo ? '&date_to=' . $dateTo : ''; ?>">
-                        <i class="bi bi-chevron-left"></i>
-                    </a>
-                </li>
-            </ul>
-        </nav>
+                    </tbody>
+                </table>
+            </div>
+        <?php else: ?>
+            <div class="alert alert-info mb-0">
+                <i class="bi bi-info-circle me-2"></i>
+                لا توجد بيانات متاحة حالياً.
+            </div>
         <?php endif; ?>
     </div>
 </div>
 
-<style>
-@media (max-width: 767.98px) {
-    .mobile-production-table-wrapper {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        border-radius: 0.75rem;
+<script>
+document.addEventListener('click', function (event) {
+    const copyButton = event.target.closest('.js-copy-batch');
+    if (!copyButton) {
+        return;
     }
 
-    .mobile-production-table-wrapper table {
-        min-width: 700px;
-        white-space: nowrap;
+    const batchNumber = copyButton.dataset.batch;
+    if (!batchNumber) {
+        return;
     }
 
-    .mobile-production-table-wrapper::-webkit-scrollbar {
-        height: 6px;
+    const originalHtml = copyButton.innerHTML;
+    const originalClasses = copyButton.className;
+
+    function showCopiedFeedback(success) {
+        copyButton.className = success ? 'btn btn-success btn-sm' : 'btn btn-warning btn-sm';
+        copyButton.innerHTML = success
+            ? '<i class="bi bi-check-circle"></i> تم النسخ'
+            : '<i class="bi bi-exclamation-triangle"></i> تعذر النسخ';
+
+        setTimeout(() => {
+            copyButton.className = originalClasses;
+            copyButton.innerHTML = originalHtml;
+        }, 2000);
     }
 
-    .mobile-production-table-wrapper::-webkit-scrollbar-thumb {
-        background: rgba(37, 99, 235, 0.35);
-        border-radius: 10px;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(batchNumber)
+            .then(() => showCopiedFeedback(true))
+            .catch(() => showCopiedFeedback(false));
+    } else {
+        const tempInput = document.createElement('input');
+        tempInput.style.position = 'fixed';
+        tempInput.style.opacity = '0';
+        tempInput.value = batchNumber;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        try {
+            const successful = document.execCommand('copy');
+            showCopiedFeedback(successful);
+        } catch (err) {
+            showCopiedFeedback(false);
+        }
+        document.body.removeChild(tempInput);
     }
-}
-</style>
+});
+</script>
 

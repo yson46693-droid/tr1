@@ -329,10 +329,14 @@ function batchCreationEnsureTables(PDO $pdo): void
             `batch_id` int(11) NOT NULL,
             `raw_material_id` int(11) DEFAULT NULL,
             `quantity_used` decimal(12,3) NOT NULL DEFAULT 0.000,
+            `material_name` varchar(255) DEFAULT NULL,
+            `unit` varchar(50) DEFAULT NULL,
+            `supplier_id` int(11) DEFAULT NULL,
             `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             KEY `batch_id` (`batch_id`),
-            KEY `raw_material_id` (`raw_material_id`)
+            KEY `raw_material_id` (`raw_material_id`),
+            KEY `supplier_id` (`supplier_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         "CREATE TABLE IF NOT EXISTS `batch_packaging` (
@@ -340,10 +344,14 @@ function batchCreationEnsureTables(PDO $pdo): void
             `batch_id` int(11) NOT NULL,
             `packaging_material_id` int(11) DEFAULT NULL,
             `quantity_used` decimal(12,3) NOT NULL DEFAULT 0.000,
+            `packaging_name` varchar(255) DEFAULT NULL,
+            `unit` varchar(50) DEFAULT NULL,
+            `supplier_id` int(11) DEFAULT NULL,
             `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             KEY `batch_id` (`batch_id`),
-            KEY `packaging_material_id` (`packaging_material_id`)
+            KEY `packaging_material_id` (`packaging_material_id`),
+            KEY `supplier_id` (`supplier_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         "CREATE TABLE IF NOT EXISTS `batch_workers` (
@@ -354,6 +362,17 @@ function batchCreationEnsureTables(PDO $pdo): void
             PRIMARY KEY (`id`),
             KEY `batch_id` (`batch_id`),
             KEY `employee_id` (`employee_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        "CREATE TABLE IF NOT EXISTS `batch_suppliers` (
+            `id` int(11) NOT NULL AUTO_INCREMENT,
+            `batch_id` int(11) NOT NULL,
+            `supplier_id` int(11) NOT NULL,
+            `role` varchar(100) DEFAULT NULL,
+            `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `batch_id` (`batch_id`),
+            KEY `supplier_id` (`supplier_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         "CREATE TABLE IF NOT EXISTS `finished_products` (
@@ -400,6 +419,17 @@ function batchCreationEnsureTables(PDO $pdo): void
     }
 
     try {
+        if (!batchCreationColumnExists($pdo, 'batch_raw_materials', 'supplier_id')) {
+            $pdo->exec("
+                ALTER TABLE `batch_raw_materials`
+                ADD COLUMN `supplier_id` int(11) DEFAULT NULL AFTER `unit`
+            ");
+        }
+    } catch (Throwable $e) {
+        error_log('batchCreationEnsureTables: failed adding supplier_id column to batch_raw_materials -> ' . $e->getMessage());
+    }
+
+    try {
         if (!batchCreationColumnExists($pdo, 'batch_packaging', 'packaging_name')) {
             $pdo->exec("
                 ALTER TABLE `batch_packaging`
@@ -421,20 +451,50 @@ function batchCreationEnsureTables(PDO $pdo): void
         error_log('batchCreationEnsureTables: failed adding packaging unit column -> ' . $e->getMessage());
     }
 
+    try {
+        if (!batchCreationColumnExists($pdo, 'batch_packaging', 'supplier_id')) {
+            $pdo->exec("
+                ALTER TABLE `batch_packaging`
+                ADD COLUMN `supplier_id` int(11) DEFAULT NULL AFTER `unit`
+            ");
+        }
+    } catch (Throwable $e) {
+        error_log('batchCreationEnsureTables: failed adding supplier_id column to batch_packaging -> ' . $e->getMessage());
+    }
+
+    try {
+        if (!batchCreationTableExists($pdo, 'batch_suppliers')) {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS `batch_suppliers` (
+                  `id` int(11) NOT NULL AUTO_INCREMENT,
+                  `batch_id` int(11) NOT NULL,
+                  `supplier_id` int(11) NOT NULL,
+                  `role` varchar(100) DEFAULT NULL,
+                  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`id`),
+                  KEY `batch_id` (`batch_id`),
+                  KEY `supplier_id` (`supplier_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+        }
+    } catch (Throwable $e) {
+        error_log('batchCreationEnsureTables: failed ensuring batch_suppliers table -> ' . $e->getMessage());
+    }
+
     $ensured = true;
 }
 
 /**
- * توليد رقم تشغيلة بالشكل BATCH-YYYYMMDD-###.
+ * توليد رقم تشغيلة بالشكل YYMMDD-XXXXXX (ستة أرقام عشوائية).
  */
 function batchCreationGenerateNumber(PDO $pdo): string
 {
-    $datePrefix = 'BATCH-' . date('Ymd') . '-';
+    $datePrefix = date('ymd') . '-';
 
-    for ($attempt = 0; $attempt < 25; $attempt++) {
-        $sequence     = str_pad((string) random_int(0, 999), 3, '0', STR_PAD_LEFT);
-        $batchNumber  = $datePrefix . $sequence;
-        $batchChecker = $pdo->prepare('SELECT COUNT(*) FROM batches WHERE batch_number = ? LIMIT 1');
+    for ($attempt = 0; $attempt < 50; $attempt++) {
+        $randomSegment = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
+        $batchNumber   = $datePrefix . $randomSegment;
+        $batchChecker  = $pdo->prepare('SELECT COUNT(*) FROM batches WHERE batch_number = ? LIMIT 1');
         $batchChecker->execute([$batchNumber]);
 
         if ((int) $batchChecker->fetchColumn() === 0) {
@@ -486,6 +546,7 @@ function batchCreationCreate(int $templateId, int $units): array
         $batchRawMaterialsExists = batchCreationTableExists($pdo, 'batch_raw_materials');
         $batchRawHasNameColumn = $batchRawMaterialsExists && batchCreationColumnExists($pdo, 'batch_raw_materials', 'material_name');
         $batchRawHasUnitColumn = $batchRawMaterialsExists && batchCreationColumnExists($pdo, 'batch_raw_materials', 'unit');
+        $batchRawHasSupplierColumn = $batchRawMaterialsExists && batchCreationColumnExists($pdo, 'batch_raw_materials', 'supplier_id');
         $batchRawInsertStatement = null;
         if ($batchRawMaterialsExists) {
             $rawInsertColumns = ['batch_id', 'raw_material_id', 'quantity_used'];
@@ -498,6 +559,10 @@ function batchCreationCreate(int $templateId, int $units): array
                 $rawInsertColumns[] = 'unit';
                 $rawInsertPlaceholders[] = '?';
             }
+            if ($batchRawHasSupplierColumn) {
+                $rawInsertColumns[] = 'supplier_id';
+                $rawInsertPlaceholders[] = '?';
+            }
             $batchRawInsertStatement = $pdo->prepare(
                 'INSERT INTO batch_raw_materials (' . implode(', ', $rawInsertColumns) . ') VALUES (' . implode(', ', $rawInsertPlaceholders) . ')'
             );
@@ -507,6 +572,7 @@ function batchCreationCreate(int $templateId, int $units): array
         $batchPackagingExists = batchCreationTableExists($pdo, 'batch_packaging');
         $batchPackagingHasNameColumn = $batchPackagingExists && batchCreationColumnExists($pdo, 'batch_packaging', 'packaging_name');
         $batchPackagingHasUnitColumn = $batchPackagingExists && batchCreationColumnExists($pdo, 'batch_packaging', 'unit');
+        $batchPackagingHasSupplierColumn = $batchPackagingExists && batchCreationColumnExists($pdo, 'batch_packaging', 'supplier_id');
         $batchPackagingInsertStatement = null;
         if ($batchPackagingExists) {
             $packInsertColumns = ['batch_id', 'packaging_material_id', 'quantity_used'];
@@ -519,16 +585,36 @@ function batchCreationCreate(int $templateId, int $units): array
                 $packInsertColumns[] = 'unit';
                 $packInsertPlaceholders[] = '?';
             }
+            if ($batchPackagingHasSupplierColumn) {
+                $packInsertColumns[] = 'supplier_id';
+                $packInsertPlaceholders[] = '?';
+            }
             $batchPackagingInsertStatement = $pdo->prepare(
                 'INSERT INTO batch_packaging (' . implode(', ', $packInsertColumns) . ') VALUES (' . implode(', ', $packInsertPlaceholders) . ')'
             );
         }
+
+        $batchSuppliersExists = batchCreationTableExists($pdo, 'batch_suppliers');
+        $batchSuppliersInsertStatement = $batchSuppliersExists
+            ? $pdo->prepare('INSERT INTO batch_suppliers (batch_id, supplier_id, role) VALUES (?, ?, ?)')
+            : null;
+
+        $supplierRoles = [];
+        $collectSupplier = static function (?int $supplierId, string $role) use (&$supplierRoles): void {
+            if ($supplierId !== null && $supplierId > 0) {
+                if (!isset($supplierRoles[$supplierId])) {
+                    $supplierRoles[$supplierId] = [];
+                }
+                $supplierRoles[$supplierId][$role] = true;
+            }
+        };
 
         // جلب بيانات القالب
         $templateStmt = $pdo->prepare("
             SELECT 
                 t.id,
                 t.product_id,
+                t.main_supplier_id,
                 t.details_json,
                 COALESCE(t.product_name, p.name) AS product_name,
                 COALESCE(p.id, t.product_id)     AS resolved_product_id
@@ -551,29 +637,133 @@ function batchCreationCreate(int $templateId, int $units): array
             throw new RuntimeException('المنتج المرتبط بالقالب غير محدد');
         }
 
-        $templateDetailsMap = [];
+        $mainSupplierId = isset($template['main_supplier_id']) ? (int) $template['main_supplier_id'] : null;
+        if ($mainSupplierId) {
+            $collectSupplier($mainSupplierId, 'template_main');
+        }
+
+        $templateRawDetailsByName = [];
+        $templateRawDetailsById   = [];
+        $templatePackagingDetailsById = [];
+        $templatePackagingDetailsByName = [];
+        $templateWorkerIdsFromDetails = [];
+
         if (!empty($template['details_json'])) {
-            $decodedDetails = json_decode((string)$template['details_json'], true);
-            if (json_last_error() === JSON_ERROR_NONE && !empty($decodedDetails['raw_materials']) && is_array($decodedDetails['raw_materials'])) {
-                foreach ($decodedDetails['raw_materials'] as $detailEntry) {
-                    if (!is_array($detailEntry)) {
+            $decodedDetails = json_decode((string) $template['details_json'], true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decodedDetails)) {
+                if (!empty($decodedDetails['raw_materials']) && is_array($decodedDetails['raw_materials'])) {
+                    foreach ($decodedDetails['raw_materials'] as $detailEntry) {
+                        if (!is_array($detailEntry)) {
+                            continue;
+                        }
+                        $supplierId = null;
+                        if (isset($detailEntry['supplier_id'])) {
+                            $supplierId = (int) $detailEntry['supplier_id'];
+                        } elseif (isset($detailEntry['supplier'])) {
+                            $supplierId = (int) $detailEntry['supplier'];
+                        }
+                        if ($supplierId) {
+                            $collectSupplier($supplierId, 'raw_material');
+                        }
+
+                        if (isset($detailEntry['id'])) {
+                            $templateRawDetailsById[(int) $detailEntry['id']] = $detailEntry;
+                            $templateRawDetailsById[(string) $detailEntry['id']] = $detailEntry;
+                        }
+
+                        $detailName = '';
+                        if (!empty($detailEntry['name'])) {
+                            $detailName = (string) $detailEntry['name'];
+                        } elseif (!empty($detailEntry['material_name'])) {
+                            $detailName = (string) $detailEntry['material_name'];
+                        }
+                        $normalizedName = $detailName !== ''
+                            ? (function_exists('mb_strtolower') ? mb_strtolower(trim($detailName), 'UTF-8') : strtolower(trim($detailName)))
+                            : '';
+                        if ($normalizedName !== '') {
+                            $templateRawDetailsByName[$normalizedName] = $detailEntry;
+                        }
+                    }
+                }
+
+                $packagingGroups = [];
+                foreach (['packaging', 'packaging_materials', 'packaging_items'] as $packKey) {
+                    if (!empty($decodedDetails[$packKey]) && is_array($decodedDetails[$packKey])) {
+                        $packagingGroups[] = $decodedDetails[$packKey];
+                    }
+                }
+                foreach ($packagingGroups as $packGroup) {
+                    foreach ($packGroup as $packDetail) {
+                        if (!is_array($packDetail)) {
+                            continue;
+                        }
+                        $supplierId = null;
+                        if (isset($packDetail['supplier_id'])) {
+                            $supplierId = (int) $packDetail['supplier_id'];
+                        } elseif (isset($packDetail['supplier'])) {
+                            $supplierId = (int) $packDetail['supplier'];
+                        }
+                        if ($supplierId) {
+                            $collectSupplier($supplierId, 'packaging');
+                        }
+
+                        if (isset($packDetail['id'])) {
+                            $templatePackagingDetailsById[(int) $packDetail['id']] = $packDetail;
+                            $templatePackagingDetailsById[(string) $packDetail['id']] = $packDetail;
+                        } elseif (isset($packDetail['packaging_material_id'])) {
+                            $templatePackagingDetailsById[(int) $packDetail['packaging_material_id']] = $packDetail;
+                            $templatePackagingDetailsById[(string) $packDetail['packaging_material_id']] = $packDetail;
+                        }
+
+                        $packName = '';
+                        if (!empty($packDetail['name'])) {
+                            $packName = (string) $packDetail['name'];
+                        } elseif (!empty($packDetail['packaging_name'])) {
+                            $packName = (string) $packDetail['packaging_name'];
+                        }
+                        $normalizedPackName = $packName !== ''
+                            ? (function_exists('mb_strtolower') ? mb_strtolower(trim($packName), 'UTF-8') : strtolower(trim($packName)))
+                            : '';
+                        if ($normalizedPackName !== '') {
+                            $templatePackagingDetailsByName[$normalizedPackName] = $packDetail;
+                        }
+                    }
+                }
+
+                if (!empty($decodedDetails['workers']) && is_array($decodedDetails['workers'])) {
+                    foreach ($decodedDetails['workers'] as $workerEntry) {
+                        $workerId = null;
+                        if (is_array($workerEntry) && isset($workerEntry['id'])) {
+                            $workerId = (int) $workerEntry['id'];
+                        } elseif (is_numeric($workerEntry)) {
+                            $workerId = (int) $workerEntry;
+                        }
+                        if ($workerId && $workerId > 0) {
+                            $templateWorkerIdsFromDetails[] = $workerId;
+                        }
+                    }
+                }
+
+                foreach (['suppliers', 'extra_suppliers'] as $suppliersKey) {
+                    if (empty($decodedDetails[$suppliersKey]) || !is_array($decodedDetails[$suppliersKey])) {
                         continue;
                     }
-                    $detailName = '';
-                    if (!empty($detailEntry['name'])) {
-                        $detailName = (string)$detailEntry['name'];
-                    } elseif (!empty($detailEntry['material_name'])) {
-                        $detailName = (string)$detailEntry['material_name'];
-                    }
-                    $normalizedName = $detailName !== ''
-                        ? (function_exists('mb_strtolower') ? mb_strtolower(trim($detailName), 'UTF-8') : strtolower(trim($detailName)))
-                        : '';
-                    if ($normalizedName !== '') {
-                        $templateDetailsMap[$normalizedName] = $detailEntry;
+                    foreach ($decodedDetails[$suppliersKey] as $supplierEntry) {
+                        $supplierId = null;
+                        if (is_array($supplierEntry) && isset($supplierEntry['id'])) {
+                            $supplierId = (int) $supplierEntry['id'];
+                        } elseif (is_numeric($supplierEntry)) {
+                            $supplierId = (int) $supplierEntry;
+                        }
+                        if ($supplierId) {
+                            $collectSupplier($supplierId, 'template_extra');
+                        }
                     }
                 }
             }
         }
+
+        $templateWorkerIdsFromDetails = array_values(array_unique(array_map('intval', $templateWorkerIdsFromDetails)));
 
         // تجهيز الجداول المرتبطة بالمواد الخام
         $templateMaterialsTable = batchCreationTableExists($pdo, 'template_materials')
@@ -608,9 +798,12 @@ function batchCreationCreate(int $templateId, int $units): array
                 $normalizedName = $materialName !== ''
                     ? (function_exists('mb_strtolower') ? mb_strtolower($materialName, 'UTF-8') : strtolower($materialName))
                     : '';
-                $detailEntry = ($normalizedName !== '' && isset($templateDetailsMap[$normalizedName]))
-                    ? $templateDetailsMap[$normalizedName]
-                    : [];
+                $detailEntry = [];
+                if ($normalizedName !== '' && isset($templateRawDetailsByName[$normalizedName])) {
+                    $detailEntry = $templateRawDetailsByName[$normalizedName];
+                } elseif (!empty($materialRow['id']) && isset($templateRawDetailsById[(int) $materialRow['id']])) {
+                    $detailEntry = $templateRawDetailsById[(int) $materialRow['id']];
+                }
 
                 $materialType = isset($detailEntry['type']) ? (string)$detailEntry['type'] : (string)($materialRow['material_type'] ?? 'other');
                 if ($materialType === 'honey') {
@@ -623,12 +816,22 @@ function batchCreationCreate(int $templateId, int $units): array
                     ? (float)$materialRow['quantity_per_unit']
                     : (isset($detailEntry['quantity']) ? (float)$detailEntry['quantity'] : 0.0);
 
+                $supplierId = null;
+                if (isset($detailEntry['supplier_id'])) {
+                    $supplierId = (int) $detailEntry['supplier_id'];
+                } elseif (isset($detailEntry['supplier'])) {
+                    $supplierId = (int) $detailEntry['supplier'];
+                } elseif (isset($materialRow['supplier_id'])) {
+                    $supplierId = (int) $materialRow['supplier_id'];
+                }
+                if ($supplierId) {
+                    $collectSupplier($supplierId, 'raw_material');
+                }
+
                 $materialsForStockDeduction[] = [
                     'material_type'    => $materialType,
                     'material_name'    => $materialName !== '' ? $materialName : ($detailEntry['name'] ?? $detailEntry['material_name'] ?? 'مادة خام'),
-                    'supplier_id'      => isset($detailEntry['supplier_id'])
-                        ? (int)$detailEntry['supplier_id']
-                        : (!empty($materialRow['material_id']) ? (int)$materialRow['material_id'] : null),
+                    'supplier_id'      => $supplierId,
                     'quantity_per_unit'=> $quantityPerUnit,
                     'unit'             => $detailEntry['unit'] ?? ($materialRow['unit'] ?? 'كجم'),
                     'honey_variety'    => $detailEntry['honey_variety'] ?? null,
@@ -656,28 +859,65 @@ function batchCreationCreate(int $templateId, int $units): array
             }
 
             $rawUnitColumn = batchCreationColumnExists($pdo, $rawInventoryTable, 'unit') ? 'unit' : null;
+            $templateMaterialsHasSupplierColumn = batchCreationColumnExists($pdo, $templateMaterialsTable, 'supplier_id');
+            $rawInventoryHasSupplierColumn = $rawInventoryTable !== null && batchCreationColumnExists($pdo, $rawInventoryTable, 'supplier_id');
 
-            $materialsStmt = $pdo->prepare(sprintf(
-                'SELECT 
-                    rm.id AS raw_id,
-                    %s AS raw_name,
-                    tm.quantity_per_unit,
-                    rm.%s AS available_stock,
-                    %s
-                FROM %s tm
-                JOIN %s rm ON rm.id = tm.%s
-                WHERE tm.template_id = ?',
-                $materialNameColumn !== null
-                    ? sprintf('COALESCE(rm.name, tm.%s)', $materialNameColumn)
-                    : 'rm.name',
-                $rawStockColumn,
-                $rawUnitColumn !== null ? 'rm.' . $rawUnitColumn . ' AS unit' : 'NULL AS unit',
-                $templateMaterialsTable,
-                $rawInventoryTable,
-                $materialIdColumn
-            ));
+            $rawNameExpression = $materialNameColumn !== null
+                ? sprintf('COALESCE(rm.name, tm.%s)', $materialNameColumn)
+                : 'rm.name';
+            $unitExpression = $rawUnitColumn !== null ? 'rm.' . $rawUnitColumn : 'NULL';
+
+            $selectParts = [
+                'rm.id AS raw_id',
+                $rawNameExpression . ' AS raw_name',
+                'tm.quantity_per_unit',
+                'rm.' . $rawStockColumn . ' AS available_stock',
+                $unitExpression . ' AS unit',
+                $templateMaterialsHasSupplierColumn ? 'tm.supplier_id AS template_supplier_id' : 'NULL AS template_supplier_id',
+                $rawInventoryHasSupplierColumn ? 'rm.supplier_id AS inventory_supplier_id' : 'NULL AS inventory_supplier_id'
+            ];
+
+            $materialsSql = 'SELECT ' . implode(",\n                    ", $selectParts) . "\n"
+                . "FROM {$templateMaterialsTable} tm\n"
+                . "JOIN {$rawInventoryTable} rm ON rm.id = tm.{$materialIdColumn}\n"
+                . "WHERE tm.template_id = ?";
+
+            $materialsStmt = $pdo->prepare($materialsSql);
             $materialsStmt->execute([$templateId]);
             $materials = $materialsStmt->fetchAll();
+
+            if (empty($materials)) {
+                throw new RuntimeException('القالب لا يحتوي على مواد خام صالحة للإنتاج');
+            }
+
+            foreach ($materials as &$material) {
+                $supplierId = null;
+                if (!empty($material['template_supplier_id'])) {
+                    $supplierId = (int) $material['template_supplier_id'];
+                } elseif (!empty($material['inventory_supplier_id'])) {
+                    $supplierId = (int) $material['inventory_supplier_id'];
+                } elseif (isset($templateRawDetailsById[(int) ($material['raw_id'] ?? 0)]['supplier_id'])) {
+                    $supplierId = (int) $templateRawDetailsById[(int) $material['raw_id']]['supplier_id'];
+                } else {
+                    $rawName = (string) ($material['raw_name'] ?? '');
+                    $normalizedRawName = $rawName !== ''
+                        ? (function_exists('mb_strtolower') ? mb_strtolower(trim($rawName), 'UTF-8') : strtolower(trim($rawName)))
+                        : '';
+                    if ($normalizedRawName !== '' && isset($templateRawDetailsByName[$normalizedRawName]['supplier_id'])) {
+                        $supplierId = (int) $templateRawDetailsByName[$normalizedRawName]['supplier_id'];
+                    }
+                }
+
+                if (!empty($templateRawDetailsById[(int) ($material['raw_id'] ?? 0)]['unit']) && ($material['unit'] === null || $material['unit'] === '')) {
+                    $material['unit'] = $templateRawDetailsById[(int) $material['raw_id']]['unit'];
+                }
+
+                $material['supplier_id'] = $supplierId ?: null;
+                if ($supplierId) {
+                    $collectSupplier($supplierId, 'raw_material');
+                }
+            }
+            unset($material);
         }
 
         if (empty($materials) && empty($materialsForStockDeduction)) {
@@ -720,27 +960,56 @@ function batchCreationCreate(int $templateId, int $units): array
 
         $packagingUnitColumn = batchCreationColumnExists($pdo, $packagingInventoryTable, 'unit') ? 'unit' : null;
 
-        $packagingStmt = $pdo->prepare(sprintf(
-            'SELECT 
-                pm.id AS pack_id,
-                %s AS pack_name,
-                tp.quantity_per_unit,
-                pm.%s AS available_stock,
-                %s
-            FROM %s tp
-            JOIN %s pm ON pm.id = tp.%s
-            WHERE tp.template_id = ?',
-            $packagingNameColumn !== null
-                ? sprintf('COALESCE(pm.name, tp.%s)', $packagingNameColumn)
-                : 'pm.name',
-            $packagingStockColumn,
-            $packagingUnitColumn !== null ? 'pm.' . $packagingUnitColumn . ' AS unit' : 'NULL AS unit',
-            $templatePackagingTable,
-            $packagingInventoryTable,
-            $packagingIdColumn
-        ));
+        $packagingHasSupplierColumn = batchCreationColumnExists($pdo, $templatePackagingTable, 'supplier_id');
+        $packagingInventoryHasSupplierColumn = batchCreationColumnExists($pdo, $packagingInventoryTable, 'supplier_id');
+
+        $packNameExpression = $packagingNameColumn !== null
+            ? sprintf('COALESCE(pm.name, tp.%s)', $packagingNameColumn)
+            : 'pm.name';
+        $packUnitExpression = $packagingUnitColumn !== null ? 'pm.' . $packagingUnitColumn : 'NULL';
+
+        $packSelectParts = [
+            'pm.id AS pack_id',
+            $packNameExpression . ' AS pack_name',
+            'tp.quantity_per_unit',
+            'pm.' . $packagingStockColumn . ' AS available_stock',
+            $packUnitExpression . ' AS unit',
+            $packagingHasSupplierColumn ? 'tp.supplier_id AS template_supplier_id' : 'NULL AS template_supplier_id',
+            $packagingInventoryHasSupplierColumn ? 'pm.supplier_id AS inventory_supplier_id' : 'NULL AS inventory_supplier_id'
+        ];
+
+        $packagingSql = 'SELECT ' . implode(",\n                    ", $packSelectParts) . "\n"
+            . "FROM {$templatePackagingTable} tp\n"
+            . "JOIN {$packagingInventoryTable} pm ON pm.id = tp.{$packagingIdColumn}\n"
+            . "WHERE tp.template_id = ?";
+
+        $packagingStmt = $pdo->prepare($packagingSql);
         $packagingStmt->execute([$templateId]);
         $packaging = $packagingStmt->fetchAll();
+
+        foreach ($packaging as &$pack) {
+            $supplierId = null;
+            if (!empty($pack['template_supplier_id'])) {
+                $supplierId = (int) $pack['template_supplier_id'];
+            } elseif (!empty($pack['inventory_supplier_id'])) {
+                $supplierId = (int) $pack['inventory_supplier_id'];
+            } elseif (isset($templatePackagingDetailsById[(int) ($pack['pack_id'] ?? 0)]['supplier_id'])) {
+                $supplierId = (int) $templatePackagingDetailsById[(int) $pack['pack_id']]['supplier_id'];
+            } else {
+                $packName = (string) ($pack['pack_name'] ?? '');
+                $normalizedPackName = $packName !== ''
+                    ? (function_exists('mb_strtolower') ? mb_strtolower(trim($packName), 'UTF-8') : strtolower(trim($packName)))
+                    : '';
+                if ($normalizedPackName !== '' && isset($templatePackagingDetailsByName[$normalizedPackName]['supplier_id'])) {
+                    $supplierId = (int) $templatePackagingDetailsByName[$normalizedPackName]['supplier_id'];
+                }
+            }
+            $pack['supplier_id'] = $supplierId ?: null;
+            if ($supplierId) {
+                $collectSupplier($supplierId, 'packaging');
+            }
+        }
+        unset($pack);
 
         // التحقق من توفر المخزون في حالة وجود جدول مخزون عام
         if ($canUpdateRawStock && !empty($materials)) {
@@ -788,6 +1057,7 @@ function batchCreationCreate(int $templateId, int $units): array
                         'quantity_used'   => $qtyUsed,
                         'material_name'   => $batchRawHasNameColumn ? (string)($stockMaterial['material_name'] ?? '') : null,
                         'unit'            => $batchRawHasUnitColumn ? ($stockMaterial['unit'] ?? null) : null,
+                        'supplier_id'     => $stockMaterial['supplier_id'] ?? null,
                     ];
                 }
             }
@@ -876,6 +1146,79 @@ function batchCreationCreate(int $templateId, int $units): array
             }
         }
 
+        if (!empty($templateWorkerIdsFromDetails)) {
+            $existingWorkerIds = array_map(static function (array $worker): int {
+                return (int) ($worker['id'] ?? 0);
+            }, $workers);
+            $missingWorkerIds = array_values(array_diff($templateWorkerIdsFromDetails, $existingWorkerIds));
+
+            if (!empty($missingWorkerIds)) {
+                $additionalWorkers = [];
+
+                if (batchCreationTableExists($pdo, 'employees')) {
+                    $employeeNameColumn = batchCreationColumnExists($pdo, 'employees', 'name')
+                        ? 'name'
+                        : (batchCreationColumnExists($pdo, 'employees', 'full_name') ? 'full_name' : null);
+                    if ($employeeNameColumn !== null) {
+                        $placeholders = implode(',', array_fill(0, count($missingWorkerIds), '?'));
+                        $workersStmt = $pdo->prepare("SELECT id, {$employeeNameColumn} AS name FROM employees WHERE id IN ({$placeholders})");
+                        $workersStmt->execute($missingWorkerIds);
+                        $additionalWorkers = $workersStmt->fetchAll(PDO::FETCH_ASSOC);
+                    }
+                }
+
+                if (empty($additionalWorkers) && batchCreationTableExists($pdo, 'users')) {
+                    $userNameColumn = batchCreationColumnExists($pdo, 'users', 'full_name')
+                        ? 'full_name'
+                        : (batchCreationColumnExists($pdo, 'users', 'name') ? 'name' : (batchCreationColumnExists($pdo, 'users', 'username') ? 'username' : 'id'));
+                    $placeholders = implode(',', array_fill(0, count($missingWorkerIds), '?'));
+                    $workersStmt = $pdo->prepare("SELECT id, {$userNameColumn} AS name FROM users WHERE id IN ({$placeholders})");
+                    $workersStmt->execute($missingWorkerIds);
+                    $additionalWorkers = array_merge($additionalWorkers, $workersStmt->fetchAll(PDO::FETCH_ASSOC));
+                }
+
+                $resolvedIds = [];
+                foreach ($additionalWorkers as $workerRow) {
+                    $workerId = (int) ($workerRow['id'] ?? 0);
+                    if ($workerId > 0) {
+                        $workers[] = [
+                            'id' => $workerId,
+                            'name' => (string) ($workerRow['name'] ?? ('الموظف #' . $workerId)),
+                        ];
+                        $resolvedIds[] = $workerId;
+                    }
+                }
+
+                $unresolved = array_diff($missingWorkerIds, $resolvedIds);
+                foreach ($unresolved as $workerId) {
+                    $workerId = (int) $workerId;
+                    if ($workerId > 0) {
+                        $workers[] = [
+                            'id' => $workerId,
+                            'name' => 'الموظف #' . $workerId,
+                        ];
+                    }
+                }
+            }
+        }
+
+        if (!empty($workers)) {
+            $workers = array_values(array_reduce(
+                $workers,
+                static function (array $carry, array $worker): array {
+                    $workerId = (int) ($worker['id'] ?? 0);
+                    if ($workerId > 0) {
+                        $carry[$workerId] = [
+                            'id' => $workerId,
+                            'name' => (string) ($worker['name'] ?? ('الموظف #' . $workerId)),
+                        ];
+                    }
+                    return $carry;
+                },
+                []
+            ));
+        }
+
         $batchNumber    = batchCreationGenerateNumber($pdo);
         $productionDate = date('Y-m-d');
         $expiryDate     = date('Y-m-d', strtotime('+1 year'));
@@ -921,6 +1264,9 @@ function batchCreationCreate(int $templateId, int $units): array
                 if ($batchRawHasUnitColumn) {
                     $params[] = $material['unit'] ?? null;
                 }
+                if ($batchRawHasSupplierColumn) {
+                    $params[] = $material['supplier_id'] ?? null;
+                }
                 $batchRawInsertStatement->execute($params);
             }
         }
@@ -933,6 +1279,9 @@ function batchCreationCreate(int $templateId, int $units): array
                 }
                 if ($batchRawHasUnitColumn) {
                     $params[] = $pendingRow['unit'];
+                }
+                if ($batchRawHasSupplierColumn) {
+                    $params[] = $pendingRow['supplier_id'] ?? null;
                 }
                 $batchRawInsertStatement->execute($params);
             }
@@ -964,7 +1313,21 @@ function batchCreationCreate(int $templateId, int $units): array
                 if ($batchPackagingHasUnitColumn) {
                     $params[] = $pack['unit'] ?? null;
                 }
+                if ($batchPackagingHasSupplierColumn) {
+                    $params[] = $pack['supplier_id'] ?? null;
+                }
                 $batchPackagingInsertStatement->execute($params);
+            }
+        }
+
+        if ($batchSuppliersExists && $batchSuppliersInsertStatement instanceof PDOStatement && !empty($supplierRoles)) {
+            foreach ($supplierRoles as $supplierId => $roles) {
+                $roleString = implode(',', array_keys($roles));
+                $batchSuppliersInsertStatement->execute([
+                    $batchId,
+                    $supplierId,
+                    $roleString !== '' ? $roleString : null,
+                ]);
             }
         }
 

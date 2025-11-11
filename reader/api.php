@@ -228,13 +228,9 @@ try {
     ];
 
     $packagingDetails = [];
-    $packagingAvailable = $batchId > 0 && readerTableExists($db, 'batch_packaging');
+    $packagingAvailable = $batchId > 0 && function_exists('readerTableExists') && readerTableExists($db, 'batch_packaging');
     if (!$packagingAvailable) {
-        if ($batchQueryError) {
-            $response['notes'][] = 'تحذير: تعذر تحميل مواد التغليف بسبب مشكلة في قاعدة البيانات.';
-        } else {
-            $response['notes'][] = 'ملاحظة: جدول مواد التغليف غير متوفر.';
-        }
+        // Packaging table not available; skip adding notes per requirements
     }
     if ($packagingAvailable) {
         $hasPackagingMaterials = readerTableExists($db, 'packaging_materials');
@@ -265,13 +261,9 @@ try {
     }
 
     $rawMaterials = [];
-    $rawAvailable = $batchId > 0 && readerTableExists($db, 'batch_raw_materials');
+    $rawAvailable = $batchId > 0 && function_exists('readerTableExists') && readerTableExists($db, 'batch_raw_materials');
     if (!$rawAvailable) {
-        if ($batchQueryError) {
-            $response['notes'][] = 'تحذير: تعذر تحميل المواد الخام بسبب مشكلة في قاعدة البيانات.';
-        } else {
-            $response['notes'][] = 'ملاحظة: جدول المواد الخام غير متوفر.';
-        }
+        // Raw materials table not available; no notes returned
     }
     if ($rawAvailable) {
         $hasRawMaterials = readerTableExists($db, 'raw_materials');
@@ -302,18 +294,14 @@ try {
     }
 
     $workersDetails = [];
-    $workersAvailable = $batchId > 0 && readerTableExists($db, 'batch_workers');
+    $workersAvailable = $batchId > 0 && function_exists('readerTableExists') && readerTableExists($db, 'batch_workers');
     if (!$workersAvailable) {
-        if ($batchQueryError) {
-            $response['notes'][] = 'تحذير: تعذر تحميل العمال بسبب مشكلة في قاعدة البيانات.';
-        } else {
-            $response['notes'][] = 'ملاحظة: جدول العمال غير متوفر.';
-        }
+        // Workers table not available; no notes returned
     }
     if ($workersAvailable) {
         try {
-            $joinEmployees = readerTableExists($db, 'employees');
-            $joinUsers = readerTableExists($db, 'users');
+            $joinEmployees = function_exists('readerTableExists') && readerTableExists($db, 'employees');
+            $joinUsers = function_exists('readerTableExists') && readerTableExists($db, 'users');
 
             $selectParts = [
                 'bw.id',
@@ -371,28 +359,18 @@ try {
         ];
     }, $workersDetails);
 
-    $batchNotes = [
-        ...($response['notes'] ?? []),
-    ];
-    unset($response['notes']);
-
     $response = [
         'success' => true,
         'batch' => [
             'id' => $batch['id'] ?? null,
             'batch_number' => $batch['batch_number'] ?? $batchNumber,
             'product_name' => $batch['product_name'] ?? null,
-            'product_category' => $batch['product_category'] ?? null,
             'production_date' => $batch['production_date'] ?? null,
             'quantity' => $batch['quantity'] ?? null,
             'quantity_produced' => $batch['quantity_produced'] ?? null,
-            'status' => $batch['status'] ?? null,
-            'status_label' => $statusLabels[$batch['status'] ?? ''] ?? 'غير معروف',
-            'notes' => $batch['notes'] ?? null,
             'packaging_materials' => $packagingFormatted,
             'raw_materials' => $rawMaterialsFormatted,
-            'workers' => $workersFormatted,
-            'notes' => $batchNotes,
+            'workers' => $workersFormatted
         ]
     ];
 

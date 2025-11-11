@@ -80,31 +80,8 @@ if (!defined('GLOBAL_TABLE_STYLES_RENDERED')) {
         }
 
         .dashboard-table--no-hover tbody tr:hover {
+            background: inherit !important;
             transform: none !important;
-        }
-
-        .dashboard-table--no-hover tbody tr:nth-child(odd):hover {
-            background: var(--global-table-row-bg) !important;
-        }
-
-        .dashboard-table--no-hover tbody tr:nth-child(even):hover {
-            background: var(--global-table-row-alt-bg) !important;
-        }
-
-        .dashboard-table--no-hover tbody tr {
-            transition: none !important;
-        }
-
-        .dashboard-table--no-hover tbody tr:hover {
-            transform: none !important;
-        }
-
-        .dashboard-table--no-hover tbody tr:nth-child(odd):hover {
-            background: var(--global-table-row-bg) !important;
-        }
-
-        .dashboard-table--no-hover tbody tr:nth-child(even):hover {
-            background: var(--global-table-row-alt-bg) !important;
         }
 
         .dashboard-table tbody td {
