@@ -109,7 +109,7 @@ try {
 
 $sessionId = $_SESSION['reader_session_id'] ?? null;
 $ipAddress = $_SERVER['REMOTE_ADDR'] ?? null;
-$readerLogMaxRows = getReaderAccessLogMaxRows();
+$readerLogMaxRows = function_exists('getReaderAccessLogMaxRows') ? getReaderAccessLogMaxRows() : 50;
 
 if ($db) {
     try {
