@@ -59,7 +59,9 @@ $translations = [
     
     // القوائم
     'menu_home' => 'الرئيسية',
-    'menu_financial' => 'المالية',
+    'menu_financial' => 'الخزنة',
+    'transfer' => 'تحويل',
+    'payment' => 'دفعة',
     'menu_suppliers' => 'الموردين',
     'menu_inventory' => 'المخزون',
     'menu_collections' => 'التحصيلات',

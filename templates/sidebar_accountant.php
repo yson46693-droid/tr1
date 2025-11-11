@@ -30,7 +30,7 @@ $baseUrl = getDashboardUrl();
             
             <li class="nav-item">
                 <a class="nav-link" href="<?php echo $baseUrl; ?>accountant.php?page=financial">
-                    <i class="bi bi-wallet2"></i>
+                    <i class="bi bi-safe"></i>
                     <span><?php echo $lang['menu_financial']; ?></span>
                 </a>
             </li>

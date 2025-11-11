@@ -475,7 +475,9 @@ $salaries = $db->query(
 
 // استبعاد المديرين من قائمة الرواتب المعروضة
 $salaries = array_values(array_filter($salaries, function ($salary) {
-    return isset($salary['role']) ? strtolower($salary['role']) !== 'manager' : true;
+    $role = strtolower($salary['role'] ?? '');
+    $hourlyRate = isset($salary['hourly_rate']) ? floatval($salary['hourly_rate']) : (isset($salary['current_hourly_rate']) ? floatval($salary['current_hourly_rate']) : 0);
+    return $role !== 'manager' && $hourlyRate > 0;
 }));
 
 // الحصول على طلبات تعديل الرواتب المعلقة (للمدير فقط)
@@ -558,11 +560,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
          FROM salaries s
          LEFT JOIN users u ON s.user_id = u.id
          LEFT JOIN users approver ON s.approved_by = approver.id
-         WHERE s.id = ?",
+         WHERE s.id = ?
+           AND (u.role IS NULL OR LOWER(u.role) != 'manager')
+           AND (u.hourly_rate IS NULL OR u.hourly_rate > 0)",
         [$salaryId]
     );
     
-    if ($salary && (!isset($salary['role']) || strtolower($salary['role']) !== 'manager')) {
+    if ($salary) {
         ?>
         <div class="row g-3">
             <div class="col-md-6">

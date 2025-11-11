@@ -221,9 +221,9 @@ $pageTitle = isset($lang['accountant_dashboard']) ? $lang['accountant_dashboard'
                 </div>
                 
             <?php elseif ($page === 'financial'): ?>
-                <!-- صفحة المالية -->
+                <!-- صفحة الخزنة -->
                 <div class="page-header mb-4">
-                    <h2><i class="bi bi-wallet2 me-2"></i><?php echo isset($lang['menu_financial']) ? $lang['menu_financial'] : 'المالية'; ?></h2>
+                    <h2><i class="bi bi-safe me-2"></i><?php echo isset($lang['menu_financial']) ? $lang['menu_financial'] : 'الخزنة'; ?></h2>
                 </div>
                 
                 <!-- لوحة مالية -->
@@ -314,6 +314,254 @@ $pageTitle = isset($lang['accountant_dashboard']) ? $lang['accountant_dashboard'
                         <div class="stat-card-description">هذا الشهر</div>
                     </div>
                 </div>
+            
+            <?php
+            $treasurySummary = $db->queryOne("
+                SELECT
+                    SUM(CASE WHEN type = 'income' AND status = 'approved' THEN amount ELSE 0 END) AS approved_income,
+                    SUM(CASE WHEN type = 'expense' AND status = 'approved' THEN amount ELSE 0 END) AS approved_expense,
+                    SUM(CASE WHEN type = 'transfer' AND status = 'approved' THEN amount ELSE 0 END) AS approved_transfer,
+                    SUM(CASE WHEN type = 'payment' AND status = 'approved' THEN amount ELSE 0 END) AS approved_payment,
+                    SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS pending_total
+                FROM financial_transactions
+            ");
+            
+            $pendingStats = $db->queryOne("
+                SELECT 
+                    COUNT(*) AS total_pending,
+                    SUM(amount) AS pending_amount
+                FROM financial_transactions
+                WHERE status = 'pending'
+            ");
+            
+            $pendingTransactionsRaw = $db->query("
+                SELECT id, type, amount, description, created_at 
+                FROM financial_transactions
+                WHERE status = 'pending'
+                ORDER BY created_at DESC
+                LIMIT 8
+            ");
+            $pendingTransactions = is_array($pendingTransactionsRaw) ? $pendingTransactionsRaw : [];
+            
+            $recentApprovedRaw = $db->query("
+                SELECT id, type, amount, description, approved_at 
+                FROM financial_transactions
+                WHERE status = 'approved' AND approved_at IS NOT NULL
+                ORDER BY approved_at DESC
+                LIMIT 8
+            ");
+            $recentApproved = is_array($recentApprovedRaw) ? $recentApprovedRaw : [];
+            
+            $monthlySummaryRaw = $db->query("
+                SELECT 
+                    DATE_FORMAT(created_at, '%Y-%m') AS month_key,
+                    SUM(CASE WHEN type = 'income' AND status = 'approved' THEN amount ELSE 0 END) AS total_income,
+                    SUM(CASE WHEN type = 'expense' AND status = 'approved' THEN amount ELSE 0 END) AS total_expense,
+                    SUM(CASE WHEN type = 'transfer' AND status = 'approved' THEN amount ELSE 0 END) AS total_transfer,
+                    SUM(CASE WHEN type = 'payment' AND status = 'approved' THEN amount ELSE 0 END) AS total_payment
+                FROM financial_transactions
+                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                GROUP BY month_key
+                ORDER BY month_key DESC
+                LIMIT 6
+            ");
+            $monthlySummary = is_array($monthlySummaryRaw) ? array_reverse($monthlySummaryRaw) : [];
+            
+            $netApprovedBalance = 
+                ($treasurySummary['approved_income'] ?? 0) 
+                - ($treasurySummary['approved_expense'] ?? 0)
+                - ($treasurySummary['approved_payment'] ?? 0);
+            
+            $typeLabelMap = [
+                'income' => $lang['income'] ?? 'إيراد',
+                'expense' => $lang['expense'] ?? 'مصروف',
+                'transfer' => isset($lang['transfer']) ? $lang['transfer'] : 'تحويل',
+                'payment' => isset($lang['payment']) ? $lang['payment'] : 'دفعة'
+            ];
+            
+            $typeColorMap = [
+                'income' => 'success',
+                'expense' => 'danger',
+                'transfer' => 'primary',
+                'payment' => 'warning'
+            ];
+            ?>
+            
+            <div class="row g-3 mt-4">
+                <div class="col-12 col-xl-4">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-light fw-bold">
+                            <i class="bi bi-graph-up-arrow me-2 text-primary"></i>ملخص الخزنة
+                        </div>
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="text-muted">إجمالي الإيرادات المعتمدة</span>
+                                <span class="fw-semibold text-success"><?php echo formatCurrency($treasurySummary['approved_income'] ?? 0); ?></span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="text-muted">إجمالي المصروفات المعتمدة</span>
+                                <span class="fw-semibold text-danger"><?php echo formatCurrency($treasurySummary['approved_expense'] ?? 0); ?></span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="text-muted">مدفوعات الموردين</span>
+                                <span class="fw-semibold text-warning"><?php echo formatCurrency($treasurySummary['approved_payment'] ?? 0); ?></span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="text-muted">تحويلات داخلية</span>
+                                <span class="fw-semibold text-primary"><?php echo formatCurrency($treasurySummary['approved_transfer'] ?? 0); ?></span>
+                            </div>
+                            <hr>
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="fw-semibold">صافي الرصيد المعتمد</span>
+                                <span class="fw-bold"><?php echo formatCurrency($netApprovedBalance); ?></span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-semibold text-muted">مبالغ بانتظار الاعتماد</span>
+                                <span class="fw-bold text-warning"><?php echo formatCurrency($treasurySummary['pending_total'] ?? 0); ?></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-xl-8">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-light fw-bold d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-hourglass-split me-2 text-warning"></i>المعاملات المعلقة</span>
+                            <span class="badge bg-warning text-dark">
+                                <?php echo intval($pendingStats['total_pending'] ?? 0); ?> 
+                                معاملة / <?php echo formatCurrency($pendingStats['pending_amount'] ?? 0); ?>
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <?php if (empty($pendingTransactions)): ?>
+                                <p class="text-muted mb-0">لا توجد معاملات بانتظار الاعتماد.</p>
+                            <?php else: ?>
+                                <div class="table-responsive">
+                                    <table class="table table-sm align-middle mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>المعرف</th>
+                                                <th>النوع</th>
+                                                <th>المبلغ</th>
+                                                <th>الوصف</th>
+                                                <th>التاريخ</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($pendingTransactions as $pending): ?>
+                                                <?php 
+                                                    $pendingType = $pending['type'] ?? '';
+                                                    $pendingColor = $typeColorMap[$pendingType] ?? 'secondary';
+                                                    $pendingLabel = $typeLabelMap[$pendingType] ?? $pendingType;
+                                                ?>
+                                                <tr>
+                                                    <td>#<?php echo intval($pending['id']); ?></td>
+                                                    <td>
+                                                        <span class="badge bg-<?php echo $pendingColor; ?>">
+                                                            <?php echo htmlspecialchars($pendingLabel, ENT_QUOTES, 'UTF-8'); ?>
+                                                        </span>
+                                                    </td>
+                                                    <td><?php echo formatCurrency($pending['amount']); ?></td>
+                                                    <td class="text-truncate" style="max-width: 240px;" title="<?php echo htmlspecialchars($pending['description'] ?? '-', ENT_QUOTES, 'UTF-8'); ?>">
+                                                        <?php echo htmlspecialchars($pending['description'] ?? '-', ENT_QUOTES, 'UTF-8'); ?>
+                                                    </td>
+                                                    <td><?php echo formatDateTime($pending['created_at']); ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row g-3 mt-1">
+                <div class="col-12 col-xl-6">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-light fw-bold">
+                            <i class="bi bi-calendar3 me-2 text-info"></i>التدفقات الشهرية المعتمدة
+                        </div>
+                        <div class="card-body">
+                            <?php if (empty($monthlySummary)): ?>
+                                <p class="text-muted mb-0">لا توجد بيانات خلال الأشهر الأخيرة.</p>
+                            <?php else: ?>
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>الشهر</th>
+                                                <th>الإيرادات</th>
+                                                <th>المصروفات</th>
+                                                <th>التحويلات</th>
+                                                <th>المدفوعات</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($monthlySummary as $monthRow): ?>
+                                                <?php 
+                                                    $monthLabel = '-';
+                                                    if (!empty($monthRow['month_key'])) {
+                                                        $dateObj = DateTime::createFromFormat('Y-m-d', $monthRow['month_key'] . '-01');
+                                                        if ($dateObj) {
+                                                            $monthLabel = $dateObj->format('F Y');
+                                                        } else {
+                                                            $monthLabel = $monthRow['month_key'];
+                                                        }
+                                                    }
+                                                ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($monthLabel, ENT_QUOTES, 'UTF-8'); ?></td>
+                                                    <td><?php echo formatCurrency($monthRow['total_income'] ?? 0); ?></td>
+                                                    <td><?php echo formatCurrency($monthRow['total_expense'] ?? 0); ?></td>
+                                                    <td><?php echo formatCurrency($monthRow['total_transfer'] ?? 0); ?></td>
+                                                    <td><?php echo formatCurrency($monthRow['total_payment'] ?? 0); ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-12 col-xl-6">
+                    <div class="card shadow-sm h-100">
+                        <div class="card-header bg-light fw-bold">
+                            <i class="bi bi-check-circle me-2 text-success"></i>أحدث الموافقات
+                        </div>
+                        <div class="card-body">
+                            <?php if (empty($recentApproved)): ?>
+                                <p class="text-muted mb-0">لا توجد معاملات معتمدة مؤخراً.</p>
+                            <?php else: ?>
+                                <ul class="list-group list-group-flush">
+                                    <?php foreach ($recentApproved as $approved): ?>
+                                        <?php 
+                                            $approvedType = $approved['type'] ?? '';
+                                            $approvedColor = $typeColorMap[$approvedType] ?? 'secondary';
+                                            $approvedLabel = $typeLabelMap[$approvedType] ?? $approvedType;
+                                        ?>
+                                        <li class="list-group-item d-flex justify-content-between align-items-start">
+                                            <div class="me-2">
+                                                <div class="fw-semibold">
+                                                    <span class="badge bg-<?php echo $approvedColor; ?> me-2">
+                                                        <?php echo htmlspecialchars($approvedLabel, ENT_QUOTES, 'UTF-8'); ?>
+                                                    </span>
+                                                    <?php echo formatCurrency($approved['amount']); ?>
+                                                </div>
+                                                <div class="small text-muted text-truncate" style="max-width: 260px;" title="<?php echo htmlspecialchars($approved['description'] ?? '-', ENT_QUOTES, 'UTF-8'); ?>">
+                                                    <?php echo htmlspecialchars($approved['description'] ?? '-', ENT_QUOTES, 'UTF-8'); ?>
+                                                </div>
+                                            </div>
+                                            <span class="small text-nowrap text-muted"><?php echo $approved['approved_at'] ? formatDateTime($approved['approved_at']) : '-'; ?></span>
+                                        </li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
                 
                 <!-- آخر المعاملات -->
                 <?php
@@ -355,10 +603,19 @@ $pageTitle = isset($lang['accountant_dashboard']) ? $lang['accountant_dashboard'
                                         </tr>
                                     <?php else: ?>
                                         <?php foreach ($transactions as $trans): ?>
+                                            <?php 
+                                                $transactionType = $trans['type'] ?? '';
+                                                $transactionColor = $typeColorMap[$transactionType] ?? ($transactionType === 'income' ? 'success' : 'danger');
+                                                $transactionLabel = $typeLabelMap[$transactionType] ?? (
+                                                    $transactionType === 'income'
+                                                        ? ($lang['income'] ?? 'إيراد')
+                                                        : ($lang['expense'] ?? 'مصروف')
+                                                );
+                                            ?>
                                             <tr>
                                                 <td>
-                                                    <span class="badge bg-<?php echo $trans['type'] === 'income' ? 'success' : 'danger'; ?>">
-                                                        <?php echo $trans['type'] === 'income' ? (isset($lang['income']) ? $lang['income'] : 'إيراد') : (isset($lang['expense']) ? $lang['expense'] : 'مصروف'); ?>
+                                                    <span class="badge bg-<?php echo $transactionColor; ?>">
+                                                        <?php echo htmlspecialchars($transactionLabel, ENT_QUOTES, 'UTF-8'); ?>
                                                     </span>
                                                 </td>
                                                 <td><?php echo formatCurrency($trans['amount']); ?></td>

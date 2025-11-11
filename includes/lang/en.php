@@ -59,7 +59,9 @@ $translations = [
     
     // Menus
     'menu_home' => 'Home',
-    'menu_financial' => 'Financial',
+    'menu_financial' => 'Treasury',
+    'transfer' => 'Transfer',
+    'payment' => 'Payment',
     'menu_suppliers' => 'Suppliers',
     'menu_inventory' => 'Inventory',
     'menu_collections' => 'Collections',

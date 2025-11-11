@@ -151,8 +151,8 @@ switch ($role) {
             ],
             ['divider' => true, 'title' => isset($lang['accounting_section']) ? $lang['accounting_section'] : 'المحاسبة'],
             [
-                'title' => isset($lang['menu_financial']) ? $lang['menu_financial'] : 'المالية',
-                'icon' => 'bi-wallet2',
+                'title' => isset($lang['menu_financial']) ? $lang['menu_financial'] : 'الخزنة',
+                'icon' => 'bi-safe',
                 'url' => $baseUrl . 'accountant.php?page=financial',
                 'active' => ($currentPage === 'accountant.php' && $currentPageParam === 'financial'),
                 'badge' => null

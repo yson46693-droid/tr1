@@ -111,8 +111,8 @@ switch ($role) {
                 'badge' => null
             ],
             [
-                'title' => isset($lang['menu_financial']) ? $lang['menu_financial'] : 'المالية',
-                'icon' => 'bi-wallet2',
+                'title' => isset($lang['menu_financial']) ? $lang['menu_financial'] : 'الخزنة',
+                'icon' => 'bi-safe',
                 'url' => $baseUrl . 'accountant.php?page=financial',
                 'active' => (isset($_GET['page']) && $_GET['page'] === 'financial'),
                 'badge' => null
