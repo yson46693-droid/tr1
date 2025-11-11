@@ -17,12 +17,18 @@ class AttendanceNotificationManager {
         this.todayStatusCache = null;
         this.todayStatusCacheTimestamp = 0;
         this.todayStatusCachePromise = null;
+        this.notificationsEnabled = false;
     }
 
     /**
      * تهيئة نظام الإشعارات
      */
     async init() {
+        if (!this.notificationsEnabled) {
+            console.log('Attendance notifications are globally disabled.');
+            return;
+        }
+
         // التحقق من أن المستخدم لديه صفحة حضور
         if (!this.hasAttendanceAccess()) {
             console.log('User does not have attendance access');
@@ -207,6 +213,10 @@ class AttendanceNotificationManager {
      * جدولة إشعارات التذكير
      */
     scheduleReminders() {
+        if (!this.notificationsEnabled) {
+            return;
+        }
+
         // إلغاء أي جدولة سابقة
         if (this.reminderTimeout) {
             clearTimeout(this.reminderTimeout);
@@ -320,6 +330,10 @@ class AttendanceNotificationManager {
      * عرض إشعار التذكير
      */
     async showReminderNotification(eventType = 'checkin') {
+        if (!this.notificationsEnabled) {
+            return;
+        }
+
         const status = await this.getTodayStatus();
 
         if (eventType === 'checkin' && status.checked_in) {
@@ -389,6 +403,9 @@ class AttendanceNotificationManager {
     }
 
     async showImmediateReminder(eventType) {
+        if (!this.notificationsEnabled) {
+            return;
+        }
         await this.showReminderNotification(eventType);
     }
 
@@ -526,6 +543,10 @@ class AttendanceNotificationManager {
      * بدء الفحص اليومي
      */
     startDailyCheck() {
+        if (!this.notificationsEnabled) {
+            return;
+        }
+
         this.dailyCheckInterval = setInterval(async () => {
             const now = new Date();
             if (now.getHours() === 0 && now.getMinutes() === 0) {
@@ -560,6 +581,10 @@ class AttendanceNotificationManager {
     }
 
     async showOverdueCheckoutReminder() {
+        if (!this.notificationsEnabled) {
+            return;
+        }
+
         const status = await this.getTodayStatus();
         if (!status.checked_in || status.checked_out || !status.past_work_end) {
             return;
@@ -607,32 +632,12 @@ class AttendanceNotificationManager {
             }
         }
 
-        this.playAlertSound();
+        // تم تعطيل الأصوات المصاحبة للتنبيهات بناءً على طلب الإدارة
     }
 
     playAlertSound() {
-        try {
-            if (!this.audioContext) {
-                this.audioContext = new AudioContext();
-            }
-            const duration = 0.7;
-            const oscillator = this.audioContext.createOscillator();
-            const gainNode = this.audioContext.createGain();
-
-            oscillator.type = 'sine';
-            oscillator.frequency.setValueAtTime(880, this.audioContext.currentTime);
-            gainNode.gain.setValueAtTime(0.001, this.audioContext.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.3, this.audioContext.currentTime + 0.05);
-            gainNode.gain.exponentialRampToValueAtTime(0.001, this.audioContext.currentTime + duration);
-
-            oscillator.connect(gainNode);
-            gainNode.connect(this.audioContext.destination);
-
-            oscillator.start();
-            oscillator.stop(this.audioContext.currentTime + duration);
-        } catch (error) {
-            console.warn('Audio context not available for alert sound:', error);
-        }
+        // تم إيقاف تشغيل أي أصوات للتنقل أو الإشعارات
+        return;
     }
 }
 

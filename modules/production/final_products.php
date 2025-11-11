@@ -12,6 +12,7 @@ require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/table_styles.php';
+require_once __DIR__ . '/../../includes/vehicle_inventory.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
@@ -19,6 +20,19 @@ $currentUser = getCurrentUser();
 $db = db();
 $error = '';
 $success = '';
+
+$sessionErrorKey = 'production_inventory_error';
+$sessionSuccessKey = 'production_inventory_success';
+
+if (!empty($_SESSION[$sessionErrorKey])) {
+    $error = $_SESSION[$sessionErrorKey];
+    unset($_SESSION[$sessionErrorKey]);
+}
+
+if (!empty($_SESSION[$sessionSuccessKey])) {
+    $success = $_SESSION[$sessionSuccessKey];
+    unset($_SESSION[$sessionSuccessKey]);
+}
 
 $currentPageSlug = $_GET['page'] ?? 'inventory';
 $currentSection = $_GET['section'] ?? null;
@@ -158,6 +172,211 @@ if (empty($productionLineIdColumn)) {
         $db->execute("ALTER TABLE `production` ADD CONSTRAINT `production_ibfk_line` FOREIGN KEY (`production_line_id`) REFERENCES `production_lines` (`id`) ON DELETE SET NULL");
     } catch (Exception $e) {
         error_log("Error adding production_line_id column: " . $e->getMessage());
+    }
+}
+
+$warehousesTableExists = $db->queryOne("SHOW TABLES LIKE 'warehouses'");
+$primaryWarehouse = null;
+$transferWarehouses = [];
+$destinationWarehouses = [];
+$transferProducts = [];
+$canCreateTransfers = false;
+
+if (!empty($warehousesTableExists)) {
+    try {
+        $primaryWarehouse = $db->queryOne(
+            "SELECT id, name, location, description, warehouse_type, status
+             FROM warehouses
+             WHERE warehouse_type = 'main'
+             ORDER BY status = 'active' DESC, id ASC
+             LIMIT 1"
+        );
+
+        if (!$primaryWarehouse) {
+            $db->execute(
+                "INSERT INTO warehouses (name, location, description, warehouse_type, status)
+                 VALUES (?, ?, ?, 'main', 'active')",
+                [
+                    'المخزن الرئيسي',
+                    'الموقع الرئيسي للشركة',
+                    'تم إنشاء هذا المخزن تلقائياً كمخزن رئيسي للنظام'
+                ]
+            );
+
+            $primaryWarehouseId = $db->getLastInsertId();
+            $primaryWarehouse = $db->queryOne(
+                "SELECT id, name, location, description, warehouse_type, status
+                 FROM warehouses
+                 WHERE id = ?",
+                [$primaryWarehouseId]
+            );
+
+            if (!empty($currentUser['id'])) {
+                logAudit($currentUser['id'], 'create_warehouse', 'warehouse', $primaryWarehouseId, null, [
+                    'auto_created' => true,
+                    'source' => 'production_inventory'
+                ]);
+            }
+        }
+
+        if ($primaryWarehouse) {
+            $productsWithoutWarehouse = $db->queryOne(
+                "SELECT COUNT(*) as total FROM products WHERE warehouse_id IS NULL"
+            );
+
+            if (($productsWithoutWarehouse['total'] ?? 0) > 0) {
+                $db->execute(
+                    "UPDATE products SET warehouse_id = ? WHERE warehouse_id IS NULL",
+                    [$primaryWarehouse['id']]
+                );
+            }
+        }
+
+        $transferWarehouses = $db->query(
+            "SELECT id, name, warehouse_type, status
+             FROM warehouses
+             WHERE status = 'active'
+             ORDER BY (id = ?) DESC, warehouse_type ASC, name ASC",
+            [$primaryWarehouse['id'] ?? 0]
+        );
+
+        if (is_array($transferWarehouses)) {
+            foreach ($transferWarehouses as $warehouse) {
+                if ($primaryWarehouse && intval($warehouse['id']) === intval($primaryWarehouse['id'])) {
+                    continue;
+                }
+                $destinationWarehouses[] = $warehouse;
+            }
+        }
+
+        $transferProducts = $db->query(
+            "SELECT id, name, quantity
+             FROM products
+             WHERE status = 'active'
+             ORDER BY name ASC"
+        );
+
+        $canCreateTransfers = !empty($primaryWarehouse) && !empty($destinationWarehouses);
+    } catch (Exception $warehouseException) {
+        error_log('Production inventory warehouse setup error: ' . $warehouseException->getMessage());
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_transfer') {
+    $transferErrors = [];
+
+    if (!$canCreateTransfers || !$primaryWarehouse) {
+        $transferErrors[] = 'لا يمكن إنشاء طلب النقل حالياً بسبب عدم توفر مخزن رئيسي أو مخازن وجهة نشطة.';
+    } else {
+        $fromWarehouseId = intval($primaryWarehouse['id']);
+        $toWarehouseId = intval($_POST['to_warehouse_id'] ?? 0);
+        $transferDate = $_POST['transfer_date'] ?? date('Y-m-d');
+        $reason = trim((string)($_POST['reason'] ?? ''));
+        $notes = trim((string)($_POST['notes'] ?? ''));
+
+        if ($toWarehouseId <= 0) {
+            $transferErrors[] = 'يرجى اختيار المخزن الوجهة.';
+        }
+
+        if ($toWarehouseId === $fromWarehouseId) {
+            $transferErrors[] = 'لا يمكن النقل من وإلى نفس المخزن.';
+        }
+
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $transferDate)) {
+            $transferDate = date('Y-m-d');
+        }
+
+        $rawItems = $_POST['items'] ?? [];
+        $transferItems = [];
+
+        if (is_array($rawItems)) {
+            foreach ($rawItems as $item) {
+                $productId = isset($item['product_id']) ? intval($item['product_id']) : 0;
+                $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0.0;
+                $itemNotes = isset($item['notes']) ? trim((string)$item['notes']) : null;
+
+                if ($productId > 0 && $quantity > 0) {
+                    $transferItems[] = [
+                        'product_id' => $productId,
+                        'quantity' => round($quantity, 4),
+                        'notes' => $itemNotes !== '' ? $itemNotes : null,
+                    ];
+                }
+            }
+        }
+
+        if (empty($transferItems)) {
+            $transferErrors[] = 'أضف منتجاً واحداً على الأقل مع كمية صالحة.';
+        }
+
+        if (empty($transferErrors)) {
+            $productIds = array_values(array_unique(array_column($transferItems, 'product_id')));
+
+            if (!empty($productIds)) {
+                $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+                $stockRows = $db->query(
+                    "SELECT id, name, quantity FROM products WHERE id IN ($placeholders)",
+                    $productIds
+                );
+                $stockMap = [];
+
+                foreach ($stockRows as $row) {
+                    $stockMap[intval($row['id'])] = [
+                        'quantity' => floatval($row['quantity'] ?? 0),
+                        'name' => $row['name'] ?? ''
+                    ];
+                }
+
+                foreach ($transferItems as $transferItem) {
+                    $productId = $transferItem['product_id'];
+                    if (!isset($stockMap[$productId])) {
+                        $transferErrors[] = 'المنتج المحدد غير موجود في المخزن الرئيسي.';
+                        break;
+                    }
+
+                    if ($transferItem['quantity'] > $stockMap[$productId]['quantity']) {
+                        $transferErrors[] = sprintf(
+                            'الكمية المطلوبة للمنتج "%s" غير متاحة في المخزون الحالي.',
+                            $stockMap[$productId]['name']
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (empty($transferErrors)) {
+            $result = createWarehouseTransfer(
+                $fromWarehouseId,
+                $toWarehouseId,
+                $transferDate,
+                array_map(static function ($item) {
+                    return [
+                        'product_id' => $item['product_id'],
+                        'quantity' => $item['quantity'],
+                        'notes' => $item['notes'] ?? null
+                    ];
+                }, $transferItems),
+                $reason !== '' ? $reason : null,
+                $notes !== '' ? $notes : null,
+                $currentUser['id'] ?? null
+            );
+
+            if (!empty($result['success'])) {
+                $_SESSION[$sessionSuccessKey] = sprintf(
+                    'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
+                    $result['transfer_number'] ?? '#'
+                );
+                header('Location: ' . getRelativeUrl('production.php?page=inventory'));
+                exit;
+            }
+
+            $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
+        }
+    }
+
+    if (!empty($transferErrors)) {
+        $error = implode(' | ', array_unique($transferErrors));
     }
 }
 
@@ -404,15 +623,37 @@ $lang = isset($translations) ? $translations : [];
 <div class="page-header mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h2 class="mb-0"><i class="bi bi-boxes me-2"></i>جدول المنتجات</h2>
     <div class="d-flex flex-wrap gap-2">
-        <?php
-        $transferUrl = getDashboardUrl('sales') . '?page=vehicle_inventory';
-        ?>
-        <a class="btn btn-outline-primary" href="<?php echo htmlspecialchars($transferUrl); ?>">
+        <button
+            type="button"
+            class="btn btn-outline-primary"
+            data-bs-toggle="modal"
+            data-bs-target="#requestTransferModal"
+            <?php echo $canCreateTransfers ? '' : 'disabled'; ?>
+            title="<?php echo $canCreateTransfers ? '' : 'يرجى التأكد من وجود مخازن وجهة نشطة.'; ?>"
+        >
             <i class="bi bi-arrow-left-right me-1"></i>
-            نقل منتجات بين المخازن
-        </a>
+            طلب نقل منتجات
+        </button>
     </div>
 </div>
+
+<?php if ($primaryWarehouse): ?>
+    <div class="alert alert-info d-flex align-items-center gap-2">
+        <i class="bi bi-info-circle-fill fs-5"></i>
+        <div>
+            هذه الصفحة تمثل المخزن الرئيسي للشركة
+            <strong><?php echo htmlspecialchars($primaryWarehouse['name']); ?></strong>.
+            كل المنتجات المعروضة يتم اعتمادها كمخزون رئيسي يظهر للمدير والمحاسب في الصفحات الأخرى.
+        </div>
+    </div>
+<?php elseif (!empty($warehousesTableExists)): ?>
+    <div class="alert alert-warning d-flex align-items-center gap-2">
+        <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+        <div>
+            لم يتم العثور على مخزن رئيسي نشط. يرجى إنشاء مخزن رئيسي من إعدادات المخازن لضمان ظهور المخزون في باقي الصفحات.
+        </div>
+    </div>
+<?php endif; ?>
 
 <?php if ($error): ?>
     <div class="alert alert-danger alert-dismissible fade show">
@@ -510,6 +751,124 @@ $lang = isset($translations) ? $translations : [];
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($primaryWarehouse): ?>
+<div class="modal fade" id="requestTransferModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-arrow-left-right me-2"></i>
+                    طلب نقل منتجات من المخزن الرئيسي
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <form method="POST" id="mainWarehouseTransferForm">
+                <input type="hidden" name="action" value="create_transfer">
+                <input type="hidden" name="from_warehouse_id" value="<?php echo intval($primaryWarehouse['id']); ?>">
+                <div class="modal-body">
+                    <?php if (!$canCreateTransfers): ?>
+                        <div class="alert alert-warning d-flex align-items-center gap-2 mb-0">
+                            <i class="bi bi-exclamation-triangle-fill fs-5"></i>
+                            <div>
+                                لا توجد مخازن وجهة نشطة متاحة حالياً. يرجى إنشاء أو تفعيل مخزن وجهة قبل إرسال طلب النقل.
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">من المخزن</label>
+                                <div class="form-control-plaintext fw-semibold">
+                                    <?php echo htmlspecialchars($primaryWarehouse['name']); ?> (مخزن رئيسي)
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">إلى المخزن <span class="text-danger">*</span></label>
+                                <select class="form-select" name="to_warehouse_id" id="transferToWarehouse" required>
+                                    <option value="">اختر المخزن الوجهة</option>
+                                    <?php foreach ($destinationWarehouses as $warehouse): ?>
+                                        <option value="<?php echo intval($warehouse['id']); ?>">
+                                            <?php echo htmlspecialchars($warehouse['name']); ?>
+                                            (<?php echo $warehouse['warehouse_type'] === 'vehicle' ? 'مخزن سيارة' : 'مخزن'; ?>)
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">تاريخ النقل <span class="text-danger">*</span></label>
+                                <input type="date" class="form-control" name="transfer_date" value="<?php echo date('Y-m-d'); ?>" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">السبب</label>
+                                <input type="text" class="form-control" name="reason" placeholder="مثال: تجهيز مخزون لمندوب المبيعات">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">عناصر النقل <span class="text-danger">*</span></label>
+                            <div id="mainWarehouseTransferItems">
+                                <div class="transfer-item row g-2 align-items-end mb-2">
+                                    <div class="col-md-5">
+                                        <label class="form-label small text-muted">المنتج</label>
+                                        <select class="form-select product-select" name="items[0][product_id]" required>
+                                            <option value="">اختر المنتج</option>
+                                            <?php foreach ($transferProducts as $product): ?>
+                                                <option value="<?php echo intval($product['id']); ?>"
+                                                        data-available="<?php echo floatval($product['quantity'] ?? 0); ?>">
+                                                    <?php echo htmlspecialchars($product['name']); ?>
+                                                    (متوفر: <?php echo number_format((float)($product['quantity'] ?? 0), 2); ?>)
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small text-muted">الكمية</label>
+                                        <input type="number" step="0.01" min="0.01" class="form-control quantity-input" name="items[0][quantity]" placeholder="الكمية" required>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <label class="form-label small text-muted">ملاحظات</label>
+                                        <input type="text" class="form-control" name="items[0][notes]" placeholder="ملاحظات (اختياري)">
+                                    </div>
+                                    <div class="col-md-1 text-end">
+                                        <button type="button" class="btn btn-outline-danger remove-transfer-item" title="حذف العنصر">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" id="addTransferItemBtn">
+                                <i class="bi bi-plus-circle me-1"></i>
+                                إضافة منتج آخر
+                            </button>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">ملاحظات إضافية</label>
+                            <textarea class="form-control" name="notes" rows="3" placeholder="أي تفاصيل إضافية للمدير (اختياري)"></textarea>
+                        </div>
+
+                        <div class="alert alert-info d-flex align-items-center gap-2">
+                            <i class="bi bi-info-circle-fill fs-5"></i>
+                            <div>
+                                سيتم إرسال طلب النقل للمدير للمراجعة والموافقة قبل خصم الكميات من المخزن الرئيسي.
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary" <?php echo $canCreateTransfers ? '' : 'disabled'; ?>>
+                        إرسال الطلب
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="modal fade" id="batchDetailsModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
