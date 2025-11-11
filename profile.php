@@ -14,6 +14,7 @@ requireLogin();
 
 $currentUser = getCurrentUser();
 $db = db();
+$passwordMinLength = getPasswordMinLength();
 
 $profilePhotoSupported = false;
 try {
@@ -126,8 +127,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $error = 'كلمة المرور الحالية غير صحيحة';
                     } elseif ($newPassword !== $confirmPassword) {
                         $error = 'كلمة المرور الجديدة غير متطابقة';
-                    } elseif (strlen($newPassword) < PASSWORD_MIN_LENGTH) {
-                        $error = 'كلمة المرور يجب أن تكون على الأقل ' . PASSWORD_MIN_LENGTH . ' أحرف';
+                    } elseif (strlen($newPassword) < $passwordMinLength) {
+                        $error = 'كلمة المرور يجب أن تكون على الأقل ' . $passwordMinLength . ' أحرف';
                     } else {
                         $newPasswordHash = hashPassword($newPassword);
                         $db->execute(
@@ -332,8 +333,8 @@ $dashboardUrl = getDashboardUrl($currentUser['role']);
                                 <div class="mb-3">
                                     <label for="new_password" class="form-label">كلمة المرور الجديدة</label>
                                     <input type="password" class="form-control" id="new_password" name="new_password" 
-                                           placeholder="أدخل كلمة المرور الجديدة" minlength="<?php echo PASSWORD_MIN_LENGTH; ?>">
-                                    <small class="text-muted">يجب أن تكون على الأقل <?php echo PASSWORD_MIN_LENGTH; ?> أحرف</small>
+                                           placeholder="أدخل كلمة المرور الجديدة" minlength="<?php echo $passwordMinLength; ?>">
+                                    <small class="text-muted">يجب أن تكون على الأقل <?php echo $passwordMinLength; ?> أحرف</small>
                                 </div>
                                 
                                 <div class="mb-3">

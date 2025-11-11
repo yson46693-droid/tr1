@@ -131,6 +131,10 @@ if ($currentUser && $currentUserRole === 'sales') {
     <?php if ($dir === 'rtl'): ?>
     <link href="<?php echo $assetsUrl; ?>css/rtl.css?v=<?php echo $cacheVersion; ?>" rel="stylesheet">
     <?php endif; ?>
+    <script>
+        window.APP_CONFIG = window.APP_CONFIG || {};
+        window.APP_CONFIG.passwordMinLength = <?php echo json_encode(getPasswordMinLength(), JSON_UNESCAPED_UNICODE); ?>;
+    </script>
     
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="<?php echo ASSETS_URL; ?>icons/favicon.svg">

@@ -18,6 +18,7 @@ require_once __DIR__ . '/../../includes/table_styles.php';
 requireRole('manager');
 
 $currentUser = getCurrentUser();
+$passwordMinLength = getPasswordMinLength();
 $db = db();
 
 $usersModuleContextValue = isset($usersModuleContext) && $usersModuleContext === 'security' ? 'security' : 'users';
@@ -72,8 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if (empty($username) || empty($email) || empty($password) || empty($role)) {
             $error = 'يجب إدخال جميع الحقول المطلوبة';
-        } elseif (strlen($password) < PASSWORD_MIN_LENGTH) {
-            $error = 'كلمة المرور يجب أن تكون على الأقل ' . PASSWORD_MIN_LENGTH . ' أحرف';
+        } elseif (strlen($password) < $passwordMinLength) {
+            $error = 'كلمة المرور يجب أن تكون على الأقل ' . $passwordMinLength . ' أحرف';
         } else {
             // التحقق من وجود المستخدم
             $existing = getUserByUsername($username);
@@ -243,8 +244,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($userId <= 0 || empty($newPassword)) {
             $error = 'يجب إدخال كلمة مرور جديدة';
-        } elseif (strlen($newPassword) < PASSWORD_MIN_LENGTH) {
-            $error = 'كلمة المرور يجب أن تكون على الأقل ' . PASSWORD_MIN_LENGTH . ' أحرف';
+        } elseif (strlen($newPassword) < $passwordMinLength) {
+            $error = 'كلمة المرور يجب أن تكون على الأقل ' . $passwordMinLength . ' أحرف';
         } else {
             $passwordHash = hashPassword($newPassword);
             $db->execute(
@@ -641,8 +642,8 @@ $users = $db->query($sql, $params);
                         <div class="col-md-6 mb-3">
                             <label class="form-label">كلمة المرور <span class="text-danger">*</span></label>
                             <input type="password" class="form-control" name="password" 
-                                   minlength="<?php echo PASSWORD_MIN_LENGTH; ?>" required>
-                            <small class="text-muted">على الأقل <?php echo PASSWORD_MIN_LENGTH; ?> أحرف</small>
+                                   minlength="<?php echo $passwordMinLength; ?>" required>
+                            <small class="text-muted">على الأقل <?php echo $passwordMinLength; ?> أحرف</small>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">الدور <span class="text-danger">*</span></label>
@@ -762,8 +763,8 @@ $users = $db->query($sql, $params);
                     <div class="mb-3">
                         <label class="form-label">كلمة المرور الجديدة <span class="text-danger">*</span></label>
                         <input type="password" class="form-control" name="new_password" 
-                               minlength="<?php echo PASSWORD_MIN_LENGTH; ?>" required>
-                        <small class="text-muted">على الأقل <?php echo PASSWORD_MIN_LENGTH; ?> أحرف</small>
+                               minlength="<?php echo $passwordMinLength; ?>" required>
+                        <small class="text-muted">على الأقل <?php echo $passwordMinLength; ?> أحرف</small>
                     </div>
                 </div>
                 <div class="modal-footer">

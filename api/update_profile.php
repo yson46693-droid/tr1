@@ -14,6 +14,7 @@ requireLogin();
 
 $currentUser = getCurrentUser();
 $db = db();
+$passwordMinLength = getPasswordMinLength();
 
 $profilePhotoSupported = false;
 try {
@@ -147,9 +148,9 @@ if ($action === 'update_profile') {
         exit;
     }
     
-    if (strlen($newPassword) < PASSWORD_MIN_LENGTH) {
+    if (strlen($newPassword) < $passwordMinLength) {
         http_response_code(400);
-        echo json_encode(['error' => 'كلمة المرور يجب أن تكون على الأقل ' . PASSWORD_MIN_LENGTH . ' أحرف']);
+        echo json_encode(['error' => 'كلمة المرور يجب أن تكون على الأقل ' . $passwordMinLength . ' أحرف']);
         exit;
     }
     
