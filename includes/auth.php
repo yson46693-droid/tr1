@@ -388,13 +388,21 @@ function hasRole($role) {
     if (!isLoggedIn()) {
         return false;
     }
-    
-    $currentRole = $_SESSION['role'] ?? null;
-    if ($currentRole === null) {
+
+    if (is_array($role)) {
+        return hasAnyRole($role);
+    }
+
+    if (!is_string($role) || $role === '') {
         return false;
     }
     
-    return strtolower((string) $currentRole) === strtolower((string) $role);
+    $currentRole = $_SESSION['role'] ?? null;
+    if (!is_string($currentRole) || $currentRole === '') {
+        return false;
+    }
+    
+    return strtolower($currentRole) === strtolower($role);
 }
 
 /**
