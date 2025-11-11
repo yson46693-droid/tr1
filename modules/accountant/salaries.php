@@ -530,7 +530,12 @@ if ($currentUser['role'] === 'manager') {
 }
 
 require_once __DIR__ . '/../../includes/path_helper.php';
-$currentUrl = getRelativeUrl('dashboard/accountant.php');
+$currentScript = $_SERVER['PHP_SELF'] ?? '/dashboard/accountant.php';
+$currentScript = ltrim($currentScript, '/');
+if ($currentScript === '' || strpos($currentScript, 'dashboard/') !== 0) {
+    $currentScript = 'dashboard/accountant.php';
+}
+$currentUrl = getRelativeUrl($currentScript);
 
 // جلب طلبات السلف
 $advances = [];
@@ -952,9 +957,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                 </div>
                 <div class="col-md-2">
                     <label class="form-label">&nbsp;</label>
-                    <button type="button" class="btn btn-secondary w-100" onclick="switchTab('calculate')">
-                        <i class="bi bi-plus-circle me-2"></i>حساب جديد
-                    </button>
+                    <div class="d-grid gap-2">
+                        <button type="button" class="btn btn-secondary" onclick="switchTab('calculate')">
+                            <i class="bi bi-plus-circle me-2"></i>حساب جديد
+                        </button>
+                        <button type="button" class="btn btn-info" onclick="showMonthlyReport()">
+                            <i class="bi bi-file-earmark-text me-2"></i>تقرير شهري شامل
+                        </button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -1370,10 +1380,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 
 <script>
 function switchTab(tabName) {
-    <?php
-    $baseUrl = getRelativeUrl('dashboard/accountant.php');
-    ?>
-    window.location.href = '<?php echo $baseUrl; ?>?page=salaries&view=' + tabName + '&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>';
+    window.location.href = <?php echo json_encode($currentUrl, JSON_UNESCAPED_SLASHES); ?> + '?page=salaries&view=' + tabName + '&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>';
 }
 
 function calculateAllSalaries() {
@@ -1395,10 +1402,7 @@ function viewSalaryDetails(salaryId) {
     const content = document.getElementById('salaryDetailsContent');
     
     // تحميل التفاصيل عبر AJAX
-    <?php
-    $ajaxUrl = $baseUrl . '?page=salaries&ajax=1&id=';
-    ?>
-    fetch('<?php echo $ajaxUrl; ?>' + salaryId)
+    fetch(<?php echo json_encode($currentUrl, JSON_UNESCAPED_SLASHES); ?> + '?page=salaries&ajax=1&id=' + salaryId)
         .then(response => response.text())
         .then(html => {
             content.innerHTML = html;
@@ -1436,10 +1440,7 @@ function formatCurrency(amount) {
 }
 
 function showMonthlyReport() {
-    <?php
-    $reportUrl = getRelativeUrl('dashboard/accountant.php') . '?page=salaries&report=1&month=' . $selectedMonth . '&year=' . $selectedYear . '&view=' . $view;
-    ?>
-    window.location.href = '<?php echo $reportUrl; ?>';
+    window.location.href = <?php echo json_encode($currentUrl, JSON_UNESCAPED_SLASHES); ?> + '?page=salaries&report=1&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>&view=<?php echo $view; ?>';
 }
 
 // حساب الراتب الجديد عند التغيير

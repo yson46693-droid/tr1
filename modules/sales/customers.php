@@ -693,9 +693,9 @@ $collectionsLabel = $isSalesUser ? 'تحصيلاتي' : 'إجمالي التحص
     </div>
 </div>
 
-<?php else: ?>
+<?php endif; ?>
 
-<?php elseif ($section === 'delegates' && !$isSalesUser): ?>
+<?php if ($section === 'delegates' && !$isSalesUser): ?>
 
 <?php
 $delegatesSummaryTitle = 'ملخص مناديب المبيعات';
