@@ -132,9 +132,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Pagination
-$page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
 $perPage = 10;
-$offset = ($page - 1) * $perPage;
+$offset = ($pageNum - 1) * $perPage;
 
 // البحث والفلترة
 $search = $_GET['search'] ?? '';
@@ -190,7 +190,7 @@ if (!empty($category)) {
 // الحصول على العدد الإجمالي
 $totalResult = $db->queryOne($countSql, $params);
 $totalProducts = $totalResult['total'] ?? 0;
-$totalPages = ceil($totalProducts / $perPage);
+$totalPages = (int) ceil($totalProducts / $perPage);
 
 // الحصول على المنتجات مع Pagination
 $sql .= " ORDER BY name ASC LIMIT ? OFFSET ?";
@@ -239,6 +239,35 @@ try {
          LIMIT 10"
     );
 }
+// ملخص سريع للمخزون
+$inventorySummary = $db->queryOne("
+    SELECT 
+        COUNT(*) AS total_products,
+        COALESCE(SUM(quantity), 0) AS total_quantity,
+        COALESCE(SUM(quantity * unit_price), 0) AS total_value
+    FROM products
+    WHERE status = 'active'
+");
+
+$lowStockCount = is_array($lowStock) ? count($lowStock) : 0;
+
+$buildInventoryUrl = function(array $overrides = []) use ($search, $category) {
+    $query = ['page' => 'inventory'];
+    if ($search !== '') {
+        $query['search'] = $search;
+    }
+    if ($category !== '') {
+        $query['category'] = $category;
+    }
+    foreach ($overrides as $key => $value) {
+        if ($value === null) {
+            unset($query[$key]);
+        } else {
+            $query[$key] = $value;
+        }
+    }
+    return '?' . http_build_query($query);
+};
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-boxes me-2"></i>إدارة المخزون</h2>
@@ -264,6 +293,109 @@ try {
 <?php endif; ?>
 
 <!-- تنبيهات المخزون المنخفض -->
+<style>
+.inventory-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+.inventory-summary-card {
+    background: linear-gradient(135deg, rgba(30, 58, 95, 0.95), rgba(44, 82, 130, 0.88));
+    color: #fff;
+    border-radius: 18px;
+    padding: 1.25rem;
+    box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+    position: relative;
+    overflow: hidden;
+}
+.inventory-summary-card .label {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.85;
+}
+.inventory-summary-card .value {
+    font-size: 1.7rem;
+    font-weight: 700;
+    margin-top: 0.35rem;
+}
+.inventory-summary-card .meta {
+    margin-top: 0.4rem;
+    font-size: 0.95rem;
+    opacity: 0.85;
+}
+.inventory-summary-card i {
+    position: absolute;
+    bottom: 1rem;
+    inset-inline-end: 1rem;
+    font-size: 2.6rem;
+    opacity: 0.12;
+}
+.inventory-search-card {
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    box-shadow: 0 16px 30px rgba(15, 23, 42, 0.12);
+}
+.inventory-search-card .form-control,
+.inventory-search-card .form-select {
+    border-radius: 12px;
+}
+.inventory-search-card .btn {
+    border-radius: 12px;
+}
+.inventory-table-card {
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    box-shadow: 0 18px 34px rgba(15, 23, 42, 0.12);
+}
+.inventory-table-card .card-header {
+    border-radius: 18px 18px 0 0;
+}
+.low-stock-alert ul {
+    margin-bottom: 0;
+    padding-inline-start: 1.2rem;
+}
+.low-stock-alert li {
+    margin-bottom: 0.35rem;
+}
+@media (max-width: 575.98px) {
+    .inventory-summary-card {
+        padding: 1rem;
+    }
+    .inventory-summary-card .value {
+        font-size: 1.45rem;
+    }
+}
+</style>
+
+<div class="inventory-summary">
+    <div class="inventory-summary-card">
+        <span class="label">إجمالي المنتجات النشطة</span>
+        <div class="value"><?php echo number_format($inventorySummary['total_products'] ?? 0); ?></div>
+        <div class="meta">عدد العناصر المتاحة حالياً بالمخزون</div>
+        <i class="bi bi-box-seam"></i>
+    </div>
+    <div class="inventory-summary-card">
+        <span class="label">إجمالي الكمية</span>
+        <div class="value"><?php echo number_format($inventorySummary['total_quantity'] ?? 0, 2); ?></div>
+        <div class="meta">إجمالي الوحدات المتاحة بجميع الفئات</div>
+        <i class="bi bi-diagram-3"></i>
+    </div>
+    <div class="inventory-summary-card">
+        <span class="label">القيمة التقديرية</span>
+        <div class="value"><?php echo formatCurrency($inventorySummary['total_value'] ?? 0); ?></div>
+        <div class="meta">مجموع (الكمية × سعر الوحدة) للمنتجات النشطة</div>
+        <i class="bi bi-cash-stack"></i>
+    </div>
+    <div class="inventory-summary-card">
+        <span class="label">منتجات منخفضة المخزون</span>
+        <div class="value"><?php echo number_format($lowStockCount); ?></div>
+        <div class="meta"><?php echo $lowStockCount > 0 ? 'يجب إعادة التوريد لتجنّب نفاد المخزون' : 'لا توجد عناصر حرجة حالياً'; ?></div>
+        <i class="bi bi-exclamation-triangle"></i>
+    </div>
+</div>
+
 <?php if (!empty($lowStock)): ?>
     <div class="alert alert-warning">
         <h5><i class="bi bi-exclamation-triangle me-2"></i>تنبيه: مخزون منخفض</h5>
@@ -278,7 +410,7 @@ try {
 <?php endif; ?>
 
 <!-- البحث والفلترة -->
-<div class="card shadow-sm mb-4">
+<div class="card inventory-search-card mb-4">
     <div class="card-body">
         <?php
         require_once __DIR__ . '/../../includes/path_helper.php';
@@ -311,7 +443,7 @@ try {
 </div>
 
 <!-- قائمة المنتجات -->
-<div class="card shadow-sm">
+<div class="card inventory-table-card">
     <div class="card-header bg-primary text-white">
         <h5 class="mb-0">قائمة المنتجات</h5>
     </div>
@@ -372,26 +504,26 @@ try {
         <?php if ($totalPages > 1): ?>
         <nav aria-label="Page navigation" class="mt-3">
             <ul class="pagination justify-content-center flex-wrap">
-                <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?page=<?php echo $page - 1; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>">
+                <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
+                    <a class="page-link" href="<?php echo htmlspecialchars($buildInventoryUrl(['p' => $pageNum - 1])); ?>">
                         <i class="bi bi-chevron-right"></i>
                     </a>
                 </li>
                 
                 <?php
-                $startPage = max(1, $page - 2);
-                $endPage = min($totalPages, $page + 2);
+                $startPage = max(1, $pageNum - 2);
+                $endPage = min($totalPages, $pageNum + 2);
                 
                 if ($startPage > 1): ?>
-                    <li class="page-item"><a class="page-link" href="?page=1&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>">1</a></li>
+                    <li class="page-item"><a class="page-link" href="<?php echo htmlspecialchars($buildInventoryUrl(['p' => 1])); ?>">1</a></li>
                     <?php if ($startPage > 2): ?>
                         <li class="page-item disabled"><span class="page-link">...</span></li>
                     <?php endif; ?>
                 <?php endif; ?>
                 
                 <?php for ($i = $startPage; $i <= $endPage; $i++): ?>
-                    <li class="page-item <?php echo $i == $page ? 'active' : ''; ?>">
-                        <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>">
+                    <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
+                        <a class="page-link" href="<?php echo htmlspecialchars($buildInventoryUrl(['p' => $i])); ?>">
                             <?php echo $i; ?>
                         </a>
                     </li>
@@ -401,11 +533,11 @@ try {
                     <?php if ($endPage < $totalPages - 1): ?>
                         <li class="page-item disabled"><span class="page-link">...</span></li>
                     <?php endif; ?>
-                    <li class="page-item"><a class="page-link" href="?page=<?php echo $totalPages; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>"><?php echo $totalPages; ?></a></li>
+                    <li class="page-item"><a class="page-link" href="<?php echo htmlspecialchars($buildInventoryUrl(['p' => $totalPages])); ?>"><?php echo $totalPages; ?></a></li>
                 <?php endif; ?>
                 
-                <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?page=<?php echo $page + 1; ?>&search=<?php echo urlencode($search); ?>&category=<?php echo urlencode($category); ?>">
+                <li class="page-item <?php echo $pageNum >= $totalPages ? 'disabled' : ''; ?>">
+                    <a class="page-link" href="<?php echo htmlspecialchars($buildInventoryUrl(['p' => $pageNum + 1])); ?>">
                         <i class="bi bi-chevron-left"></i>
                     </a>
                 </li>

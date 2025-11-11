@@ -219,13 +219,6 @@ switch ($role) {
                 'url' => getRelativeUrl('attendance.php'),
                 'active' => ($currentPage === 'attendance.php'),
                 'badge' => null
-            ],
-            [
-                'title' => isset($lang['menu_advance_requests']) ? $lang['menu_advance_requests'] : 'طلبات السلفة',
-                'icon' => 'bi-cash-coin',
-                'url' => $baseUrl . 'accountant.php?page=advance_requests',
-                'active' => ($currentPage === 'accountant.php' && $currentPageParam === 'advance_requests'),
-                'badge' => null
             ]
         ];
         break;
