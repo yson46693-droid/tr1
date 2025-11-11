@@ -227,35 +227,29 @@ $totalCategories = count($uniqueCategories);
 <?php endif; ?>
 
 <div class="pos-wrapper">
-    <section class="pos-summary">
+    <section class="pos-warehouse-summary">
         <div class="pos-summary-card">
-            <div class="icon bg-primary text-white"><i class="bi bi-box-seam"></i></div>
-            <div class="label">إجمالي المنتجات</div>
+            <span class="label">المخزن الرئيسي</span>
+            <div class="value"><?php echo htmlspecialchars($mainWarehouse['name']); ?></div>
+            <div class="meta">هذا المخزن مخصص لعمليات نقطة البيع المحلية.</div>
+            <i class="bi bi-building icon"></i>
+        </div>
+        <div class="pos-summary-card">
+            <span class="label">منتجات جاهزة</span>
             <div class="value"><?php echo number_format($totalProductsCount); ?></div>
-            <div class="meta text-muted">منتج نشط في المخزن</div>
+            <div class="meta">أصناف متاحة للبيع من المخزن.</div>
+            <i class="bi bi-box-seam icon"></i>
         </div>
         <div class="pos-summary-card">
-            <div class="icon bg-success text-white"><i class="bi bi-diagram-3"></i></div>
-            <div class="label">الكمية المتاحة</div>
+            <span class="label">إجمالي الكميات</span>
             <div class="value"><?php echo number_format($totalQuantity, 2); ?></div>
-            <div class="meta text-muted">إجمالي الوحدات الحالية</div>
-        </div>
-        <div class="pos-summary-card">
-            <div class="icon bg-warning text-dark"><i class="bi bi-currency-exchange"></i></div>
-            <div class="label">القيمة التقديرية</div>
-            <div class="value"><?php echo formatCurrency($totalStockValue); ?></div>
-            <div class="meta text-muted">استناداً إلى أسعار البيع الحالية</div>
-        </div>
-        <div class="pos-summary-card">
-            <div class="icon bg-secondary text-white"><i class="bi bi-people"></i></div>
-            <div class="label">عملاء نشطون</div>
-            <div class="value"><?php echo number_format(is_array($customers) ? count($customers) : 0); ?></div>
-            <div class="meta text-muted">جاهزون لاستلام المبيعات</div>
+            <div class="meta">إجمالي الوحدات الحالية في المخزون.</div>
+            <i class="bi bi-stack icon"></i>
         </div>
     </section>
 
     <section class="pos-content">
-        <div class="pos-panel" style="grid-column: span 7;">
+        <div class="pos-panel pos-inventory-panel" style="grid-column: span 7;">
             <div class="pos-panel-header">
                 <div>
                     <h4 class="mb-1"><i class="bi bi-box-seam me-1"></i>المنتجات المتاحة</h4>
@@ -263,7 +257,7 @@ $totalCategories = count($uniqueCategories);
                 </div>
                 <div class="pos-search">
                     <i class="bi bi-search"></i>
-                    <input type="text" id="posProductSearch" class="form-control" placeholder="بحث سريع عن منتج..." <?php echo empty($products) ? 'disabled' : ''; ?>>
+                    <input type="text" id="posInventorySearch" class="form-control" placeholder="بحث سريع عن منتج..." <?php echo empty($products) ? 'disabled' : ''; ?>>
                 </div>
             </div>
             <div class="pos-product-grid" id="posProductGrid">
@@ -427,7 +421,7 @@ $totalCategories = count($uniqueCategories);
 <script>
 let cart = [];
 
-const productSearchInput = document.getElementById('posProductSearch');
+const productSearchInput = document.getElementById('posInventorySearch');
 const productCards = Array.from(document.querySelectorAll('[data-product-card]'));
 const noResultsState = document.getElementById('posNoResults');
 
@@ -683,57 +677,54 @@ updateCartDisplay();
     flex-direction: column;
     gap: 1.5rem;
 }
-.pos-summary {
+.pos-warehouse-summary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 1rem;
 }
 .pos-summary-card {
     position: relative;
-    background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 18px;
-    padding: 1.25rem;
-    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
     overflow: hidden;
-}
-.pos-summary-card .icon {
-    position: absolute;
-    top: 12px;
-    inset-inline-start: 12px;
-    width: 42px;
-    height: 42px;
-    border-radius: 12px;
-    display: grid;
-    place-items: center;
-    font-size: 1.25rem;
+    border-radius: 18px;
+    padding: 1.5rem;
+    color: #ffffff;
+    background: linear-gradient(135deg, rgba(30,58,95,0.95), rgba(44,82,130,0.88));
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.15);
 }
 .pos-summary-card .label {
     font-size: 0.85rem;
-    color: #64748b;
-    margin-bottom: 0.35rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.8;
 }
 .pos-summary-card .value {
-    font-size: 1.85rem;
+    font-size: 1.6rem;
     font-weight: 700;
-    color: #0f172a;
+    margin-top: 0.35rem;
 }
 .pos-summary-card .meta {
-    font-size: 0.8rem;
-    color: #94a3b8;
     margin-top: 0.35rem;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+.pos-summary-card .icon {
+    position: absolute;
+    bottom: 1rem;
+    right: 1rem;
+    font-size: 2.4rem;
+    opacity: 0.12;
 }
 .pos-content {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    gap: 1.25rem;
+    gap: 1.5rem;
 }
 .pos-panel {
     background: #ffffff;
     border-radius: 18px;
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
     padding: 1.5rem;
+    box-shadow: 0 16px 35px rgba(15, 23, 42, 0.12);
+    border: 1px solid rgba(15, 23, 42, 0.05);
     display: flex;
     flex-direction: column;
     gap: 1rem;
@@ -742,23 +733,25 @@ updateCartDisplay();
     display: flex;
     flex-wrap: wrap;
     justify-content: space-between;
-    gap: 1rem;
     align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.5rem;
 }
 .pos-panel-header h4 {
     margin: 0;
     font-size: 1.2rem;
     font-weight: 700;
-    color: #0f172a;
+    color: #1f2937;
 }
 .pos-panel-header p {
     margin: 0;
-    font-size: 0.85rem;
     color: #64748b;
+    font-size: 0.9rem;
 }
 .pos-search {
     position: relative;
-    width: min(320px, 100%);
+    flex: 1;
+    min-width: 220px;
 }
 .pos-search input {
     padding-inline-start: 2.25rem;
@@ -769,7 +762,7 @@ updateCartDisplay();
 }
 .pos-search input:focus {
     border-color: rgba(99, 102, 241, 0.5);
-    box-shadow: 0 0 0 0.2rem rgba(99, 102, 241, 0.15);
+    box-shadow: 0 0 0 0.2rem rgba(99, 102, 241, 0.18);
 }
 .pos-search i {
     position: absolute;
@@ -875,18 +868,38 @@ updateCartDisplay();
     gap: 0.75rem;
     align-items: center;
 }
-.pos-cart-empty i { font-size: 2.3rem; color: rgba(226, 232, 240, 0.65); }
+.pos-cart-empty i {
+    font-size: 2.3rem;
+    color: rgba(226, 232, 240, 0.65);
+}
 .pos-cart-table {
     background: #ffffff;
     border-radius: 16px;
     overflow: hidden;
     color: #0f172a;
 }
-.pos-cart-table thead { background: #f1f5f9; font-size: 0.85rem; color: #475569; }
-.pos-cart-table td { vertical-align: middle; }
-.pos-qty-control { display: inline-flex; align-items: center; gap: 0.35rem; }
-.pos-qty-control .btn { border-radius: 10px; padding: 0.35rem 0.75rem; }
-.pos-qty-control input { width: 64px; border-radius: 10px; text-align: center; }
+.pos-cart-table thead {
+    background: #f1f5f9;
+    font-size: 0.85rem;
+    color: #475569;
+}
+.pos-cart-table td {
+    vertical-align: middle;
+}
+.pos-qty-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.pos-qty-control .btn {
+    border-radius: 10px;
+    padding: 0.35rem 0.75rem;
+}
+.pos-qty-control input {
+    width: 64px;
+    border-radius: 10px;
+    text-align: center;
+}
 .pos-summary-card-neutral {
     background: rgba(248, 250, 252, 0.1);
     border: 1px solid rgba(148, 163, 184, 0.25);
@@ -894,25 +907,83 @@ updateCartDisplay();
     padding: 1rem 1.25rem;
     color: #e2e8f0;
 }
-.pos-summary-card-neutral .total { font-weight: 700; font-size: 1.2rem; }
-.pos-panel .btn-success { border-radius: 12px; box-shadow: 0 10px 20px rgba(34, 197, 94, 0.25); }
+.pos-summary-card-neutral .total {
+    font-weight: 700;
+    font-size: 1.2rem;
+}
+.pos-panel .btn-success {
+    border-radius: 12px;
+    box-shadow: 0 10px 20px rgba(34, 197, 94, 0.25);
+}
 .pos-panel .btn-outline-light,
-.pos-panel .btn-outline-light:hover { border-radius: 12px; }
-.pos-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2.5rem 1.25rem; border-radius: 18px; border: 1px dashed rgba(148, 163, 184, 0.4); color: #64748b; background: rgba(241, 245, 249, 0.5); text-align: center; }
-.pos-empty i { font-size: 2.2rem; color: #94a3b8; }
+.pos-panel .btn-outline-light:hover {
+    border-radius: 12px;
+}
+.pos-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 2.5rem 1.25rem;
+    border-radius: 18px;
+    border: 1px dashed rgba(148, 163, 184, 0.4);
+    color: #64748b;
+    background: rgba(241, 245, 249, 0.5);
+    text-align: center;
+}
+.pos-empty i {
+    font-size: 2.2rem;
+    color: #94a3b8;
+}
+@media (max-width: 1199.98px) {
+    .pos-content {
+        gap: 1.25rem;
+    }
+}
 @media (max-width: 991.98px) {
-    .pos-content { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-    .pos-panel { padding: 1.25rem; }
-    .pos-checkout-panel { order: -1; }
+    .pos-content {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    .pos-panel {
+        padding: 1.25rem;
+    }
+    .pos-checkout-panel {
+        order: -1;
+    }
 }
 @media (max-width: 575.98px) {
-    .pos-summary { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-    .pos-summary-card { padding: 1rem; border-radius: 14px; }
-    .pos-product-grid { grid-template-columns: repeat(1, minmax(0, 1fr)); }
-    .pos-cart-table thead { display: none; }
-    .pos-cart-table tbody tr { display: grid; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
-    .pos-cart-table td { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; border: none !important; }
-    .pos-cart-table td::before { content: attr(data-label); font-weight: 600; color: #64748b; }
+    .pos-warehouse-summary {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    .pos-summary-card {
+        padding: 1.2rem;
+        border-radius: 16px;
+    }
+    .pos-product-grid {
+        grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+    .pos-cart-table thead {
+        display: none;
+    }
+    .pos-cart-table tbody tr {
+        display: grid;
+        gap: 0.75rem;
+        padding: 0.75rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    }
+    .pos-cart-table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.85rem;
+        border: none !important;
+    }
+    .pos-cart-table td::before {
+        content: attr(data-label);
+        font-weight: 600;
+        color: #64748b;
+    }
 }
 </style>
 
