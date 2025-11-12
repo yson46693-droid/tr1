@@ -407,15 +407,71 @@ function getBatchNumber($batchId) {
 
         $batchWorkersTableExists = $db->queryOne("SHOW TABLES LIKE 'batch_workers'");
         if (!empty($batchWorkersTableExists)) {
-            $batch['workers_details'] = $db->query(
-                "SELECT 
-                    bw.employee_id as id,
-                    e.name as full_name
-                 FROM batch_workers bw
-                 LEFT JOIN employees e ON bw.employee_id = e.id
-                 WHERE bw.batch_id = ?",
-                [$batchIdValue]
-            );
+            $employeesTableExists = $db->queryOne("SHOW TABLES LIKE 'employees'");
+            if (!empty($employeesTableExists)) {
+                $batch['workers_details'] = $db->query(
+                    "SELECT 
+                        bw.employee_id AS id,
+                        e.name AS full_name
+                     FROM batch_workers bw
+                     LEFT JOIN employees e ON bw.employee_id = e.id
+                     WHERE bw.batch_id = ?",
+                    [$batchIdValue]
+                );
+            } else {
+                $usersTableExists = $db->queryOne("SHOW TABLES LIKE 'users'");
+                if (!empty($usersTableExists)) {
+                    $nameColumn = 'name';
+                    foreach (['full_name', 'name', 'username'] as $candidate) {
+                        $columnExists = $db->queryOne("SHOW COLUMNS FROM users LIKE '{$candidate}'");
+                        if (!empty($columnExists)) {
+                            $nameColumn = $candidate;
+                            break;
+                        }
+                    }
+                    $batch['workers_details'] = $db->query(
+                        "SELECT 
+                            bw.employee_id AS id,
+                            u.{$nameColumn} AS full_name
+                         FROM batch_workers bw
+                         LEFT JOIN users u ON bw.employee_id = u.id
+                         WHERE bw.batch_id = ?",
+                        [$batchIdValue]
+                    );
+                } else {
+                    $availableNameColumn = null;
+                    foreach (['employee_name', 'worker_name', 'name', 'full_name'] as $candidate) {
+                        $columnExists = $db->queryOne("SHOW COLUMNS FROM batch_workers LIKE '{$candidate}'");
+                        if (!empty($columnExists)) {
+                            $availableNameColumn = $candidate;
+                            break;
+                        }
+                    }
+
+                    if ($availableNameColumn !== null) {
+                        $batch['workers_details'] = $db->query(
+                            "SELECT 
+                                bw.employee_id AS id,
+                                bw.{$availableNameColumn} AS full_name
+                             FROM batch_workers bw
+                             WHERE bw.batch_id = ?",
+                            [$batchIdValue]
+                        );
+                    } else {
+                        $rawWorkers = $db->query(
+                            "SELECT bw.employee_id AS id FROM batch_workers bw WHERE bw.batch_id = ?",
+                            [$batchIdValue]
+                        );
+                        $batch['workers_details'] = array_map(static function ($worker) {
+                            $workerId = isset($worker['id']) ? (int)$worker['id'] : null;
+                            return [
+                                'id' => $workerId,
+                                'full_name' => $workerId ? ('عامل #' . $workerId) : 'عامل غير معروف'
+                            ];
+                        }, is_array($rawWorkers) ? $rawWorkers : []);
+                    }
+                }
+            }
         } else {
             $batch['workers_details'] = [];
         }
