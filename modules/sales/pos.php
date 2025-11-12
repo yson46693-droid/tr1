@@ -312,7 +312,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $effectivePaidAmount = 0.0;
         }
 
-        $dueAmount = round(max(0, $netTotal - $effectivePaidAmount), 2);
+        $baseDueAmount = round(max(0, $netTotal - $effectivePaidAmount), 2);
+        $dueAmount = $baseDueAmount;
+        $creditUsed = 0.0;
 
         $customerId = 0;
         $createdCustomerId = null;
@@ -350,6 +352,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $conn->begin_transaction();
 
                 if ($customerMode === 'new') {
+                    $dueAmount = $baseDueAmount;
                     $db->execute(
                         "INSERT INTO customers (name, phone, address, balance, status, created_by) VALUES (?, ?, ?, ?, 'active', ?)",
                         [
@@ -378,8 +381,16 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('تعذر تحميل بيانات العميل أثناء المعالجة.');
                     }
 
-                    if ($dueAmount > 0) {
-                        $newBalance = round(((float) ($customer['balance'] ?? 0)) + $dueAmount, 2);
+                    $currentBalance = (float) ($customer['balance'] ?? 0);
+                    if ($currentBalance < 0 && $dueAmount > 0) {
+                        $creditUsed = min(abs($currentBalance), $dueAmount);
+                        $dueAmount = round($dueAmount - $creditUsed, 2);
+                    } else {
+                        $creditUsed = 0.0;
+                    }
+
+                    $newBalance = round($currentBalance + $creditUsed + $dueAmount, 2);
+                    if (abs($newBalance - $currentBalance) > 0.0001) {
                         $db->execute("UPDATE customers SET balance = ? WHERE id = ?", [$newBalance, $customerId]);
                         $customer['balance'] = $newBalance;
                     }
@@ -473,12 +484,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 logAudit($currentUser['id'], 'create_pos_sale_multi', 'invoice', $invoiceId, null, [
-                    'invoice_number' => $invoiceNumber,
-                    'items' => $normalizedCart,
-                    'net_total' => $netTotal,
-                    'paid_amount' => $effectivePaidAmount,
-                    'due_amount' => $dueAmount,
-                    'customer_id' => $customerId,
+                    'invoice_number'    => $invoiceNumber,
+                    'items'             => $normalizedCart,
+                    'net_total'         => $netTotal,
+                    'paid_amount'       => $effectivePaidAmount,
+                    'base_due_amount'   => $baseDueAmount,
+                    'credit_used'       => $creditUsed,
+                    'due_amount'        => $dueAmount,
+                    'customer_id'       => $customerId,
                 ]);
 
                 $conn->commit();
@@ -490,6 +503,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         'prepaid' => $prepaidAmount,
                         'net_total' => $netTotal,
                         'paid' => $effectivePaidAmount,
+                        'due_before_credit' => $baseDueAmount,
+                        'credit_used' => $creditUsed,
                         'due' => $dueAmount,
                     ],
                 ];
