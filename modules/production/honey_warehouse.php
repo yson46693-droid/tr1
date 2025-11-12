@@ -709,14 +709,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                         <input type="number" class="form-control" name="raw_quantity" id="filter_raw_quantity" step="0.01" min="0.01" required>
                         <small class="text-muted">الكمية بعد التصفية: <span id="filter_result_quantity">0.00</span> كجم</small>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">تاريخ التصفية</label>
-                        <input type="date" class="form-control" name="filtration_date" value="<?php echo date('Y-m-d'); ?>" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">ملاحظات</label>
-                        <textarea class="form-control" name="notes" rows="3"></textarea>
-                    </div>
+                    <input type="hidden" name="filtration_date" value="<?php echo date('Y-m-d'); ?>">
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
