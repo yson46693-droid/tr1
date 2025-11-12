@@ -154,6 +154,7 @@ function createBatchNumber(
 ) {
     $templateId = $templateId !== null ? (int) $templateId : 0;
     $units = (int) $quantity;
+    $db = db();
 
     if ($templateId <= 0) {
         return [

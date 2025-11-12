@@ -828,6 +828,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $honeySupplierId = null;
                 $honeyVariety = null;
 
+                $packagingUsageLogsExists = !empty($db->queryOne("SHOW TABLES LIKE 'packaging_usage_logs'"));
+
                 foreach ($packagingItems as $pkg) {
                     $packagingMaterialId = isset($pkg['packaging_material_id']) ? (int)$pkg['packaging_material_id'] : 0;
                     $pkgKey = 'pack_' . ($packagingMaterialId ?: $pkg['id']);
@@ -1291,12 +1293,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                         if ($packMaterialId > 0 && $packQuantity > 0) {
+                            $quantityBefore = null;
+                            $materialNameForLog = $packItem['name'] ?? null;
+                            $materialUnitForLog = $packItem['unit'] ?? 'وحدة';
+
+                            if ($packagingUsageLogsExists) {
+                                try {
+                                    $packagingRowForLog = $db->queryOne(
+                                        "SELECT name, unit, quantity FROM packaging_materials WHERE id = ?",
+                                        [$packMaterialId]
+                                    );
+                                    if ($packagingRowForLog) {
+                                        $quantityBefore = (float)($packagingRowForLog['quantity'] ?? 0);
+                                        if (!empty($packagingRowForLog['name'])) {
+                                            $materialNameForLog = $packagingRowForLog['name'];
+                                        }
+                                        if (!empty($packagingRowForLog['unit'])) {
+                                            $materialUnitForLog = $packagingRowForLog['unit'];
+                                        }
+                                    }
+                                } catch (Exception $packagingLogFetchError) {
+                                    error_log('Production packaging usage fetch warning: ' . $packagingLogFetchError->getMessage());
+                                }
+                            }
+
                             $db->execute(
                                 "UPDATE packaging_materials 
                                  SET quantity = GREATEST(quantity - ?, 0), updated_at = NOW() 
                                  WHERE id = ?",
                                 [$packQuantity, $packMaterialId]
                             );
+
+                            if ($packagingUsageLogsExists && $quantityBefore !== null) {
+                                $quantityAfter = max($quantityBefore - $packQuantity, 0);
+                                $quantityUsed = $quantityBefore - $quantityAfter;
+
+                                if ($quantityUsed > 0) {
+                                    try {
+                                        $db->execute(
+                                            "INSERT INTO packaging_usage_logs 
+                                             (material_id, material_name, material_code, source_table, quantity_before, quantity_used, quantity_after, unit, used_by) 
+                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                            [
+                                                $packMaterialId,
+                                                $materialNameForLog,
+                                                null,
+                                                'packaging_materials',
+                                                $quantityBefore,
+                                                $quantityUsed,
+                                                $quantityAfter,
+                                                $materialUnitForLog ?: 'وحدة',
+                                                $currentUser['id'] ?? null
+                                            ]
+                                        );
+                                    } catch (Exception $packagingUsageInsertError) {
+                                        error_log('Production packaging usage log insert failed: ' . $packagingUsageInsertError->getMessage());
+                                    }
+                                }
+                            }
                         }
                     }
                     unset($packItem);
