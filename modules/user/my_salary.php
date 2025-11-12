@@ -208,6 +208,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         if (!$isAjaxRequest) {
             return false;
         }
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+
         if (!headers_sent()) {
             http_response_code($success ? 200 : 400);
             header('Content-Type: application/json; charset=utf-8');
