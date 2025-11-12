@@ -14,6 +14,239 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 
+if (!function_exists('generateNextPackagingMaterialCode')) {
+    /**
+     * توليد كود أداة التعبئة التالي بصيغة PKG-###
+     */
+    function generateNextPackagingMaterialCode($db, bool $usePackagingTable): string
+    {
+        $prefix = 'PKG-';
+        $prefixLength = strlen($prefix) + 1; // بداية الجزء الرقمي في الدالة SUBSTRING
+        $maxNumber = 0;
+        $maxDigits = 3;
+
+        if ($usePackagingTable) {
+            $row = $db->queryOne(
+                "SELECT material_id 
+                 FROM packaging_materials 
+                 WHERE material_id REGEXP '^{$prefix}[0-9]+$' 
+                 ORDER BY CAST(SUBSTRING(material_id, {$prefixLength}) AS UNSIGNED) DESC 
+                 LIMIT 1"
+            );
+            if (!empty($row['material_id'])) {
+                $numericPart = substr($row['material_id'], strlen($prefix));
+                if ($numericPart !== '') {
+                    $maxNumber = max($maxNumber, (int)$numericPart);
+                    $maxDigits = max($maxDigits, strlen($numericPart));
+                }
+            }
+        }
+
+        static $productsHasMaterialIdColumn = null;
+        if ($productsHasMaterialIdColumn === null) {
+            $productsTableExists = $db->queryOne("SHOW TABLES LIKE 'products'");
+            if (empty($productsTableExists)) {
+                $productsHasMaterialIdColumn = false;
+            } else {
+                $columnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'material_id'");
+                $productsHasMaterialIdColumn = !empty($columnCheck);
+            }
+        }
+
+        if ($productsHasMaterialIdColumn) {
+            $row = $db->queryOne(
+                "SELECT material_id 
+                 FROM products 
+                 WHERE material_id IS NOT NULL 
+                   AND material_id REGEXP '^{$prefix}[0-9]+$' 
+                 ORDER BY CAST(SUBSTRING(material_id, {$prefixLength}) AS UNSIGNED) DESC 
+                 LIMIT 1"
+            );
+            if (!empty($row['material_id'])) {
+                $numericPart = substr($row['material_id'], strlen($prefix));
+                if ($numericPart !== '') {
+                    $maxNumber = max($maxNumber, (int)$numericPart);
+                    $maxDigits = max($maxDigits, strlen($numericPart));
+                }
+            }
+        }
+
+        $nextNumber = $maxNumber + 1;
+        if ($nextNumber <= 0) {
+            $nextNumber = 1;
+        }
+
+        $padLength = max(3, $maxDigits);
+        $numericSegment = str_pad((string)$nextNumber, $padLength, '0', STR_PAD_LEFT);
+
+        return $prefix . $numericSegment;
+    }
+}
+
+if (!function_exists('packagingMaterialCodeExists')) {
+    /**
+     * التحقق من وجود كود أداة التعبئة مسبقاً.
+     */
+    function packagingMaterialCodeExists($db, string $code, bool $usePackagingTable): bool
+    {
+        $code = trim($code);
+        if ($code === '') {
+            return true;
+        }
+
+        if ($usePackagingTable) {
+            $row = $db->queryOne(
+                "SELECT id FROM packaging_materials WHERE material_id = ? LIMIT 1",
+                [$code]
+            );
+            if (!empty($row)) {
+                return true;
+            }
+        } else {
+            static $packagingTableExists = null;
+            if ($packagingTableExists === null) {
+                $packagingTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'packaging_materials'"));
+            }
+            if ($packagingTableExists) {
+                $row = $db->queryOne(
+                    "SELECT id FROM packaging_materials WHERE material_id = ? LIMIT 1",
+                    [$code]
+                );
+                if (!empty($row)) {
+                    return true;
+                }
+            }
+        }
+
+        static $productsHasMaterialIdColumn = null;
+        if ($productsHasMaterialIdColumn === null) {
+            $productsTableExists = $db->queryOne("SHOW TABLES LIKE 'products'");
+            if (empty($productsTableExists)) {
+                $productsHasMaterialIdColumn = false;
+            } else {
+                $columnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'material_id'");
+                $productsHasMaterialIdColumn = !empty($columnCheck);
+            }
+        }
+
+        if ($productsHasMaterialIdColumn) {
+            $row = $db->queryOne(
+                "SELECT id FROM products WHERE material_id = ? LIMIT 1",
+                [$code]
+            );
+            if (!empty($row)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+}
+
+if (!function_exists('getPackagingTypeOptions')) {
+    /**
+     * استرجاع قائمة أنواع أدوات التعبئة من جدول الأنواع إن وجد، وإلا استخدام القيم الحالية.
+     *
+     * @return array<int, string>
+     */
+    function getPackagingTypeOptions($db, bool $usePackagingTable): array
+    {
+        $options = [];
+        $candidates = [
+            'packaging_tool_types',
+            'packaging_material_types',
+            'tool_types',
+        ];
+
+        foreach ($candidates as $tableName) {
+            $tableExists = $db->queryOne("SHOW TABLES LIKE '{$tableName}'");
+            if (empty($tableExists)) {
+                continue;
+            }
+
+            $columns = $db->query("SHOW COLUMNS FROM {$tableName}");
+            if (empty($columns) || !is_array($columns)) {
+                continue;
+            }
+
+            $columnNames = array_map(static function ($column): string {
+                return $column['Field'] ?? '';
+            }, $columns);
+
+            $labelColumn = null;
+            foreach (['name', 'type_name', 'label', 'title'] as $candidateColumn) {
+                if (in_array($candidateColumn, $columnNames, true)) {
+                    $labelColumn = $candidateColumn;
+                    break;
+                }
+            }
+
+            if ($labelColumn === null) {
+                continue;
+            }
+
+            $orderColumn = in_array('sort_order', $columnNames, true) ? 'sort_order' : $labelColumn;
+            $rows = $db->query("SELECT {$labelColumn} AS label FROM {$tableName} ORDER BY {$orderColumn}");
+
+            if (!empty($rows) && is_array($rows)) {
+                foreach ($rows as $row) {
+                    $label = isset($row['label']) ? trim((string)$row['label']) : '';
+                    if ($label !== '') {
+                        $options[] = $label;
+                    }
+                }
+            }
+
+            if (!empty($options)) {
+                $options = array_values(array_unique($options));
+                break;
+            }
+        }
+
+        if (!empty($options)) {
+            return $options;
+        }
+
+        if ($usePackagingTable) {
+            $rows = $db->query(
+                "SELECT DISTINCT type 
+                 FROM packaging_materials 
+                 WHERE type IS NOT NULL AND TRIM(type) <> '' 
+                 ORDER BY type"
+            );
+            if (!empty($rows)) {
+                foreach ($rows as $row) {
+                    $label = isset($row['type']) ? trim((string)$row['type']) : '';
+                    if ($label !== '') {
+                        $options[] = $label;
+                    }
+                }
+            }
+        } else {
+            $typeColumnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'type'");
+            if (!empty($typeColumnCheck)) {
+                $rows = $db->query(
+                    "SELECT DISTINCT type 
+                     FROM products 
+                     WHERE type IS NOT NULL AND TRIM(type) <> '' 
+                       AND (category LIKE '%تغليف%' OR category LIKE '%packaging%' OR type LIKE '%تغليف%')
+                     ORDER BY type"
+                );
+                if (!empty($rows)) {
+                    foreach ($rows as $row) {
+                        $label = isset($row['type']) ? trim((string)$row['type']) : '';
+                        if ($label !== '') {
+                            $options[] = $label;
+                        }
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique($options));
+    }
+}
+
 if (!function_exists('buildPackagingReportHtmlDocument')) {
     /**
      * إنشاء مستند HTML لتقرير مخزن أدوات التعبئة.
@@ -683,15 +916,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $materialCode = trim((string)($_POST['material_id'] ?? ''));
+            $materialCodeInput = trim((string)($_POST['material_id'] ?? ''));
             $name = trim((string)($_POST['name'] ?? ''));
             $typeValue = trim((string)($_POST['type'] ?? ''));
-            $unitValue = trim((string)($_POST['unit'] ?? ''));
             $aliasValue = trim((string)($_POST['alias'] ?? ''));
-            $specificationsValue = trim((string)($_POST['specifications'] ?? ''));
+            $specificationsValue = '';
             $statusValue = (string)($_POST['status'] ?? 'active');
             $initialQuantityRaw = $_POST['initial_quantity'] ?? 0;
-            $unitPriceRaw = $_POST['unit_price'] ?? 0;
+
+            $materialCode = $materialCodeInput !== '' ? strtoupper($materialCodeInput) : '';
+            if ($materialCode === '') {
+                $materialCode = generateNextPackagingMaterialCode($db, $usePackagingTable);
+            }
 
             $allowedStatuses = ['active', 'inactive'];
             if (!in_array($statusValue, $allowedStatuses, true)) {
@@ -704,16 +940,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $initialQuantity = max(0.0, round($initialQuantity, 4));
 
-            $unitPrice = is_numeric($unitPriceRaw) ? floatval($unitPriceRaw) : 0.0;
-            if (!is_finite($unitPrice)) {
-                $unitPrice = 0.0;
-            }
-            $unitPrice = max(0.0, round($unitPrice, 2));
+            $unitPrice = 0.0;
+            $unitValue = 'قطعة';
 
             if (empty($error)) {
-                if ($materialCode === '') {
-                    $error = 'يرجى إدخال كود الأداة.';
-                } elseif (preg_match('/\s/u', $materialCode)) {
+                if (preg_match('/\s/u', $materialCode)) {
                     $error = 'كود الأداة يجب ألا يحتوي على مسافات.';
                 } elseif (mb_strlen($materialCode, 'UTF-8') > 50) {
                     $error = 'كود الأداة يتجاوز الحد الأقصى للطول (50 حرفاً).';
@@ -726,31 +957,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $db->beginTransaction();
 
-                    $duplicate = $db->queryOne(
-                        "SELECT id FROM packaging_materials WHERE material_id = ? LIMIT 1",
-                        [$materialCode]
-                    );
+                    $insertAttempts = 0;
+                    $maxInsertAttempts = 5;
+                    $inserted = false;
+                    while ($insertAttempts < $maxInsertAttempts && !$inserted) {
+                        if (packagingMaterialCodeExists($db, $materialCode, $usePackagingTable)) {
+                            $materialCode = generateNextPackagingMaterialCode($db, $usePackagingTable);
+                            $insertAttempts++;
+                            continue;
+                        }
 
-                    if ($duplicate) {
-                        throw new Exception('يوجد أداة تعبئة أخرى بنفس الكود.');
+                        try {
+                            $insertResult = $db->execute(
+                                "INSERT INTO packaging_materials 
+                                 (material_id, name, alias, type, specifications, quantity, unit, unit_price, status, created_at) 
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+                                [
+                                    $materialCode,
+                                    $name,
+                                    $aliasValue !== '' ? $aliasValue : null,
+                                    $typeValue !== '' ? $typeValue : null,
+                                    $specificationsValue !== '' ? $specificationsValue : null,
+                                    $initialQuantity,
+                                    $unitValue,
+                                    $unitPrice,
+                                    $statusValue
+                                ]
+                            );
+                            $inserted = true;
+                        } catch (Exception $insertError) {
+                            $message = $insertError->getMessage();
+                            if (stripos($message, 'duplicate') !== false || stripos($message, 'Duplicate entry') !== false) {
+                                $materialCode = generateNextPackagingMaterialCode($db, $usePackagingTable);
+                                $insertAttempts++;
+                                continue;
+                            }
+                            throw $insertError;
+                        }
                     }
 
-                    $insertResult = $db->execute(
-                        "INSERT INTO packaging_materials 
-                         (material_id, name, alias, type, specifications, quantity, unit, unit_price, status, created_at) 
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-                        [
-                            $materialCode,
-                            $name,
-                            $aliasValue !== '' ? $aliasValue : null,
-                            $typeValue !== '' ? $typeValue : null,
-                            $specificationsValue !== '' ? $specificationsValue : null,
-                            $initialQuantity,
-                            $unitValue !== '' ? $unitValue : null,
-                            $unitPrice,
-                            $statusValue
-                        ]
-                    );
+                    if (!$inserted) {
+                        throw new Exception('تعذر توليد كود فريد للأداة بعد عدة محاولات.');
+                    }
 
                     $newId = isset($insertResult['insert_id']) && $insertResult['insert_id'] > 0
                         ? (int)$insertResult['insert_id']
@@ -766,7 +1014,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'material_id' => $materialCode,
                             'name' => $name,
                             'initial_quantity' => $initialQuantity,
-                            'unit' => $unitValue !== '' ? $unitValue : null,
+                            'unit' => $unitValue,
                             'status' => $statusValue
                         ]
                     );
@@ -1322,6 +1570,34 @@ if ($usePackagingTable) {
         }
     }
     unset($legacyMaterial);
+}
+
+$packagingTypeOptions = getPackagingTypeOptions($db, $usePackagingTable);
+$nextMaterialCode = generateNextPackagingMaterialCode($db, $usePackagingTable);
+
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'next_code') {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $code = $nextMaterialCode;
+        $attempts = 0;
+        while (packagingMaterialCodeExists($db, $code, $usePackagingTable) && $attempts < 5) {
+            $code = generateNextPackagingMaterialCode($db, $usePackagingTable);
+            $attempts++;
+        }
+        echo json_encode([
+            'success' => true,
+            'code' => $code
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $ajaxError) {
+        echo json_encode([
+            'success' => false,
+            'message' => 'تعذر توليد كود جديد: ' . $ajaxError->getMessage()
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
 }
 
 // بناء استعلام للحصول على الاستخدامات
@@ -1971,7 +2247,6 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                             <th style="padding: 0.5rem 0.25rem;">اسم الأداة</th>
                             <th style="width: 100px; padding: 0.5rem 0.25rem;">الفئة</th>
                             <th style="width: 120px; padding: 0.5rem 0.25rem;">الكمية المتاحة</th>
-                            <th style="width: 100px; padding: 0.5rem 0.25rem;">إجمالي المستخدم</th>
                             <th style="width: 80px; padding: 0.5rem 0.25rem;">الإجراءات</th>
                         </tr>
                     </thead>
@@ -2033,11 +2308,6 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                     <?php if (!empty($material['unit'])): ?>
                                         <div style="font-size: 0.7rem; color: #6c757d;"><?php echo htmlspecialchars($material['unit']); ?></div>
                                     <?php endif; ?>
-                                </td>
-                                <td style="padding: 0.4rem 0.25rem;">
-                                    <div style="font-weight: 600; font-size: 0.875rem;" class="text-warning">
-                                        <?php echo number_format($material['usage']['total_used'] ?? 0, 2); ?>
-                                    </div>
                                 </td>
                                 <td style="padding: 0.4rem 0.25rem;">
                                     <div class="btn-group btn-group-sm">
@@ -2277,13 +2547,24 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label fw-bold">كود الأداة <span class="text-danger">*</span></label>
-                            <input type="text"
-                                   class="form-control"
+                            <div class="input-group">
+                                <input type="text"
+                                       class="form-control"
+                                       id="create_material_code_display"
+                                       value="<?php echo htmlspecialchars($nextMaterialCode, ENT_QUOTES, 'UTF-8'); ?>"
+                                       readonly>
+                                <button type="button"
+                                        class="btn btn-outline-secondary"
+                                        id="refresh_material_code_btn"
+                                        title="تحديث الكود">
+                                    <i class="bi bi-arrow-repeat"></i>
+                                </button>
+                            </div>
+                            <input type="hidden"
                                    name="material_id"
-                                   required
-                                   maxlength="50"
-                                   placeholder="مثال: PKG-001">
-                            <small class="text-muted">يجب أن يكون الكود فريداً ولا يتكرر مع أدوات أخرى.</small>
+                                   id="create_material_code"
+                                   value="<?php echo htmlspecialchars($nextMaterialCode, ENT_QUOTES, 'UTF-8'); ?>">
+                            <small class="text-muted">يتم إنشاء الكود تلقائياً لضمان عدم تكراره.</small>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-bold">اسم الأداة <span class="text-danger">*</span></label>
@@ -2298,22 +2579,32 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                     <div class="row g-3 mt-0">
                         <div class="col-md-6">
                             <label class="form-label">الفئة / النوع</label>
-                            <input type="text"
-                                   class="form-control"
-                                   name="type"
-                                   maxlength="100"
-                                   placeholder="مثال: عبوات زجاج">
+                            <select class="form-select" name="type" id="create_material_type">
+                                <option value="">اختر النوع</option>
+                                <?php foreach ($packagingTypeOptions as $typeOption): ?>
+                                    <option value="<?php echo htmlspecialchars($typeOption, ENT_QUOTES, 'UTF-8'); ?>">
+                                        <?php echo htmlspecialchars($typeOption, ENT_QUOTES, 'UTF-8'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <?php if (empty($packagingTypeOptions)): ?>
+                                <small class="text-muted">لم يتم العثور على أنواع مسجلة. يرجى إضافة الأنواع من جدول أنواع الأدوات.</small>
+                            <?php endif; ?>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">الوحدة</label>
-                            <input type="text"
-                                   class="form-control"
-                                   name="unit"
-                                   maxlength="50"
-                                   placeholder="مثال: قطعة">
+                            <label class="form-label">الحالة</label>
+                            <select class="form-select" name="status">
+                                <option value="active" selected>نشطة</option>
+                                <option value="inactive">غير نشطة</option>
+                            </select>
                         </div>
                     </div>
                     <div class="row g-3 mt-0">
+                        <div class="col-md-6">
+                            <label class="form-label">الوحدة</label>
+                            <div class="form-control-plaintext fw-semibold">قطعة</div>
+                            <input type="hidden" name="unit" value="قطعة">
+                        </div>
                         <div class="col-md-6">
                             <label class="form-label">الكمية الابتدائية</label>
                             <div class="input-group">
@@ -2324,21 +2615,9 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                        min="0"
                                        value="0"
                                        placeholder="0.00">
-                                <span class="input-group-text initial-quantity-unit-label">وحدة</span>
+                                <span class="input-group-text">قطعة</span>
                             </div>
                             <small class="text-muted">يمكن تعديل الكمية لاحقاً من خلال زر "إضافة كمية".</small>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">سعر الوحدة (اختياري)</label>
-                            <div class="input-group">
-                                <span class="input-group-text">ج.م</span>
-                                <input type="number"
-                                       class="form-control"
-                                       name="unit_price"
-                                       step="0.01"
-                                       min="0"
-                                       placeholder="0.00">
-                            </div>
                         </div>
                     </div>
                     <div class="row g-3 mt-0">
@@ -2350,21 +2629,6 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
                                    maxlength="255"
                                    placeholder="اسم مختصر للأداة">
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">الحالة</label>
-                            <select class="form-select" name="status">
-                                <option value="active" selected>نشطة</option>
-                                <option value="inactive">غير نشطة</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="mt-3">
-                        <label class="form-label">المواصفات / الملاحظات</label>
-                        <textarea class="form-control"
-                                  name="specifications"
-                                  rows="3"
-                                  maxlength="500"
-                                  placeholder="أضف معلومات تساعد في التعرف على الأداة (اختياري)"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -2627,6 +2891,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
 
 <script>
 const aliasApiUrl = '<?php echo getRelativeUrl('api/update_packaging_alias.php'); ?>';
+const nextCodeApiUrl = '<?php echo getRelativeUrl('production.php?page=packaging_warehouse&ajax=next_code'); ?>';
 
 document.addEventListener('DOMContentLoaded', function () {
     const reportButton = document.getElementById('generatePackagingReportBtn');
@@ -2637,31 +2902,62 @@ document.addEventListener('DOMContentLoaded', function () {
     const createMaterialModal = document.getElementById('createMaterialModal');
 
     if (createMaterialForm) {
-        const unitInput = createMaterialForm.querySelector('input[name="unit"]');
-        const unitSuffix = createMaterialForm.querySelector('.initial-quantity-unit-label');
-
-        const refreshUnitSuffix = () => {
-            if (!unitSuffix) {
+        const codeDisplayInput = document.getElementById('create_material_code_display');
+        const codeHiddenInput = document.getElementById('create_material_code');
+        const refreshCodeButton = document.getElementById('refresh_material_code_btn');
+        const setGeneratedCode = (code) => {
+            if (typeof code !== 'string' || code.trim() === '') {
                 return;
             }
-            const unitValue = unitInput ? unitInput.value.trim() : '';
-            unitSuffix.textContent = unitValue !== '' ? unitValue : 'وحدة';
+            const normalized = code.trim();
+            if (codeDisplayInput) {
+                codeDisplayInput.value = normalized;
+                codeDisplayInput.defaultValue = normalized;
+            }
+            if (codeHiddenInput) {
+                codeHiddenInput.value = normalized;
+                codeHiddenInput.defaultValue = normalized;
+            }
         };
 
-        refreshUnitSuffix();
+        const fetchNextCode = async () => {
+            if (!nextCodeApiUrl) {
+                return;
+            }
+            try {
+                const response = await fetch(nextCodeApiUrl, {
+                    credentials: 'same-origin',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const payload = await response.json();
+                if (payload?.success && payload.code) {
+                    setGeneratedCode(payload.code);
+                }
+            } catch (error) {
+                console.error('Failed to fetch next packaging code:', error);
+            }
+        };
 
-        if (unitInput) {
-            unitInput.addEventListener('input', refreshUnitSuffix);
+        if (refreshCodeButton) {
+            refreshCodeButton.addEventListener('click', (event) => {
+                event.preventDefault();
+                fetchNextCode();
+            });
         }
 
-        createMaterialForm.addEventListener('reset', () => {
-            setTimeout(refreshUnitSuffix, 0);
-        });
-
         if (createMaterialModal) {
+            createMaterialModal.addEventListener('show.bs.modal', () => {
+                fetchNextCode();
+            });
             createMaterialModal.addEventListener('hidden.bs.modal', () => {
                 createMaterialForm.reset();
-                refreshUnitSuffix();
+                fetchNextCode();
             });
         }
     }
