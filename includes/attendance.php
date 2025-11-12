@@ -101,6 +101,152 @@ function calculateWorkHours($checkInTime, $checkOutTime) {
 }
 
 /**
+ * استخراج قيم الشهر/السنة بالشكل القياسي YYYY-MM
+ *
+ * @return array{month_key:string, month:int, year:int}
+ */
+function resolveAttendanceMonthParts($month, ?int $year = null): array
+{
+    if (is_string($month) && preg_match('/^(\d{4})-(\d{2})$/', $month, $matches)) {
+        $resolvedYear  = (int) $matches[1];
+        $resolvedMonth = (int) $matches[2];
+        return [
+            'month_key' => sprintf('%04d-%02d', $resolvedYear, $resolvedMonth),
+            'month'     => $resolvedMonth,
+            'year'      => $resolvedYear,
+        ];
+    }
+
+    $resolvedMonth = (int) $month;
+    $resolvedYear  = $year !== null ? (int) $year : (int) date('Y');
+
+    if ($resolvedMonth < 1) {
+        $resolvedMonth = 1;
+    } elseif ($resolvedMonth > 12) {
+        $resolvedMonth = 12;
+    }
+
+    return [
+        'month_key' => sprintf('%04d-%02d', $resolvedYear, $resolvedMonth),
+        'month'     => $resolvedMonth,
+        'year'      => $resolvedYear,
+    ];
+}
+
+/**
+ * حساب ملخص التأخير الشهري للمستخدم اعتماداً على أول تسجيل حضور يومي.
+ *
+ * @return array{
+ *     total_minutes: float,
+ *     average_minutes: float,
+ *     delay_days: int,
+ *     attendance_days: int,
+ *     details: array<string, array{delay: float, first_check_in: string|null}>
+ * }
+ */
+function calculateMonthlyDelaySummary(int $userId, $month, ?int $year = null): array
+{
+    $db = db();
+    $parts = resolveAttendanceMonthParts($month, $year);
+    $monthKey = $parts['month_key'];
+
+    $summary = [
+        'total_minutes'    => 0.0,
+        'average_minutes'  => 0.0,
+        'delay_days'       => 0,
+        'attendance_days'  => 0,
+        'details'          => [],
+    ];
+
+    // المديرون لا يمتلكون أوقات حضور رسمية
+    $workTime = getOfficialWorkTime($userId);
+    if ($workTime === null) {
+        return $summary;
+    }
+
+    $tableCheck = $db->queryOne("SHOW TABLES LIKE 'attendance_records'");
+
+    if (!empty($tableCheck)) {
+        $records = $db->query(
+            "SELECT date, check_in_time, delay_minutes
+             FROM attendance_records
+             WHERE user_id = ? AND DATE_FORMAT(date, '%Y-%m') = ?
+             ORDER BY date ASC, check_in_time ASC",
+            [$userId, $monthKey]
+        );
+
+        foreach ($records as $record) {
+            $attendanceDate = $record['date'];
+            if (!isset($summary['details'][$attendanceDate])) {
+                $delayValue = isset($record['delay_minutes']) ? (float) $record['delay_minutes'] : 0.0;
+                if ($delayValue < 0) {
+                    $delayValue = 0.0;
+                }
+                $summary['details'][$attendanceDate] = [
+                    'delay'           => $delayValue,
+                    'first_check_in'  => $record['check_in_time'] ?? null,
+                ];
+            }
+        }
+    } else {
+        // fallback للجدول القديم attendance
+        $legacyRecords = $db->query(
+            "SELECT date, check_in
+             FROM attendance
+             WHERE user_id = ? AND DATE_FORMAT(date, '%Y-%m') = ?
+             ORDER BY date ASC, check_in ASC",
+            [$userId, $monthKey]
+        );
+
+        foreach ($legacyRecords as $record) {
+            $attendanceDate = $record['date'];
+            if (!isset($summary['details'][$attendanceDate])) {
+                $checkInTime = $record['check_in'] ?? null;
+                $combinedCheckIn = $checkInTime ? ($attendanceDate . ' ' . $checkInTime) : null;
+                $officialDateTime = $attendanceDate . ' ' . ($workTime['start'] ?? '00:00:00');
+                $delayValue = 0.0;
+
+                if ($combinedCheckIn) {
+                    $checkInTs = strtotime($combinedCheckIn);
+                    $officialTs = strtotime($officialDateTime);
+                    if ($checkInTs !== false && $officialTs !== false && $checkInTs > $officialTs) {
+                        $delayValue = round(($checkInTs - $officialTs) / 60, 2);
+                    }
+                }
+
+                $summary['details'][$attendanceDate] = [
+                    'delay'           => $delayValue,
+                    'first_check_in'  => $combinedCheckIn,
+                ];
+            }
+        }
+    }
+
+    if (empty($summary['details'])) {
+        return $summary;
+    }
+
+    $totalDelay = 0.0;
+    $delayDays = 0;
+
+    foreach ($summary['details'] as $detail) {
+        $delay = (float) ($detail['delay'] ?? 0.0);
+        if ($delay > 0) {
+            $totalDelay += $delay;
+            $delayDays++;
+        }
+    }
+
+    $attendanceDays = count($summary['details']);
+    $summary['attendance_days'] = $attendanceDays;
+    $summary['delay_days'] = $delayDays;
+    $summary['total_minutes'] = round($totalDelay, 2);
+    $summary['average_minutes'] = $attendanceDays > 0 ? round($totalDelay / $attendanceDays, 2) : 0.0;
+
+    return $summary;
+}
+
+/**
  * حفظ صورة الحضور/الانصراف على الخادم وإرجاع المسارات المطلوبة
  */
 function saveAttendancePhoto($photoBase64, $userId, $type = 'checkin') {
@@ -669,24 +815,13 @@ function calculateMonthHours($userId, $month) {
  * حساب متوسط التأخير الشهري
  */
 function calculateAverageDelay($userId, $month) {
-    $db = db();
-    
-    // التحقق من وجود الجدول
-    $tableCheck = $db->queryOne("SHOW TABLES LIKE 'attendance_records'");
-    if (empty($tableCheck)) {
-        return ['average' => 0, 'count' => 0];
-    }
-    
-    $result = $db->queryOne(
-        "SELECT COALESCE(AVG(delay_minutes), 0) as avg_delay, COUNT(*) as count 
-         FROM attendance_records 
-         WHERE user_id = ? AND DATE_FORMAT(date, '%Y-%m') = ? AND delay_minutes > 0",
-        [$userId, $month]
-    );
-    
+    $summary = calculateMonthlyDelaySummary($userId, $month);
+
     return [
-        'average' => round($result['avg_delay'] ?? 0, 2),
-        'count' => $result['count'] ?? 0
+        'average' => $summary['average_minutes'],
+        'count'   => $summary['delay_days'],
+        'total'   => $summary['total_minutes'],
+        'days'    => $summary['attendance_days'],
     ];
 }
 
