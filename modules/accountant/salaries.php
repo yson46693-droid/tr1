@@ -336,34 +336,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 if (!$advance) {
                     $error = 'السلفة غير موجودة';
-                } elseif ($advance['status'] !== 'accountant_approved') {
-                    $error = 'يجب أن يوافق المحاسب أولاً على هذه السلفة';
+                } elseif (!in_array($advance['status'], ['pending', 'accountant_approved'], true)) {
+                    $error = 'لا يمكن الموافقة على الطلب في حالته الحالية';
+                } elseif (!empty($advance['deducted_from_salary_id'])) {
+                    $error = 'تم خصم هذه السلفة من الراتب بالفعل.';
                 } else {
-                    $db->execute(
-                        "UPDATE salary_advances 
-                         SET status = 'manager_approved', 
-                             manager_approved_by = ?, 
-                             manager_approved_at = NOW() 
-                         WHERE id = ?",
-                        [$currentUser['id'], $advanceId]
-                    );
-                    
-                    logAudit($currentUser['id'], 'manager_approve_advance', 'salary_advance', $advanceId, null, [
-                        'user_id' => $advance['user_id'],
-                        'amount' => $advance['amount']
-                    ]);
-                    
-                    // إرسال إشعار للموظف
-                    createNotification(
-                        $advance['user_id'],
-                        'تمت الموافقة على طلب السلفة',
-                        "تمت الموافقة على طلب السلفة بمبلغ " . number_format($advance['amount'], 2) . " ج.م. سيتم خصمها من راتبك القادم.",
-                        'success',
-                        null,
-                        false
-                    );
-                    
-                    $success = 'تمت الموافقة على السلفة بنجاح. سيتم خصمها من الراتب القادم.';
+                    $resolution = salaryAdvanceResolveSalary($advance, $db);
+                    if (!($resolution['success'] ?? false)) {
+                        $error = $resolution['message'] ?? 'تعذر تحديد الراتب المناسب لخصم السلفة.';
+                    } else {
+                        $salaryData = $resolution['salary'];
+                        $salaryId = (int) ($resolution['salary_id'] ?? 0);
+
+                        if ($salaryId <= 0) {
+                            $error = 'تعذر تحديد الراتب المراد الخصم منه.';
+                        } else {
+                            try {
+                                $db->beginTransaction();
+
+                                $deductionResult = salaryAdvanceApplyDeduction($advance, $salaryData, $db);
+                                if (!($deductionResult['success'] ?? false)) {
+                                    $message = $deductionResult['message'] ?? 'تعذر تطبيق الخصم على الراتب.';
+                                    throw new Exception($message);
+                                }
+
+                                if ($advance['status'] === 'pending') {
+                                    $db->execute(
+                                        "UPDATE salary_advances 
+                                         SET status = 'manager_approved', 
+                                             accountant_approved_by = ?, 
+                                             accountant_approved_at = NOW(), 
+                                             manager_approved_by = ?, 
+                                             manager_approved_at = NOW(),
+                                             deducted_from_salary_id = ?
+                                         WHERE id = ?",
+                                        [$currentUser['id'], $currentUser['id'], $salaryId, $advanceId]
+                                    );
+                                } else {
+                                    $db->execute(
+                                        "UPDATE salary_advances 
+                                         SET status = 'manager_approved', 
+                                             manager_approved_by = ?, 
+                                             manager_approved_at = NOW(),
+                                             deducted_from_salary_id = ?
+                                         WHERE id = ?",
+                                        [$currentUser['id'], $salaryId, $advanceId]
+                                    );
+                                }
+
+                                $db->commit();
+                            } catch (Throwable $approvalError) {
+                                $db->rollback();
+                                $error = $approvalError->getMessage() ?: 'تعذر إتمام الموافقة على السلفة.';
+                            }
+
+                            if (empty($error)) {
+                                logAudit($currentUser['id'], 'manager_approve_advance', 'salary_advance', $advanceId, null, [
+                                    'user_id' => $advance['user_id'],
+                                    'amount' => $advance['amount'],
+                                    'salary_id' => $salaryId
+                                ]);
+                                
+                                createNotification(
+                                    $advance['user_id'],
+                                    'تمت الموافقة على طلب السلفة',
+                                    "تمت الموافقة على طلب السلفة بمبلغ " . number_format($advance['amount'], 2) . " ج.م. وتم خصمها من راتبك الحالي.",
+                                    'success',
+                                    null,
+                                    false
+                                );
+                                
+                                $success = 'تمت الموافقة على السلفة بنجاح وتم خصمها من الراتب الحالي.';
+                            }
+                        }
+                    }
                 }
             }
         }

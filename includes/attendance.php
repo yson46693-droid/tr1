@@ -434,6 +434,17 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
         return ['success' => false, 'message' => 'لا يوجد تسجيل حضور مسبق'];
     }
     
+    // تحديد تاريخ الحضور المستخدم في سجلات الرواتب (يعتمد على يوم الحضور الفعلي)
+    $attendanceDate = $lastCheckIn['date'] ?? $today;
+    try {
+        $attendanceDateTime = new DateTime($attendanceDate);
+    } catch (Exception $e) {
+        $attendanceDateTime = new DateTime($today);
+    }
+    $attendanceMonthNumber = (int)$attendanceDateTime->format('n');
+    $attendanceYearNumber  = (int)$attendanceDateTime->format('Y');
+    $attendanceMonthKey    = $attendanceDateTime->format('Y-m');
+
     // حساب ساعات العمل
     $workHours = calculateWorkHours($lastCheckIn['check_in_time'], $now);
     
@@ -461,15 +472,12 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
         error_log("Verified saved work_hours: record_id={$lastCheckIn['id']}, saved_work_hours={$verifyRecord['work_hours']}");
     }
     
-    // حساب الساعات الحالية اليوم والساعات التراكمية للشهر
-    $todayHours = calculateTodayHours($userId, $today);
-    $monthHours = calculateMonthHours($userId, date('Y-m'));
+    // حساب الساعات الحالية لليوم والساعات التراكمية للشهر بناءً على يوم الحضور الفعلي
+    $todayHours = calculateTodayHours($userId, $attendanceDateTime->format('Y-m-d'));
+    $monthHours = calculateMonthHours($userId, $attendanceMonthKey);
     
     // حساب الراتب تلقائياً بعد تسجيل الانصراف
     try {
-        $currentMonth = intval(date('m'));
-        $currentYear = intval(date('Y'));
-        
         // التحقق من وجود سعر ساعة للمستخدم
         $user = $db->queryOne("SELECT hourly_rate, role FROM users WHERE id = ?", [$userId]);
         
@@ -480,11 +488,20 @@ function recordAttendanceCheckOut($userId, $photoBase64 = null) {
             
             if ($hourlyRate > 0) {
                 // حساب الراتب تلقائياً للشهر الحالي
-                $salaryResult = createOrUpdateSalary($userId, $currentMonth, $currentYear, 0, 0, 'حساب تلقائي بعد تسجيل الانصراف');
+                $salaryResult = createOrUpdateSalary(
+                    $userId,
+                    $attendanceMonthNumber,
+                    $attendanceYearNumber,
+                    0,
+                    0,
+                    'حساب تلقائي بعد تسجيل الانصراف'
+                );
                 
                 if ($salaryResult['success']) {
                     // تم حساب الراتب بنجاح
-                    error_log("Salary auto-calculated for user {$userId} after checkout: Month={$currentMonth}/{$currentYear}, Hours={$salaryResult['calculation']['total_hours']}, Total={$salaryResult['calculation']['total_amount']}");
+                    error_log(
+                        "Salary auto-calculated for user {$userId} after checkout: Month={$attendanceMonthNumber}/{$attendanceYearNumber}, Hours={$salaryResult['calculation']['total_hours']}, Total={$salaryResult['calculation']['total_amount']}"
+                    );
                 } else {
                     error_log("Failed to calculate salary for user {$userId} after checkout: {$salaryResult['message']}");
                 }

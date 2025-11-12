@@ -826,3 +826,195 @@ function getSalarySummary($userId, $month, $year) {
     ];
 }
 
+/**
+ * الحصول على خريطة أعمدة جدول الرواتب المستخدمة في خصم السلف.
+ *
+ * @return array{
+ *     deductions: string|null,
+ *     advances_deduction: string|null,
+ *     total_amount: string|null,
+ *     updated_at: string|null
+ * }
+ */
+function salaryAdvanceGetSalaryColumns(?Database $dbInstance = null): array
+{
+    static $columnMap = null;
+
+    if ($columnMap !== null) {
+        return $columnMap;
+    }
+
+    $db = $dbInstance ?: db();
+
+    try {
+        $columns = $db->query("SHOW COLUMNS FROM salaries");
+    } catch (Throwable $e) {
+        error_log('Unable to read salaries columns for advances deduction: ' . $e->getMessage());
+        $columnMap = [
+            'deductions' => null,
+            'advances_deduction' => null,
+            'total_amount' => null,
+            'updated_at' => null,
+        ];
+        return $columnMap;
+    }
+
+    $columnMap = [
+        'deductions' => null,
+        'advances_deduction' => null,
+        'total_amount' => null,
+        'updated_at' => null,
+    ];
+
+    foreach ($columns as $column) {
+        $field = $column['Field'] ?? '';
+        if ($field === '') {
+            continue;
+        }
+
+        if ($columnMap['deductions'] === null && in_array($field, ['deductions', 'total_deductions'], true)) {
+            $columnMap['deductions'] = $field;
+        } elseif ($columnMap['advances_deduction'] === null && $field === 'advances_deduction') {
+            $columnMap['advances_deduction'] = $field;
+        } elseif ($columnMap['total_amount'] === null && in_array($field, ['total_amount', 'net_total', 'amount'], true)) {
+            $columnMap['total_amount'] = $field;
+        } elseif ($columnMap['updated_at'] === null && in_array($field, ['updated_at', 'modified_at', 'last_updated'], true)) {
+            $columnMap['updated_at'] = $field;
+        }
+    }
+
+    return $columnMap;
+}
+
+/**
+ * تجهيز الراتب الذي سيتم خصم السلفة منه، وإنشاء الراتب إن لم يكن موجوداً.
+ *
+ * @return array{
+ *     success: bool,
+ *     salary?: array,
+ *     salary_id?: int,
+ *     month?: int,
+ *     year?: int,
+ *     message?: string
+ * }
+ */
+function salaryAdvanceResolveSalary(array $advance, ?Database $dbInstance = null): array
+{
+    $db = $dbInstance ?: db();
+
+    $userId = isset($advance['user_id']) ? (int)$advance['user_id'] : 0;
+    $amount = isset($advance['amount']) ? (float)$advance['amount'] : 0.0;
+
+    if ($userId <= 0) {
+        return ['success' => false, 'message' => 'معرف المستخدم غير صالح للسلفة.'];
+    }
+
+    if ($amount <= 0) {
+        return ['success' => false, 'message' => 'مبلغ السلفة غير صالح للخصم.'];
+    }
+
+    $targetDate = $advance['request_date'] ?? date('Y-m-d');
+    $timestamp = strtotime($targetDate) ?: time();
+    $month = (int) date('n', $timestamp);
+    $year = (int) date('Y', $timestamp);
+
+    $summary = getSalarySummary($userId, $month, $year);
+
+    if (!$summary['exists']) {
+        $creation = createOrUpdateSalary($userId, $month, $year);
+        if (!($creation['success'] ?? false)) {
+            $message = $creation['message'] ?? 'تعذر إنشاء الراتب لخصم السلفة.';
+            return ['success' => false, 'message' => $message];
+        }
+
+        $summary = getSalarySummary($userId, $month, $year);
+        if (!($summary['exists'] ?? false)) {
+            return ['success' => false, 'message' => 'لم يتم العثور على الراتب بعد إنشائه.'];
+        }
+    }
+
+    $salary = $summary['salary'];
+    $salaryId = isset($salary['id']) ? (int)$salary['id'] : 0;
+
+    if ($salaryId <= 0) {
+        return ['success' => false, 'message' => 'تعذر تحديد الراتب لخصم السلفة.'];
+    }
+
+    return [
+        'success' => true,
+        'salary' => $salary,
+        'salary_id' => $salaryId,
+        'month' => $month,
+        'year' => $year,
+    ];
+}
+
+/**
+ * تطبيق خصم السلفة على الراتب المحدد.
+ *
+ * @return array{success: bool, message?: string}
+ */
+function salaryAdvanceApplyDeduction(array $advance, array $salaryData, ?Database $dbInstance = null): array
+{
+    $db = $dbInstance ?: db();
+    $amount = isset($advance['amount']) ? (float)$advance['amount'] : 0.0;
+
+    if ($amount <= 0) {
+        return ['success' => false, 'message' => 'مبلغ السلفة غير صالح.'];
+    }
+
+    $columns = salaryAdvanceGetSalaryColumns($db);
+    if (
+        $columns['advances_deduction'] === null
+        && $columns['deductions'] === null
+        && $columns['total_amount'] === null
+    ) {
+        return ['success' => false, 'message' => 'لا يمكن تنفيذ الخصم لعدم توفر الأعمدة المطلوبة.'];
+    }
+
+    $salaryId = isset($salaryData['id']) ? (int)$salaryData['id'] : 0;
+    if ($salaryId <= 0) {
+        return ['success' => false, 'message' => 'معرف الراتب غير صالح.'];
+    }
+
+    $updates = [];
+    $params = [];
+
+    if ($columns['advances_deduction'] !== null) {
+        $updates[] = "{$columns['advances_deduction']} = COALESCE({$columns['advances_deduction']}, 0) + ?";
+        $params[] = $amount;
+    }
+
+    if ($columns['deductions'] !== null) {
+        $updates[] = "{$columns['deductions']} = COALESCE({$columns['deductions']}, 0) + ?";
+        $params[] = $amount;
+    }
+
+    if ($columns['total_amount'] !== null) {
+        $updates[] = "{$columns['total_amount']} = GREATEST(COALESCE({$columns['total_amount']}, 0) - ?, 0)";
+        $params[] = $amount;
+    }
+
+    if ($columns['updated_at'] !== null) {
+        $updates[] = "{$columns['updated_at']} = NOW()";
+    }
+
+    if (empty($updates)) {
+        return ['success' => false, 'message' => 'لا توجد أعمدة صالحة لتحديث الراتب.'];
+    }
+
+    $params[] = $salaryId;
+
+    try {
+        $db->execute(
+            "UPDATE salaries SET " . implode(', ', $updates) . " WHERE id = ?",
+            $params
+        );
+    } catch (Throwable $e) {
+        error_log('Failed to apply salary advance deduction: ' . $e->getMessage());
+        return ['success' => false, 'message' => 'تعذر تحديث الراتب بخصم السلفة.'];
+    }
+
+    return ['success' => true];
+}
+
