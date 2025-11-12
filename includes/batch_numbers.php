@@ -349,32 +349,58 @@ function getBatchNumber($batchId) {
 
         $rawMaterialsTableExists = $db->queryOne("SHOW TABLES LIKE 'batch_raw_materials'");
         if (!empty($rawMaterialsTableExists)) {
-            $batch['raw_materials'] = $db->query(
-                "SELECT 
-                    brm.quantity_used,
-                    COALESCE(brm.material_name, rm.name) AS name,
-                    COALESCE(brm.unit, rm.unit) AS unit
-                 FROM batch_raw_materials brm
-                 LEFT JOIN raw_materials rm ON brm.raw_material_id = rm.id
-                 WHERE brm.batch_id = ?",
-                [$batchIdValue]
-            );
+            $rawMaterialsLookupExists = $db->queryOne("SHOW TABLES LIKE 'raw_materials'");
+            if (!empty($rawMaterialsLookupExists)) {
+                $batch['raw_materials'] = $db->query(
+                    "SELECT 
+                        brm.quantity_used,
+                        COALESCE(brm.material_name, rm.name) AS name,
+                        COALESCE(brm.unit, rm.unit) AS unit
+                     FROM batch_raw_materials brm
+                     LEFT JOIN raw_materials rm ON brm.raw_material_id = rm.id
+                     WHERE brm.batch_id = ?",
+                    [$batchIdValue]
+                );
+            } else {
+                $batch['raw_materials'] = $db->query(
+                    "SELECT 
+                        brm.quantity_used,
+                        brm.material_name AS name,
+                        brm.unit
+                     FROM batch_raw_materials brm
+                     WHERE brm.batch_id = ?",
+                    [$batchIdValue]
+                );
+            }
         } else {
             $batch['raw_materials'] = [];
         }
 
         $batchPackagingTableExists = $db->queryOne("SHOW TABLES LIKE 'batch_packaging'");
         if (!empty($batchPackagingTableExists)) {
-            $batch['packaging_materials_details'] = $db->query(
-                "SELECT 
-                    bp.quantity_used,
-                    COALESCE(bp.packaging_name, pm.name) AS name,
-                    COALESCE(bp.unit, pm.unit) AS unit
-                 FROM batch_packaging bp
-                 LEFT JOIN packaging_materials pm ON bp.packaging_material_id = pm.id
-                 WHERE bp.batch_id = ?",
-                [$batchIdValue]
-            );
+            $packagingLookupExists = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
+            if (!empty($packagingLookupExists)) {
+                $batch['packaging_materials_details'] = $db->query(
+                    "SELECT 
+                        bp.quantity_used,
+                        COALESCE(bp.packaging_name, pm.name) AS name,
+                        COALESCE(bp.unit, pm.unit) AS unit
+                     FROM batch_packaging bp
+                     LEFT JOIN packaging_materials pm ON bp.packaging_material_id = pm.id
+                     WHERE bp.batch_id = ?",
+                    [$batchIdValue]
+                );
+            } else {
+                $batch['packaging_materials_details'] = $db->query(
+                    "SELECT 
+                        bp.quantity_used,
+                        bp.packaging_name AS name,
+                        bp.unit
+                     FROM batch_packaging bp
+                     WHERE bp.batch_id = ?",
+                    [$batchIdValue]
+                );
+            }
         } else {
             $batch['packaging_materials_details'] = [];
         }

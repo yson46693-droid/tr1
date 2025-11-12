@@ -641,6 +641,14 @@
     padding: 1.25rem 1.5rem !important;
 }
 
+#printBarcodesModal .modal-header {
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%) !important;
+}
+
+#printBarcodesModal .modal-header .btn-close {
+    filter: brightness(0) invert(1) !important;
+}
+
 .modal-header .btn-close {
     filter: brightness(0) invert(1) !important;
 }
