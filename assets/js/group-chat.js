@@ -514,6 +514,15 @@
         state.pollTimer = window.setInterval(fetchMessages, pollInterval);
     };
 
+    function autoResizeTextarea() {
+        if (!elements.textarea) {
+            return;
+        }
+        elements.textarea.style.height = 'auto';
+        const newHeight = Math.min(elements.textarea.scrollHeight, 220);
+        elements.textarea.style.height = `${newHeight}px`;
+    }
+
     const registerEvents = () => {
         elements.sendButton?.addEventListener('click', submitMessage);
         elements.cancelReply?.addEventListener('click', () => {
@@ -521,6 +530,7 @@
             clearEditTarget();
             if (elements.textarea) {
                 elements.textarea.value = '';
+                autoResizeTextarea();
                 elements.textarea.focus();
             }
             setSendButtonState(true);
@@ -540,6 +550,7 @@
         });
 
         elements.textarea?.addEventListener('input', () => {
+            autoResizeTextarea();
             const hasText = elements.textarea.value.trim().length > 0;
             setSendButtonState(state.isSending || !hasText);
         });
@@ -550,6 +561,7 @@
     updateMessageCount();
     registerEvents();
     setSendButtonState(!(elements.textarea && elements.textarea.value.trim().length));
+    autoResizeTextarea();
     initPoller();
 
     if (!state.messages.length) {

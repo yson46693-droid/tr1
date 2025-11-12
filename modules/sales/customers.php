@@ -848,6 +848,250 @@ $collectionsLabel = $isSalesUser ? 'تحصيلاتي' : 'إجمالي التحص
 </div>
 <?php endif; ?>
 
+<?php if ($currentRole === 'manager'): ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var historyModal = document.getElementById('customerHistoryModal');
+    if (!historyModal) {
+        return;
+    }
+
+    var purchaseHistoryEndpointBase = <?php echo json_encode($customersPageBaseWithSection); ?>;
+    var nameTarget = historyModal.querySelector('.customer-history-name');
+    var loadingIndicator = historyModal.querySelector('.customer-history-loading');
+    var errorAlert = historyModal.querySelector('.customer-history-error');
+    var contentWrapper = historyModal.querySelector('.customer-history-content');
+    var invoicesTableBody = historyModal.querySelector('.customer-history-table tbody');
+    var returnsContainer = historyModal.querySelector('.customer-history-returns');
+    var exchangesContainer = historyModal.querySelector('.customer-history-exchanges');
+    var totalInvoicesEl = historyModal.querySelector('.history-total-invoices');
+    var totalInvoicedEl = historyModal.querySelector('.history-total-invoiced');
+    var totalReturnsEl = historyModal.querySelector('.history-total-returns');
+    var netTotalEl = historyModal.querySelector('.history-net-total');
+
+    function formatCurrency(value) {
+        var number = Number(value || 0);
+        return number.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ج.م';
+    }
+
+    function renderInvoices(rows) {
+        if (!invoicesTableBody) {
+            return;
+        }
+        invoicesTableBody.innerHTML = '';
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+            var emptyRow = document.createElement('tr');
+            var emptyCell = document.createElement('td');
+            emptyCell.colSpan = 8;
+            emptyCell.className = 'text-center text-muted py-4';
+            emptyCell.textContent = 'لا توجد فواتير خلال النافذة الزمنية.';
+            emptyRow.appendChild(emptyCell);
+            invoicesTableBody.appendChild(emptyRow);
+            return;
+        }
+
+        rows.forEach(function (row) {
+            var tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${row.invoice_number || '—'}</td>
+                <td>${row.invoice_date || '—'}</td>
+                <td>${formatCurrency(row.invoice_total || 0)}</td>
+                <td>${formatCurrency(row.paid_amount || 0)}</td>
+                <td>
+                    <span class="text-danger fw-semibold">${formatCurrency(row.return_total || 0)}</span>
+                    <div class="text-muted small">${row.return_count || 0} مرتجع</div>
+                </td>
+                <td>
+                    <span class="text-success fw-semibold">${formatCurrency(row.exchange_total || 0)}</span>
+                    <div class="text-muted small">${row.exchange_count || 0} استبدال</div>
+                </td>
+                <td>${formatCurrency(row.net_total || 0)}</td>
+                <td>${row.invoice_status || '—'}</td>
+            `;
+            invoicesTableBody.appendChild(tr);
+        });
+    }
+
+    function renderReturns(list) {
+        if (!returnsContainer) {
+            return;
+        }
+        returnsContainer.innerHTML = '';
+
+        if (!Array.isArray(list) || list.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'text-muted';
+            empty.textContent = 'لا توجد مرتجعات خلال الفترة.';
+            returnsContainer.appendChild(empty);
+            return;
+        }
+
+        var group = document.createElement('div');
+        group.className = 'list-group list-group-flush';
+
+        list.forEach(function (item) {
+            var row = document.createElement('div');
+            row.className = 'list-group-item';
+            row.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-semibold">رقم المرتجع: ${item.return_number || '—'}</div>
+                        <div class="text-muted small">
+                            التاريخ: ${item.return_date || '—'} | النوع: ${item.return_type || '—'}
+                        </div>
+                    </div>
+                    <div class="text-danger fw-semibold">${formatCurrency(item.refund_amount || 0)}</div>
+                </div>
+                <div class="text-muted small mt-1">الحالة: ${item.status || '—'}</div>
+            `;
+            group.appendChild(row);
+        });
+
+        returnsContainer.appendChild(group);
+    }
+
+    function renderExchanges(list) {
+        if (!exchangesContainer) {
+            return;
+        }
+        exchangesContainer.innerHTML = '';
+
+        if (!Array.isArray(list) || list.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'text-muted';
+            empty.textContent = 'لا توجد حالات استبدال خلال الفترة.';
+            exchangesContainer.appendChild(empty);
+            return;
+        }
+
+        var group = document.createElement('div');
+        group.className = 'list-group list-group-flush';
+
+        list.forEach(function (item) {
+            var difference = Number(item.difference_amount || 0);
+            var row = document.createElement('div');
+            row.className = 'list-group-item';
+            row.innerHTML = `
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="fw-semibold">رقم الاستبدال: ${item.exchange_number || '—'}</div>
+                        <div class="text-muted small">
+                            التاريخ: ${item.exchange_date || '—'} | النوع: ${item.exchange_type || '—'}
+                        </div>
+                    </div>
+                    <div class="fw-semibold ${difference >= 0 ? 'text-success' : 'text-danger'}">
+                        ${formatCurrency(difference)}
+                    </div>
+                </div>
+                <div class="text-muted small mt-1">الحالة: ${item.status || '—'}</div>
+            `;
+            group.appendChild(row);
+        });
+
+        exchangesContainer.appendChild(group);
+    }
+
+    function resetModalState() {
+        if (errorAlert) {
+            errorAlert.classList.add('d-none');
+            errorAlert.textContent = '';
+        }
+        if (contentWrapper) {
+            contentWrapper.classList.add('d-none');
+        }
+        if (loadingIndicator) {
+            loadingIndicator.classList.remove('d-none');
+        }
+        if (invoicesTableBody) {
+            invoicesTableBody.innerHTML = '';
+        }
+        if (returnsContainer) {
+            returnsContainer.innerHTML = '';
+        }
+        if (exchangesContainer) {
+            exchangesContainer.innerHTML = '';
+        }
+    }
+
+    var historyButtons = document.querySelectorAll('.js-customer-history');
+    historyButtons.forEach(function (button) {
+        button.addEventListener('click', function () {
+            var customerId = button.getAttribute('data-customer-id');
+            var customerName = button.getAttribute('data-customer-name') || '-';
+
+            if (nameTarget) {
+                nameTarget.textContent = customerName;
+            }
+            resetModalState();
+
+            var modalInstance = bootstrap.Modal.getOrCreateInstance(historyModal);
+            modalInstance.show();
+
+            var url = purchaseHistoryEndpointBase
+                + '&action=purchase_history&ajax=purchase_history&customer_id='
+                + encodeURIComponent(customerId);
+
+            fetch(url, {
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('تعذر تحميل البيانات.');
+                    }
+                    return response.json();
+                })
+                .then(function (payload) {
+                    if (!payload || !payload.success) {
+                        throw new Error(payload && payload.message ? payload.message : 'فشل تحميل بيانات السجل.');
+                    }
+
+                    var history = payload.history || {};
+                    var totals = history.totals || {};
+
+                    if (totalInvoicesEl) {
+                        totalInvoicesEl.textContent = Number(totals.invoice_count || 0).toLocaleString('ar-EG');
+                    }
+                    if (totalInvoicedEl) {
+                        totalInvoicedEl.textContent = formatCurrency(totals.total_invoiced || 0);
+                    }
+                    if (totalReturnsEl) {
+                        totalReturnsEl.textContent = formatCurrency(totals.total_returns || 0);
+                    }
+                    if (netTotalEl) {
+                        netTotalEl.textContent = formatCurrency(totals.net_total || 0);
+                    }
+
+                    renderInvoices(history.invoices || []);
+                    renderReturns(history.returns || []);
+                    renderExchanges(history.exchanges || []);
+
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.add('d-none');
+                    }
+                    if (contentWrapper) {
+                        contentWrapper.classList.remove('d-none');
+                    }
+                })
+                .catch(function (error) {
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.add('d-none');
+                    }
+                    if (errorAlert) {
+                        errorAlert.textContent = error.message || 'حدث خطأ غير متوقع.';
+                        errorAlert.classList.remove('d-none');
+                    }
+                });
+        });
+    });
+
+    historyModal.addEventListener('hidden.bs.modal', resetModalState);
+});
+</script>
+<?php endif; ?>
+
 <?php endif; ?>
 
 <?php if ($section === 'delegates' && !$isSalesUser): ?>

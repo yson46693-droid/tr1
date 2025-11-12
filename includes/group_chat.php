@@ -183,6 +183,45 @@ if (!function_exists('normalizeGroupChatRow')) {
     }
 }
 
+if (!function_exists('cleanupExpiredGroupChatMessages')) {
+    /**
+     * حذف رسائل الدردشة الأقدم من فترة الاحتفاظ المحددة.
+     */
+    function cleanupExpiredGroupChatMessages(): void
+    {
+        static $cleanupDone = false;
+
+        if ($cleanupDone) {
+            return;
+        }
+
+        if (!ensureGroupChatTables()) {
+            return;
+        }
+
+        $retentionDays = defined('GROUP_CHAT_RETENTION_DAYS')
+            ? (int) GROUP_CHAT_RETENTION_DAYS
+            : 30;
+
+        if ($retentionDays < 1) {
+            $retentionDays = 30;
+        }
+
+        $db = db();
+
+        try {
+            $db->execute(
+                "DELETE FROM group_chat_messages WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)",
+                [$retentionDays]
+            );
+        } catch (Throwable $cleanupError) {
+            error_log('Group chat cleanup failed: ' . $cleanupError->getMessage());
+        }
+
+        $cleanupDone = true;
+    }
+}
+
 if (!function_exists('getGroupChatMessageById')) {
     /**
      * الحصول على رسالة واحدة
@@ -236,6 +275,8 @@ if (!function_exists('getGroupChatMessages')) {
         if (!ensureGroupChatTables()) {
             return [];
         }
+
+        cleanupExpiredGroupChatMessages();
 
         $limit = isset($options['limit']) ? (int) $options['limit'] : 100;
         $limit = max(1, min(200, $limit));
