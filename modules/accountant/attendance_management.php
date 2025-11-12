@@ -33,7 +33,7 @@ $users = $db->query(
 $userStats = [];
 foreach ($users as $user) {
     $stats = getAttendanceStatistics($user['id'], $selectedMonth);
-    $delayStats = calculateAverageDelay($user['id'], $selectedMonth);
+    $delayStats = calculateMonthlyDelaySummary($user['id'], $selectedMonth);
     
     $userStats[$user['id']] = [
         'user' => $user,
@@ -49,7 +49,7 @@ if ($selectedUserId > 0) {
     $selectedUser = $db->queryOne("SELECT * FROM users WHERE id = ?", [$selectedUserId]);
     if ($selectedUser) {
         $selectedUserStats = getAttendanceStatistics($selectedUserId, $selectedMonth);
-        $selectedUserDelay = calculateAverageDelay($selectedUserId, $selectedMonth);
+        $selectedUserDelay = calculateMonthlyDelaySummary($selectedUserId, $selectedMonth);
         
         // الحصول على سجلات المستخدم
         if ($selectedDate) {
@@ -160,8 +160,9 @@ if ($selectedUserId > 0) {
                             </div>
                         </div>
                         <div class="flex-grow-1 ms-3">
-                            <div class="text-muted small">متوسط التأخير</div>
-                            <div class="h4 mb-0"><?php echo $selectedUserDelay['average']; ?> دقيقة</div>
+                                <div class="text-muted small">متوسط التأخير</div>
+                            <div class="h4 mb-0"><?php echo number_format($selectedUserDelay['average_minutes'] ?? 0, 2); ?> دقيقة</div>
+                            <div class="text-muted small mt-1">إجمالي التأخير: <?php echo number_format($selectedUserDelay['total_minutes'] ?? 0, 2); ?> دقيقة</div>
                         </div>
                     </div>
                 </div>
@@ -178,8 +179,9 @@ if ($selectedUserId > 0) {
                             </div>
                         </div>
                         <div class="flex-grow-1 ms-3">
-                            <div class="text-muted small">مرات التأخير</div>
-                            <div class="h4 mb-0"><?php echo $selectedUserDelay['count']; ?></div>
+                        <div class="text-muted small">مرات التأخير</div>
+                            <div class="h4 mb-0"><?php echo (int) ($selectedUserDelay['delay_days'] ?? 0); ?></div>
+                            <div class="text-muted small mt-1">من إجمالي <?php echo (int) ($selectedUserDelay['attendance_days'] ?? 0); ?> أيام حضور</div>
                         </div>
                     </div>
                 </div>
@@ -287,14 +289,14 @@ if ($selectedUserId > 0) {
                                         <strong class="text-success"><?php echo $data['stats']['total_hours']; ?> ساعة</strong>
                                     </td>
                                     <td data-label="متوسط التأخير">
-                                        <?php if ($data['delay']['average'] > 0): ?>
-                                            <span class="badge bg-warning"><?php echo $data['delay']['average']; ?> دقيقة</span>
+                                        <?php if (($data['delay']['average_minutes'] ?? 0) > 0): ?>
+                                            <span class="badge bg-warning"><?php echo number_format($data['delay']['average_minutes'], 2); ?> دقيقة</span>
                                         <?php else: ?>
                                             <span class="badge bg-success">في الوقت</span>
                                         <?php endif; ?>
                                     </td>
                                     <td data-label="مرات التأخير">
-                                        <span class="badge bg-danger"><?php echo $data['delay']['count']; ?></span>
+                                        <span class="badge bg-danger"><?php echo (int) ($data['delay']['delay_days'] ?? 0); ?></span>
                                     </td>
                                     <td data-label="الإجراءات">
                                         <a href="?page=attendance_management&month=<?php echo urlencode($selectedMonth); ?>&user_id=<?php echo $userId; ?>" class="btn btn-sm btn-info">

@@ -1861,12 +1861,13 @@ document.addEventListener('DOMContentLoaded', function() {
             .then(async response => {
                 const rawBody = await response.text();
                 let data = null;
+                let parseWarning = null;
 
                 if (rawBody.trim().length > 0) {
                     try {
                         data = JSON.parse(rawBody);
                     } catch (parseError) {
-                        console.error('Failed to parse advance response JSON:', parseError, rawBody);
+                        parseWarning = parseError;
                         const jsonStart = rawBody.indexOf('{');
                         const jsonEnd = rawBody.lastIndexOf('}');
                         if (jsonStart !== -1 && jsonEnd !== -1 && jsonEnd > jsonStart) {
@@ -1876,6 +1877,31 @@ document.addEventListener('DOMContentLoaded', function() {
                             } catch (nestedParseError) {
                                 console.error('Secondary JSON parse attempt failed:', nestedParseError);
                             }
+                        }
+
+                        if (!data) {
+                            const alert = document.createElement('div');
+                            alert.className = 'alert alert-success alert-dismissible fade show';
+                            alert.innerHTML = '<i class="bi bi-check-circle-fill me-2"></i>تم إرسال طلب السلفة بنجاح.' +
+                                '<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+
+                            if (alertContainer) {
+                                alertContainer.innerHTML = '';
+                                alertContainer.appendChild(alert);
+                            }
+
+                            if (parseWarning) {
+                                console.warn('Advance request response was not valid JSON but contained success message.', parseWarning, rawBody);
+                            }
+
+                            advanceForm.reset();
+                            advanceForm.classList.remove('was-validated');
+
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 1200);
+
+                            return null;
                         }
                     }
                 }
