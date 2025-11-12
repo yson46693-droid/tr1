@@ -13,11 +13,15 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/table_styles.php';
 require_once __DIR__ . '/../../includes/vehicle_inventory.php';
+require_once __DIR__ . '/../../includes/audit_log.php';
 
 requireRole(['production', 'accountant', 'manager']);
 
 $currentUser = getCurrentUser();
 $db = db();
+$isManager = isset($currentUser['role']) && $currentUser['role'] === 'manager';
+$managerInventoryUrl = getRelativeUrl('manager.php?page=final_products');
+$productionInventoryUrl = getRelativeUrl('production.php?page=inventory');
 $error = '';
 $success = '';
 
@@ -32,6 +36,26 @@ if (!empty($_SESSION[$sessionErrorKey])) {
 if (!empty($_SESSION[$sessionSuccessKey])) {
     $success = $_SESSION[$sessionSuccessKey];
     unset($_SESSION[$sessionSuccessKey]);
+}
+
+// Ensure new columns for external products
+try {
+    $productTypeColumn = $db->queryOne("SHOW COLUMNS FROM products LIKE 'product_type'");
+    if (empty($productTypeColumn)) {
+        $db->execute("ALTER TABLE `products` ADD COLUMN `product_type` ENUM('internal','external') DEFAULT 'internal' AFTER `category`");
+        $db->execute("UPDATE products SET product_type = 'internal' WHERE product_type IS NULL OR product_type = ''");
+    }
+} catch (Exception $e) {
+    error_log('final_products: failed ensuring product_type column -> ' . $e->getMessage());
+}
+
+try {
+    $externalChannelColumn = $db->queryOne("SHOW COLUMNS FROM products LIKE 'external_channel'");
+    if (empty($externalChannelColumn)) {
+        $db->execute("ALTER TABLE `products` ADD COLUMN `external_channel` ENUM('company','delegate','other') DEFAULT NULL AFTER `product_type`");
+    }
+} catch (Exception $e) {
+    error_log('final_products: failed ensuring external_channel column -> ' . $e->getMessage());
 }
 
 $currentPageSlug = $_GET['page'] ?? 'inventory';
@@ -223,12 +247,12 @@ if (!empty($warehousesTableExists)) {
 
         if ($primaryWarehouse) {
             $productsWithoutWarehouse = $db->queryOne(
-                "SELECT COUNT(*) as total FROM products WHERE warehouse_id IS NULL"
+                "SELECT COUNT(*) as total FROM products WHERE warehouse_id IS NULL AND (product_type IS NULL OR product_type = 'internal')"
             );
 
             if (($productsWithoutWarehouse['total'] ?? 0) > 0) {
                 $db->execute(
-                    "UPDATE products SET warehouse_id = ? WHERE warehouse_id IS NULL",
+                    "UPDATE products SET warehouse_id = ? WHERE warehouse_id IS NULL AND (product_type IS NULL OR product_type = 'internal')",
                     [$primaryWarehouse['id']]
                 );
             }
@@ -261,125 +285,331 @@ if (!empty($warehousesTableExists)) {
     }
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_transfer') {
-    $transferErrors = [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $postAction = $_POST['action'] ?? '';
 
-    if (!$canCreateTransfers || !$primaryWarehouse) {
-        $transferErrors[] = 'لا يمكن إنشاء طلب النقل حالياً بسبب عدم توفر مخزن رئيسي أو مخازن وجهة نشطة.';
-    } else {
-        $fromWarehouseId = intval($primaryWarehouse['id']);
-        $toWarehouseId = intval($_POST['to_warehouse_id'] ?? 0);
-        $transferDate = $_POST['transfer_date'] ?? date('Y-m-d');
-        $reason = trim((string)($_POST['reason'] ?? ''));
-        $notes = trim((string)($_POST['notes'] ?? ''));
+    if ($postAction === 'create_transfer') {
+        $transferErrors = [];
 
-        if ($toWarehouseId <= 0) {
-            $transferErrors[] = 'يرجى اختيار المخزن الوجهة.';
-        }
+        if (!$canCreateTransfers || !$primaryWarehouse) {
+            $transferErrors[] = 'لا يمكن إنشاء طلب النقل حالياً بسبب عدم توفر مخزن رئيسي أو مخازن وجهة نشطة.';
+        } else {
+            $fromWarehouseId = intval($primaryWarehouse['id']);
+            $toWarehouseId = intval($_POST['to_warehouse_id'] ?? 0);
+            $transferDate = $_POST['transfer_date'] ?? date('Y-m-d');
+            $reason = trim((string)($_POST['reason'] ?? ''));
+            $notes = trim((string)($_POST['notes'] ?? ''));
 
-        if ($toWarehouseId === $fromWarehouseId) {
-            $transferErrors[] = 'لا يمكن النقل من وإلى نفس المخزن.';
-        }
+            if ($toWarehouseId <= 0) {
+                $transferErrors[] = 'يرجى اختيار المخزن الوجهة.';
+            }
 
-        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $transferDate)) {
-            $transferDate = date('Y-m-d');
-        }
+            if ($toWarehouseId === $fromWarehouseId) {
+                $transferErrors[] = 'لا يمكن النقل من وإلى نفس المخزن.';
+            }
 
-        $rawItems = $_POST['items'] ?? [];
-        $transferItems = [];
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $transferDate)) {
+                $transferDate = date('Y-m-d');
+            }
 
-        if (is_array($rawItems)) {
-            foreach ($rawItems as $item) {
-                $productId = isset($item['product_id']) ? intval($item['product_id']) : 0;
-                $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0.0;
-                $itemNotes = isset($item['notes']) ? trim((string)$item['notes']) : null;
-                $batchId = isset($item['batch_id']) ? intval($item['batch_id']) : 0;
-                $batchNumber = isset($item['batch_number']) ? trim((string)$item['batch_number']) : '';
+            $rawItems = $_POST['items'] ?? [];
+            $transferItems = [];
 
-                if ($quantity > 0 && ($productId > 0 || $batchId > 0)) {
-                    $transferItems[] = [
-                        'product_id' => $productId > 0 ? $productId : null,
-                        'batch_id' => $batchId > 0 ? $batchId : null,
-                        'batch_number' => $batchNumber !== '' ? $batchNumber : null,
-                        'quantity' => round($quantity, 4),
-                        'notes' => $itemNotes !== '' ? $itemNotes : null,
-                    ];
+            if (is_array($rawItems)) {
+                foreach ($rawItems as $item) {
+                    $productId = isset($item['product_id']) ? intval($item['product_id']) : 0;
+                    $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0.0;
+                    $itemNotes = isset($item['notes']) ? trim((string)$item['notes']) : null;
+                    $batchId = isset($item['batch_id']) ? intval($item['batch_id']) : 0;
+                    $batchNumber = isset($item['batch_number']) ? trim((string)$item['batch_number']) : '';
+
+                    if ($quantity > 0 && ($productId > 0 || $batchId > 0)) {
+                        $transferItems[] = [
+                            'product_id' => $productId > 0 ? $productId : null,
+                            'batch_id' => $batchId > 0 ? $batchId : null,
+                            'batch_number' => $batchNumber !== '' ? $batchNumber : null,
+                            'quantity' => round($quantity, 4),
+                            'notes' => $itemNotes !== '' ? $itemNotes : null,
+                        ];
+                    }
                 }
             }
-        }
 
-        if (empty($transferItems)) {
-            $transferErrors[] = 'أضف منتجاً واحداً على الأقل مع كمية صالحة.';
-        }
+            if (empty($transferItems)) {
+                $transferErrors[] = 'أضف منتجاً واحداً على الأقل مع كمية صالحة.';
+            }
 
-        if (empty($transferErrors)) {
-            $productIds = array_values(array_unique(array_column($transferItems, 'product_id')));
+            if (empty($transferErrors)) {
+                $productIds = array_values(array_unique(array_column($transferItems, 'product_id')));
 
-            if (!empty($productIds)) {
-                $placeholders = implode(',', array_fill(0, count($productIds), '?'));
-                $stockRows = $db->query(
-                    "SELECT id, name, quantity FROM products WHERE id IN ($placeholders)",
-                    $productIds
+                if (!empty($productIds)) {
+                    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+                    $stockRows = $db->query(
+                        "SELECT id, name, quantity FROM products WHERE id IN ($placeholders) AND (product_type IS NULL OR product_type = 'internal')",
+                        $productIds
+                    );
+                    $stockMap = [];
+
+                    foreach ($stockRows as $row) {
+                        $stockMap[intval($row['id'])] = [
+                            'quantity' => floatval($row['quantity'] ?? 0),
+                            'name' => $row['name'] ?? ''
+                        ];
+                    }
+
+                    foreach ($transferItems as $transferItem) {
+                        $productId = $transferItem['product_id'];
+                        if (!isset($stockMap[$productId])) {
+                            $transferErrors[] = 'المنتج المحدد غير موجود في المخزن الرئيسي.';
+                            break;
+                        }
+
+                        if ($transferItem['quantity'] > $stockMap[$productId]['quantity']) {
+                            $transferErrors[] = sprintf(
+                                'الكمية المطلوبة للمنتج "%s" غير متاحة في المخزون الحالي.',
+                                $stockMap[$productId]['name']
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (empty($transferErrors)) {
+                $result = createWarehouseTransfer(
+                    $fromWarehouseId,
+                    $toWarehouseId,
+                    $transferDate,
+                    array_map(static function ($item) {
+                        return [
+                            'product_id' => $item['product_id'],
+                            'quantity' => $item['quantity'],
+                            'notes' => $item['notes'] ?? null
+                        ];
+                    }, $transferItems),
+                    $reason !== '' ? $reason : null,
+                    $notes !== '' ? $notes : null,
+                    $currentUser['id'] ?? null
                 );
-                $stockMap = [];
 
-                foreach ($stockRows as $row) {
-                    $stockMap[intval($row['id'])] = [
-                        'quantity' => floatval($row['quantity'] ?? 0),
-                        'name' => $row['name'] ?? ''
-                    ];
+                if (!empty($result['success'])) {
+                    $_SESSION[$sessionSuccessKey] = sprintf(
+                        'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
+                        $result['transfer_number'] ?? '#'
+                    );
+                    header('Location: ' . $productionInventoryUrl);
+                    exit;
                 }
 
-                foreach ($transferItems as $transferItem) {
-                    $productId = $transferItem['product_id'];
-                    if (!isset($stockMap[$productId])) {
-                        $transferErrors[] = 'المنتج المحدد غير موجود في المخزن الرئيسي.';
-                        break;
-                    }
-
-                    if ($transferItem['quantity'] > $stockMap[$productId]['quantity']) {
-                        $transferErrors[] = sprintf(
-                            'الكمية المطلوبة للمنتج "%s" غير متاحة في المخزون الحالي.',
-                            $stockMap[$productId]['name']
-                        );
-                        break;
-                    }
-                }
+                $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
             }
         }
 
-        if (empty($transferErrors)) {
-            $result = createWarehouseTransfer(
-                $fromWarehouseId,
-                $toWarehouseId,
-                $transferDate,
-                array_map(static function ($item) {
-                    return [
-                        'product_id' => $item['product_id'],
-                        'quantity' => $item['quantity'],
-                        'notes' => $item['notes'] ?? null
-                    ];
-                }, $transferItems),
-                $reason !== '' ? $reason : null,
-                $notes !== '' ? $notes : null,
-                $currentUser['id'] ?? null
+        if (!empty($transferErrors)) {
+            $error = implode(' | ', array_unique($transferErrors));
+        }
+    } elseif ($isManager && $postAction === 'create_external_product') {
+        $name = trim((string)($_POST['external_name'] ?? ''));
+        $channel = $_POST['external_channel'] ?? 'company';
+        $initialQuantity = max(0, floatval($_POST['external_quantity'] ?? 0));
+        $unitPrice = max(0, floatval($_POST['external_price'] ?? 0));
+        $unit = trim((string)($_POST['external_unit'] ?? 'قطعة'));
+        $notesValue = trim((string)($_POST['external_description'] ?? ''));
+
+        if ($name === '') {
+            $_SESSION[$sessionErrorKey] = 'يرجى إدخال اسم المنتج الخارجي.';
+            header('Location: ' . $managerInventoryUrl);
+            exit;
+        }
+
+        if (!in_array($channel, ['company', 'delegate', 'other'], true)) {
+            $channel = 'company';
+        }
+
+        try {
+            $insertResult = $db->execute(
+                "INSERT INTO products (name, category, product_type, external_channel, quantity, unit, unit_price, description, status)
+                 VALUES (?, ?, 'external', ?, ?, ?, ?, ?, 'active')",
+                [
+                    $name,
+                    $channel === 'company' ? 'بيع داخلي' : ($channel === 'delegate' ? 'مندوب مبيعات' : 'خارجي'),
+                    $channel,
+                    $initialQuantity,
+                    $unit !== '' ? $unit : 'قطعة',
+                    $unitPrice,
+                    $notesValue !== '' ? $notesValue : null,
+                ]
             );
 
-            if (!empty($result['success'])) {
-                $_SESSION[$sessionSuccessKey] = sprintf(
-                    'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
-                    $result['transfer_number'] ?? '#'
+            $productId = $insertResult['insert_id'] ?? null;
+            if (!empty($productId) && !empty($currentUser['id'])) {
+                logAudit(
+                    $currentUser['id'],
+                    'external_product_create',
+                    'product',
+                    $productId,
+                    null,
+                    [
+                        'name' => $name,
+                        'channel' => $channel,
+                        'quantity' => $initialQuantity,
+                        'unit_price' => $unitPrice,
+                    ]
                 );
-                header('Location: ' . getRelativeUrl('production.php?page=inventory'));
+            }
+
+            $_SESSION[$sessionSuccessKey] = 'تم إضافة المنتج الخارجي بنجاح.';
+        } catch (Exception $e) {
+            error_log('create_external_product error: ' . $e->getMessage());
+            $_SESSION[$sessionErrorKey] = 'تعذر إضافة المنتج الخارجي. يرجى المحاولة لاحقاً.';
+        }
+
+        header('Location: ' . $managerInventoryUrl);
+        exit;
+    } elseif ($isManager && $postAction === 'adjust_external_stock') {
+        $productId = intval($_POST['product_id'] ?? 0);
+        $operation = $_POST['operation'] ?? 'add';
+        $amount = max(0, floatval($_POST['quantity'] ?? 0));
+        $note = trim((string)($_POST['note'] ?? ''));
+
+        if ($productId <= 0 || $amount <= 0) {
+            $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج وإدخال كمية صالحة.';
+            header('Location: ' . $managerInventoryUrl);
+            exit;
+        }
+
+        try {
+            $productRow = $db->queryOne(
+                "SELECT id, name, quantity FROM products WHERE id = ? AND product_type = 'external' LIMIT 1",
+                [$productId]
+            );
+
+            if (!$productRow) {
+                $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود أو ليس منتجاً خارجياً.';
+                header('Location: ' . $managerInventoryUrl);
                 exit;
             }
 
-            $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
-        }
-    }
+            $oldQuantity = floatval($productRow['quantity'] ?? 0);
+            $newQuantity = $oldQuantity;
 
-    if (!empty($transferErrors)) {
-        $error = implode(' | ', array_unique($transferErrors));
+            if ($operation === 'discard') {
+                if ($amount > $oldQuantity) {
+                    $_SESSION[$sessionErrorKey] = 'الكمية المراد إتلافها أكبر من الكمية المتاحة.';
+                    header('Location: ' . $managerInventoryUrl);
+                    exit;
+                }
+                $newQuantity = $oldQuantity - $amount;
+            } else {
+                $newQuantity = $oldQuantity + $amount;
+                $operation = 'add';
+            }
+
+            $db->execute(
+                "UPDATE products SET quantity = ?, updated_at = NOW() WHERE id = ? AND product_type = 'external'",
+                [$newQuantity, $productId]
+            );
+
+            if (!empty($currentUser['id'])) {
+                logAudit(
+                    $currentUser['id'],
+                    $operation === 'add' ? 'external_product_increase' : 'external_product_discard',
+                    'product',
+                    $productId,
+                    ['quantity' => $oldQuantity],
+                    [
+                        'quantity' => $newQuantity,
+                        'change' => $amount,
+                        'note' => $note !== '' ? $note : null,
+                    ]
+                );
+            }
+
+            $_SESSION[$sessionSuccessKey] = $operation === 'add'
+                ? 'تم زيادة كمية المنتج الخارجي بنجاح.'
+                : 'تم إتلاف الكمية المحددة من المنتج الخارجي.';
+        } catch (Exception $e) {
+            error_log('adjust_external_stock error: ' . $e->getMessage());
+            $_SESSION[$sessionErrorKey] = 'تعذر تحديث كمية المنتج الخارجي.';
+        }
+
+        header('Location: ' . $managerInventoryUrl);
+        exit;
+    } elseif ($isManager && $postAction === 'update_external_product') {
+        $productId = intval($_POST['product_id'] ?? 0);
+        $name = trim((string)($_POST['edit_name'] ?? ''));
+        $channel = $_POST['edit_channel'] ?? 'company';
+        $unitPrice = max(0, floatval($_POST['edit_price'] ?? 0));
+        $unit = trim((string)($_POST['edit_unit'] ?? 'قطعة'));
+        $description = trim((string)($_POST['edit_description'] ?? ''));
+
+        if ($productId <= 0 || $name === '') {
+            $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج صالح وتحديد الاسم.';
+            header('Location: ' . $managerInventoryUrl);
+            exit;
+        }
+
+        if (!in_array($channel, ['company', 'delegate', 'other'], true)) {
+            $channel = 'company';
+        }
+
+        try {
+            $existing = $db->queryOne(
+                "SELECT id, name, external_channel, unit_price, unit, description
+                 FROM products WHERE id = ? AND product_type = 'external' LIMIT 1",
+                [$productId]
+            );
+
+            if (!$existing) {
+                $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود أو ليس منتجاً خارجياً.';
+                header('Location: ' . $managerInventoryUrl);
+                exit;
+            }
+
+            $db->execute(
+                "UPDATE products
+                 SET name = ?, category = ?, external_channel = ?, unit_price = ?, unit = ?, description = ?, updated_at = NOW()
+                 WHERE id = ? AND product_type = 'external'",
+                [
+                    $name,
+                    $channel === 'company' ? 'بيع داخلي' : ($channel === 'delegate' ? 'مندوب مبيعات' : 'خارجي'),
+                    $channel,
+                    $unitPrice,
+                    $unit !== '' ? $unit : 'قطعة',
+                    $description !== '' ? $description : null,
+                    $productId,
+                ]
+            );
+
+            if (!empty($currentUser['id'])) {
+                logAudit(
+                    $currentUser['id'],
+                    'external_product_update',
+                    'product',
+                    $productId,
+                    [
+                        'name' => $existing['name'] ?? null,
+                        'channel' => $existing['external_channel'] ?? null,
+                        'unit_price' => $existing['unit_price'] ?? null,
+                        'unit' => $existing['unit'] ?? null,
+                    ],
+                    [
+                        'name' => $name,
+                        'channel' => $channel,
+                        'unit_price' => $unitPrice,
+                        'unit' => $unit,
+                    ]
+                );
+            }
+
+            $_SESSION[$sessionSuccessKey] = 'تم تحديث بيانات المنتج الخارجي بنجاح.';
+        } catch (Exception $e) {
+            error_log('update_external_product error: ' . $e->getMessage());
+            $_SESSION[$sessionErrorKey] = 'تعذر تحديث بيانات المنتج الخارجي.';
+        }
+
+        header('Location: ' . $managerInventoryUrl);
+        exit;
     }
 }
 
@@ -621,11 +851,45 @@ if ($dateFrom || $dateTo) {
 
 require_once __DIR__ . '/../../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = isset($translations) ? $translations : [];
+
+$externalProducts = [];
+$externalChannelLabels = [
+    'company' => 'بيع داخل الشركة',
+    'delegate' => 'مندوب مبيعات',
+    'other' => 'متنوع',
+    '' => 'غير محدد',
+    null => 'غير محدد',
+];
+
+if ($isManager) {
+    try {
+        $externalProducts = $db->query(
+            "SELECT id, name, external_channel, quantity, unit_price, unit, updated_at, created_at, description
+             FROM products
+             WHERE product_type = 'external'
+             ORDER BY updated_at DESC, created_at DESC"
+        );
+    } catch (Exception $e) {
+        error_log('final_products: failed loading external products -> ' . $e->getMessage());
+        $externalProducts = [];
+    }
+}
 ?>
 
 <div class="page-header mb-4 d-flex justify-content-between align-items-center flex-wrap gap-2">
     <h2 class="mb-0"><i class="bi bi-boxes me-2"></i>جدول المنتجات</h2>
     <div class="d-flex flex-wrap gap-2">
+        <?php if ($isManager): ?>
+        <button
+            type="button"
+            class="btn btn-success"
+            data-bs-toggle="modal"
+            data-bs-target="#addExternalProductModal"
+        >
+            <i class="bi bi-plus-circle me-1"></i>
+            إضافة منتج خارجي
+        </button>
+        <?php endif; ?>
         <button
             type="button"
             class="btn btn-outline-primary"
@@ -754,6 +1018,238 @@ $lang = isset($translations) ? $translations : [];
         <?php endif; ?>
     </div>
 </div>
+
+<?php if ($isManager): ?>
+<div class="card shadow-sm mt-4">
+    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+        <h5 class="mb-0"><i class="bi bi-cart4 me-2"></i>المنتجات الخارجية (لا تؤثر على مخزون الشركة)</h5>
+        <span class="badge bg-light text-dark"><?php echo number_format(is_countable($externalProducts) ? count($externalProducts) : 0); ?> منتج</span>
+    </div>
+    <div class="card-body">
+        <?php if (!empty($externalProducts)): ?>
+        <div class="table-responsive dashboard-table-wrapper">
+            <table class="table dashboard-table align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>اسم المنتج</th>
+                        <th>نوع البيع</th>
+                        <th>الكمية المتاحة</th>
+                        <th>سعر البيع</th>
+                        <th>آخر تحديث</th>
+                        <th>إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($externalProducts as $externalProduct): ?>
+                    <tr>
+                        <td>
+                            <strong><?php echo htmlspecialchars($externalProduct['name'] ?? ''); ?></strong>
+                            <?php if (!empty($externalProduct['description'])): ?>
+                                <br><small class="text-muted"><?php echo htmlspecialchars($externalProduct['description']); ?></small>
+                            <?php endif; ?>
+                        </td>
+                        <td><?php
+                            $channelKey = $externalProduct['external_channel'] ?? null;
+                            echo htmlspecialchars($externalChannelLabels[$channelKey] ?? $externalChannelLabels[null]);
+                        ?></td>
+                        <td><?php echo number_format((float)($externalProduct['quantity'] ?? 0), 2); ?> <?php echo htmlspecialchars($externalProduct['unit'] ?? ''); ?></td>
+                        <td><?php echo formatCurrency($externalProduct['unit_price'] ?? 0); ?></td>
+                        <td>
+                            <?php
+                                $updatedAt = $externalProduct['updated_at'] ?? $externalProduct['created_at'] ?? null;
+                                echo $updatedAt ? htmlspecialchars(formatDateTime($updatedAt)) : '—';
+                            ?>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-success js-external-adjust"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#externalStockModal"
+                                    data-mode="add"
+                                    data-product="<?php echo intval($externalProduct['id']); ?>"
+                                    data-name="<?php echo htmlspecialchars($externalProduct['name'] ?? '', ENT_QUOTES); ?>"
+                                >
+                                    <i class="bi bi-plus-circle"></i>
+                                    إضافة كمية
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-danger js-external-adjust"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#externalStockModal"
+                                    data-mode="discard"
+                                    data-product="<?php echo intval($externalProduct['id']); ?>"
+                                    data-name="<?php echo htmlspecialchars($externalProduct['name'] ?? '', ENT_QUOTES); ?>"
+                                >
+                                    <i class="bi bi-trash3"></i>
+                                    إتلاف
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-primary js-external-edit"
+                                    data-bs-toggle="modal"
+                                    data-bs-target="#editExternalProductModal"
+                                    data-product="<?php echo intval($externalProduct['id']); ?>"
+                                    data-name="<?php echo htmlspecialchars($externalProduct['name'] ?? '', ENT_QUOTES); ?>"
+                                    data-channel="<?php echo htmlspecialchars($externalProduct['external_channel'] ?? '', ENT_QUOTES); ?>"
+                                    data-price="<?php echo htmlspecialchars($externalProduct['unit_price'] ?? 0, ENT_QUOTES); ?>"
+                                    data-unit="<?php echo htmlspecialchars($externalProduct['unit'] ?? 'قطعة', ENT_QUOTES); ?>"
+                                    data-description="<?php echo htmlspecialchars($externalProduct['description'] ?? '', ENT_QUOTES); ?>"
+                                >
+                                    <i class="bi bi-pencil-square"></i>
+                                    تعديل
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php else: ?>
+        <div class="alert alert-info mb-0">
+            <i class="bi bi-info-circle me-2"></i>
+            لم يتم إضافة منتجات خارجية بعد.
+        </div>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if ($isManager): ?>
+<div class="modal fade" id="addExternalProductModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form class="modal-content" method="POST">
+            <input type="hidden" name="action" value="create_external_product">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إضافة منتج خارجي جديد</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">اسم المنتج <span class="text-danger">*</span></label>
+                    <input type="text" name="external_name" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">نوع البيع <span class="text-danger">*</span></label>
+                    <select name="external_channel" class="form-select" required>
+                        <option value="company">بيع داخل الشركة</option>
+                        <option value="delegate">مندوب المبيعات</option>
+                        <option value="other">أخرى</option>
+                    </select>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">الكمية الابتدائية</label>
+                        <input type="number" name="external_quantity" class="form-control" min="0" step="0.01" value="0">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">الوحدة</label>
+                        <input type="text" name="external_unit" class="form-control" value="قطعة">
+                    </div>
+                </div>
+                <div class="row g-3 mt-0">
+                    <div class="col-md-6">
+                        <label class="form-label">سعر البيع</label>
+                        <input type="number" name="external_price" class="form-control" min="0" step="0.01" value="0.00">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">وصف مختصر</label>
+                        <input type="text" name="external_description" class="form-control" placeholder="اختياري">
+                    </div>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-info-circle me-2"></i>
+                    هذه المنتجات لا تؤثر على مخزون الشركة وتُستخدم للمنتجات الخارجية التي يتم بيعها داخلياً أو عبر المناديب.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="submit" class="btn btn-success">حفظ المنتج</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="externalStockModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form class="modal-content" method="POST">
+            <input type="hidden" name="action" value="adjust_external_stock">
+            <input type="hidden" name="product_id" value="">
+            <input type="hidden" name="operation" value="add">
+            <div class="modal-header">
+                <h5 class="modal-title js-external-stock-title">تحديث كمية المنتج الخارجي</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">اسم المنتج</label>
+                    <input type="text" class="form-control js-external-stock-name" readonly>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label js-external-stock-label">الكمية المراد إضافتها</label>
+                    <input type="number" name="quantity" class="form-control" min="0" step="0.01" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">ملاحظة</label>
+                    <textarea name="note" class="form-control" rows="2" placeholder="اختياري"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="submit" class="btn btn-primary js-external-stock-submit">حفظ</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="editExternalProductModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form class="modal-content" method="POST">
+            <input type="hidden" name="action" value="update_external_product">
+            <input type="hidden" name="product_id" value="">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>تعديل بيانات المنتج الخارجي</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">اسم المنتج <span class="text-danger">*</span></label>
+                    <input type="text" name="edit_name" class="form-control" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">نوع البيع <span class="text-danger">*</span></label>
+                    <select name="edit_channel" class="form-select" required>
+                        <option value="company">بيع داخل الشركة</option>
+                        <option value="delegate">مندوب المبيعات</option>
+                        <option value="other">أخرى</option>
+                    </select>
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">سعر البيع</label>
+                        <input type="number" name="edit_price" class="form-control" min="0" step="0.01">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">الوحدة</label>
+                        <input type="text" name="edit_unit" class="form-control">
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="form-label">ملاحظات</label>
+                    <textarea name="edit_description" class="form-control" rows="2" placeholder="اختياري"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="submit" class="btn btn-primary">حفظ التعديلات</button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
 
 <?php if ($primaryWarehouse): ?>
 <div class="modal fade" id="requestTransferModal" tabindex="-1" aria-hidden="true">

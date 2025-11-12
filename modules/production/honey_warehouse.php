@@ -448,8 +448,19 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
 
 <!-- قائمة مخزون العسل -->
 <div class="card shadow-sm">
-    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">مخزون العسل (<?php echo $totalCount; ?>)</h5>
+    <div class="card-header bg-primary text-white d-flex flex-wrap gap-2 justify-content-between align-items-center">
+        <h5 class="mb-0">
+            مخزون العسل (<?php echo $totalCount; ?>)
+        </h5>
+        <button
+            type="button"
+            id="printHoneyWarehouseReportButton"
+            class="btn btn-outline-light btn-sm d-print-none"
+            aria-label="طباعة تقرير مخزون العسل"
+        >
+            <i class="bi bi-printer me-1"></i>
+            طباعة التقرير
+        </button>
     </div>
     <div class="card-body">
         <?php if (empty($honeyStock)): ?>
@@ -866,6 +877,15 @@ function viewFiltrationHistory(supplierId) {
             content.innerHTML = '<div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>حدث خطأ في تحميل البيانات<br><small class="text-muted">' + error.message + '</small><br><small>يرجى التحقق من الاتصال بالإنترنت والمحاولة مرة أخرى.</small></div>';
         });
 }
+
+document.addEventListener('DOMContentLoaded', function () {
+    const printButton = document.getElementById('printHoneyWarehouseReportButton');
+    if (printButton) {
+        printButton.addEventListener('click', function () {
+            window.print();
+        });
+    }
+});
 </script>
 
 <?php
