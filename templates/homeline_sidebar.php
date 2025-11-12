@@ -46,6 +46,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => $lang['menu_group_chat'] ?? 'الدردشة الجماعية',
+                'icon' => 'bi-chat-dots',
+                'url' => $baseUrl . 'manager.php?page=group_chat',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'group_chat'),
+                'badge' => null
+            ],
+            [
                 'title' => isset($lang['menu_security']) ? $lang['menu_security'] : 'الأمان',
                 'icon' => 'bi-lock',
                 'url' => $baseUrl . 'manager.php?page=security',

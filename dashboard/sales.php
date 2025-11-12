@@ -229,6 +229,9 @@ if ($page === 'group_chat') {
                     </div>
                 </div>
                 
+            <?php elseif ($page === 'group_chat'): ?>
+                <?php include __DIR__ . '/../modules/chat/group_chat.php'; ?>
+
             <?php elseif ($page === 'customers'): ?>
                 <!-- Page Header -->
                 <div class="page-header">
