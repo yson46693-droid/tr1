@@ -3222,28 +3222,77 @@ function renderTemplateSuppliers(details) {
         return chip;
     };
 
+    const resolveComponentKey = (component) => {
+        if (!component) {
+            return 'component_' + Math.random().toString(36).slice(2);
+        }
+        if (!component.__resolvedKey) {
+            component.__resolvedKey = component.key || component.name || ('component_' + Math.random().toString(36).slice(2));
+        }
+        return component.__resolvedKey;
+    };
+
+    const honeyComponentEntries = components
+        .filter(component => {
+            const canonicalType = determineComponentType(component);
+            return isHoneyComponent(component) || ['honey_raw', 'honey_filtered', 'honey_main'].includes(canonicalType);
+        })
+        .map(component => ({
+            component,
+            key: resolveComponentKey(component)
+        }));
+
+    const honeyGroup = {
+        entries: honeyComponentEntries,
+        baseEntry: honeyComponentEntries[0] || null,
+        extraEntries: honeyComponentEntries.slice(1),
+        renderAggregated: honeyComponentEntries.length > 1
+    };
+
     components.forEach(function(component) {
         const canonicalType = determineComponentType(component);
-        const safeTypeClass = canonicalType.replace(/[^a-z0-9_-]/g, '') || 'generic';
-        const componentKey = (component.key || component.name || ('component_' + Math.random().toString(36).slice(2)));
+        const componentKey = resolveComponentKey(component);
+        const isHoneyType = isHoneyComponent(component)
+            || canonicalType === 'honey_raw'
+            || canonicalType === 'honey_filtered'
+            || canonicalType === 'honey_main';
+
+        if (isHoneyType && honeyGroup.renderAggregated && honeyGroup.baseEntry && componentKey !== honeyGroup.baseEntry.key) {
+            return;
+        }
+
+        const isAggregatedHoneyCard = isHoneyType
+            && honeyGroup.baseEntry
+            && componentKey === honeyGroup.baseEntry.key
+            && honeyGroup.renderAggregated;
+
+        const aggregatedEntries = isAggregatedHoneyCard ? honeyGroup.entries : [];
+        const extraHoneyEntries = isAggregatedHoneyCard ? honeyGroup.extraEntries : [];
+
+        const effectiveType = isAggregatedHoneyCard ? 'honey_main' : canonicalType;
+        const safeTypeClass = effectiveType.replace(/[^a-z0-9_-]/g, '') || 'generic';
 
         const col = document.createElement('div');
         col.className = 'col-12 col-lg-6';
 
         const card = document.createElement('div');
         card.className = `component-card component-type-${safeTypeClass}`;
-        card.style.setProperty('--component-accent', accentColors[canonicalType] || accentColors.default);
+        card.style.setProperty('--component-accent', accentColors[effectiveType] || accentColors.default);
 
         const header = document.createElement('div');
         header.className = 'component-card-header';
 
         const title = document.createElement('span');
         title.className = 'component-card-title';
-        title.textContent = component.name || component.label || 'مكوّن';
+        if (isAggregatedHoneyCard) {
+            title.textContent = 'مكوّنات العسل';
+        } else {
+            title.textContent = component.name || component.label || 'مكوّن';
+        }
 
         const badge = document.createElement('span');
         badge.className = 'component-card-badge';
-        badge.textContent = typeLabelsMap[canonicalType] || typeLabelsMap.generic;
+        badge.textContent = typeLabelsMap[effectiveType] || typeLabelsMap.generic;
 
         header.appendChild(title);
         header.appendChild(badge);
@@ -3252,28 +3301,51 @@ function renderTemplateSuppliers(details) {
         const meta = document.createElement('div');
         meta.className = 'component-card-meta';
         const metaIcon = document.createElement('i');
-        metaIcon.className = `bi ${componentIcons[canonicalType] || componentIcons.generic} me-2`;
+        metaIcon.className = `bi ${componentIcons[effectiveType] || componentIcons.generic} me-2`;
         meta.appendChild(metaIcon);
         const metaText = document.createElement('span');
-        metaText.textContent = component.description || 'لا توجد تفاصيل إضافية.';
+        if (isAggregatedHoneyCard) {
+            metaText.textContent = 'سيتم تطبيق نفس المورد ونوع العسل على جميع العناصر المرتبطة بالقالب.';
+        } else {
+            metaText.textContent = component.description || 'لا توجد تفاصيل إضافية.';
+        }
         meta.appendChild(metaText);
         card.appendChild(meta);
 
         const chipsWrapper = document.createElement('div');
         chipsWrapper.className = 'component-card-chips';
-        if (component.requires_variety || isHoneyComponent(component)) {
+        if (component.requires_variety || isHoneyType) {
             chipsWrapper.appendChild(createChip('bi-stars', 'يتطلب تحديد نوع العسل'));
         }
         if (component.default_supplier) {
             chipsWrapper.appendChild(createChip('bi-person-check', 'مورد مقترح'));
         }
+        if (isAggregatedHoneyCard) {
+            chipsWrapper.appendChild(createChip('bi-collection', `يشمل ${aggregatedEntries.length} عناصر`));
+        }
         if (chipsWrapper.children.length > 0) {
             card.appendChild(chipsWrapper);
         }
 
+        if (isAggregatedHoneyCard) {
+            const honeyList = document.createElement('div');
+            honeyList.className = 'aggregated-honey-list text-muted small mt-2';
+            honeyList.innerHTML = aggregatedEntries.map(entry => {
+                const name = entry.component.name || entry.component.label || 'عسل';
+                const quantityLabel = formatComponentQuantity(entry.component);
+                return `
+                    <div class="d-flex align-items-center mb-1">
+                        <i class="bi bi-dot text-warning me-2"></i>
+                        <span>${name} — ${quantityLabel}</span>
+                    </div>
+                `;
+            }).join('');
+            card.appendChild(honeyList);
+        }
+
         const controlLabel = document.createElement('label');
         controlLabel.className = 'form-label fw-semibold small text-muted mb-1';
-        controlLabel.textContent = 'اختر المورد المناسب';
+        controlLabel.textContent = isAggregatedHoneyCard ? 'اختر المورد للعسل' : 'اختر المورد المناسب';
         card.appendChild(controlLabel);
 
         const select = document.createElement('select');
@@ -3290,6 +3362,7 @@ function renderTemplateSuppliers(details) {
 
         const suppliersForComponent = getSuppliersForComponent(component);
         const suppliersList = suppliersForComponent.length ? suppliersForComponent : (window.productionSuppliers || []);
+        let autoSelectSupplierId = null;
 
         suppliersList.forEach(function(supplier) {
             const option = document.createElement('option');
@@ -3301,6 +3374,10 @@ function renderTemplateSuppliers(details) {
             select.appendChild(option);
         });
 
+        if (!component.default_supplier && suppliersList.length === 1) {
+            autoSelectSupplierId = suppliersList[0].id;
+        }
+
         if (suppliersList.length === 0) {
             const noSupplierOption = document.createElement('option');
             noSupplierOption.value = '';
@@ -3311,7 +3388,7 @@ function renderTemplateSuppliers(details) {
 
         card.appendChild(select);
 
-        if (isHoneyComponent(component)) {
+        if (isHoneyType) {
             const honeyWrapper = document.createElement('div');
             honeyWrapper.className = 'mt-2';
 
@@ -3325,6 +3402,7 @@ function renderTemplateSuppliers(details) {
             honeySelect.dataset.role = 'honey-variety';
             honeySelect.required = true;
             honeySelect.disabled = true;
+            honeySelect.dataset.defaultValue = component.honey_variety || component.variety || '';
 
             const honeyPlaceholder = document.createElement('option');
             honeyPlaceholder.value = '';
@@ -3335,16 +3413,54 @@ function renderTemplateSuppliers(details) {
 
             const honeyHelper = document.createElement('small');
             honeyHelper.className = 'text-muted d-block mt-1';
-            honeyHelper.textContent = 'اختر نوع العسل المناسب حسب الكمية المتاحة لدى المورد.';
+            honeyHelper.textContent = isAggregatedHoneyCard
+                ? 'سيتم تطبيق هذا النوع على جميع عناصر العسل في القالب.'
+                : 'اختر نوع العسل المناسب حسب الكمية المتاحة لدى المورد.';
 
             honeyWrapper.appendChild(honeyLabel);
             honeyWrapper.appendChild(honeySelect);
             honeyWrapper.appendChild(honeyHelper);
 
+            let syncHiddenInputs = () => {};
+
+            if (isAggregatedHoneyCard && extraHoneyEntries.length) {
+                const hiddenContainer = document.createElement('div');
+                hiddenContainer.className = 'd-none aggregated-honey-hidden-inputs';
+
+                extraHoneyEntries.forEach(entry => {
+                    const hiddenSupplier = document.createElement('input');
+                    hiddenSupplier.type = 'hidden';
+                    hiddenSupplier.name = 'material_suppliers[' + entry.key + ']';
+                    hiddenContainer.appendChild(hiddenSupplier);
+
+                    const hiddenVariety = document.createElement('input');
+                    hiddenVariety.type = 'hidden';
+                    hiddenVariety.name = 'material_honey_varieties[' + entry.key + ']';
+                    hiddenContainer.appendChild(hiddenVariety);
+                });
+
+                card.appendChild(hiddenContainer);
+
+                syncHiddenInputs = () => {
+                    extraHoneyEntries.forEach(entry => {
+                        const hiddenSupplier = hiddenContainer.querySelector(`input[name="material_suppliers[${entry.key}]"]`);
+                        if (hiddenSupplier) {
+                            hiddenSupplier.value = select.value;
+                        }
+                        const hiddenVariety = hiddenContainer.querySelector(`input[name="material_honey_varieties[${entry.key}]"]`);
+                        if (hiddenVariety) {
+                            hiddenVariety.value = honeySelect.value;
+                        }
+                    });
+                };
+            }
+
             const updateHoneyHelperMessage = () => {
                 const selectedOption = honeySelect.options[honeySelect.selectedIndex];
                 if (!selectedOption || !selectedOption.value) {
-                    honeyHelper.textContent = 'اختر نوع العسل المناسب حسب الكمية المتاحة لدى المورد.';
+                    honeyHelper.textContent = isAggregatedHoneyCard
+                        ? 'سيتم تطبيق هذا النوع على جميع عناصر العسل في القالب.'
+                        : 'اختر نوع العسل المناسب حسب الكمية المتاحة لدى المورد.';
                     return;
                 }
                 const rawQty = parseFloat(selectedOption.dataset.raw || '0');
@@ -3361,21 +3477,30 @@ function renderTemplateSuppliers(details) {
                     : 'لا توجد كميات مسجلة لهذا النوع لدى المورد.';
             };
 
-            select.addEventListener('change', function() {
-                populateHoneyVarietyOptions(honeySelect, this.value, component);
+            const handleSupplierChange = () => {
+                populateHoneyVarietyOptions(honeySelect, select.value, component);
                 updateHoneyHelperMessage();
-            });
+                syncHiddenInputs();
+            };
 
-            honeySelect.addEventListener('change', updateHoneyHelperMessage);
+            select.addEventListener('change', handleSupplierChange);
+            honeySelect.addEventListener('change', () => {
+                updateHoneyHelperMessage();
+                syncHiddenInputs();
+            });
 
             card.appendChild(honeyWrapper);
 
-            populateHoneyVarietyOptions(honeySelect, select.value, component);
-            updateHoneyHelperMessage();
+            handleSupplierChange();
         }
 
         col.appendChild(card);
         container.appendChild(col);
+
+        if (autoSelectSupplierId !== null) {
+            select.value = String(autoSelectSupplierId);
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
     });
 
     wrapper.classList.remove('d-none');
