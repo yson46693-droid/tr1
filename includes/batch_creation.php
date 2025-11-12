@@ -1243,6 +1243,12 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
             }
         }
 
+        $attendanceWorkersCount = is_array($workers) ? count($workers) : 0;
+
+        if ($attendanceWorkersCount === 0) {
+            throw new RuntimeException('لا يمكن إنشاء التشغيله بدون عمال حاضرين اليوم. يرجى تسجيل حضور العمال أولاً.');
+        }
+
         if (!empty($templateWorkerIdsFromDetails)) {
             $existingWorkerIds = array_map(static function (array $worker): int {
                 return (int) ($worker['id'] ?? 0);

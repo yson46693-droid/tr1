@@ -823,8 +823,77 @@ $lang = isset($translations) ? $translations : [];
     </div>
 </div>
 
+<!-- Modal تفاصيل الباركود للتشغيلة -->
+<div class="modal fade" id="batchBarcodeModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-upc-scan me-2"></i>باركود التشغيلة</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-success d-flex align-items-center">
+                    <i class="bi bi-check-circle-fill fs-4 me-3 text-success"></i>
+                    <div>
+                        <strong>تم إنشاء التشغيله بنجاح!</strong>
+                        <div class="small text-muted">يمكنك الآن طباعة الباركود أو حفظه كملف PDF.</div>
+                    </div>
+                </div>
+
+                <div class="row g-4 align-items-center">
+                    <div class="col-md-6">
+                        <div class="border rounded-3 p-3 text-center bg-light">
+                            <h6 class="text-muted mb-3">رقم التشغيلة</h6>
+                            <div id="batchBarcodeNumber" class="fs-4 fw-bold text-primary"></div>
+                            <div class="barcode-preview mt-3">
+                                <canvas id="batchBarcodeCanvas" class="img-fluid"></canvas>
+                            </div>
+                            <div class="mt-2 text-muted small">
+                                <span class="d-block">المنتج: <strong id="batchBarcodeProduct"></strong></span>
+                                <span class="d-block">تاريخ الإنتاج: <strong id="batchBarcodeProductionDate"></strong></span>
+                                <span class="d-block">تاريخ الانتهاء: <strong id="batchBarcodeExpiryDate"></strong></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="mb-3">
+                            <label class="form-label">عدد الباركودات المطلوب طباعتها</label>
+                            <input type="number" class="form-control" id="batchBarcodeQuantityInput" min="1" value="1">
+                            <div class="form-text">يستخدم عدد المنتجات في التشغيلة كقيمة افتراضية.</div>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <button type="button" class="btn btn-outline-primary" onclick="printSingleBatchBarcode()">
+                                <i class="bi bi-printer me-2"></i>طباعة باركود واحد
+                            </button>
+                            <button type="button" class="btn btn-primary" onclick="printMultipleBatchBarcodes()">
+                                <i class="bi bi-printer-fill me-2"></i>طباعة الكمية المحددة
+                            </button>
+                            <button type="button" class="btn btn-outline-success" onclick="downloadBatchBarcodePdf()">
+                                <i class="bi bi-file-earmark-pdf me-2"></i>تحميل الباركود كملف PDF
+                            </button>
+                        </div>
+                        <div class="mt-3">
+                            <div class="small text-muted">
+                                يمكنك مشاركة ملف الـ PDF مباشرةً مع فريق الطباعة أو حفظه للأرشفة.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إغلاق</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js" integrity="sha384-TUuC0BpvyEukgqS0bkkCm1cW0XkyKADVY6jwxKF1u9IiMaivGi99ZTSdKCbFf8Os" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" integrity="sha384-d2N7Ez+KQEiC5EvhczHxVn9Yx8RJWb1x1o1t4bm/FYnGV8eK3opgDdGztqKqRR3v" crossorigin="anonymous"></script>
 <script>
 let rawMaterialIndex = 0;
+
+const PRINT_BARCODE_URL = '<?php echo addslashes(getRelativeUrl("print_barcode.php")); ?>';
+let lastCreatedBatchInfo = null;
 
 function addRawMaterial() {
     const container = document.getElementById('rawMaterialsContainer');
@@ -896,15 +965,13 @@ function createBatch(templateId, templateName, triggerButton) {
         .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                const productLabel = data.product_name || templateName || 'منتج غير معروف';
-                alert(
-                    '✅ تم إنشاء التشغيله بنجاح\n' +
-                    'رقم التشغيله: ' + (data.batch_number || '-') + '\n' +
-                    'المنتج: ' + productLabel + '\n' +
-                    'الكمية: ' + units + '\n' +
-                    'تاريخ الإنتاج: ' + (data.production_date || '-') + '\n' +
-                    'تاريخ الانتهاء: ' + (data.expiry_date || '-')
-                );
+                showBatchBarcodeModal({
+                    batchNumber: data.batch_number || '-',
+                    productName: data.product_name || templateName || 'منتج غير معروف',
+                    productionDate: data.production_date || '-',
+                    expiryDate: data.expiry_date || '-',
+                    quantity: Number(data.quantity) || units
+                });
             } else {
                 alert('❌ خطأ: ' + (data.message || 'تعذر إتمام العملية.'));
             }
@@ -944,4 +1011,156 @@ document.getElementById('createTemplateForm')?.addEventListener('submit', functi
         return false;
     }
 });
+
+function showBatchBarcodeModal(batchData) {
+    const modalElement = document.getElementById('batchBarcodeModal');
+    if (!modalElement) {
+        alert('تم إنشاء التشغيله بنجاح. رقم التشغيله: ' + (batchData.batchNumber || '-'));
+        return;
+    }
+
+    const numberEl = document.getElementById('batchBarcodeNumber');
+    const productEl = document.getElementById('batchBarcodeProduct');
+    const prodDateEl = document.getElementById('batchBarcodeProductionDate');
+    const expDateEl = document.getElementById('batchBarcodeExpiryDate');
+    const quantityInput = document.getElementById('batchBarcodeQuantityInput');
+    const canvasEl = document.getElementById('batchBarcodeCanvas');
+
+    if (numberEl) {
+        numberEl.textContent = batchData.batchNumber || '-';
+    }
+    if (productEl) {
+        productEl.textContent = batchData.productName || '-';
+    }
+    if (prodDateEl) {
+        prodDateEl.textContent = batchData.productionDate || '-';
+    }
+    if (expDateEl) {
+        expDateEl.textContent = batchData.expiryDate || '-';
+    }
+    if (quantityInput) {
+        const defaultQuantity = Math.max(1, parseInt(batchData.quantity, 10) || 1);
+        quantityInput.value = defaultQuantity;
+    }
+
+    if (canvasEl && typeof JsBarcode !== 'undefined') {
+        try {
+            const context = canvasEl.getContext('2d');
+            if (context) {
+                context.clearRect(0, 0, canvasEl.width || 0, canvasEl.height || 0);
+            }
+            JsBarcode(canvasEl, batchData.batchNumber || 'UNKNOWN', {
+                format: 'CODE128',
+                displayValue: true,
+                fontSize: 14,
+                lineColor: '#1f2937',
+                width: 2,
+                height: 80,
+                margin: 10
+            });
+        } catch (barcodeError) {
+            console.error('Barcode render error:', barcodeError);
+        }
+    }
+
+    lastCreatedBatchInfo = {
+        number: batchData.batchNumber || '',
+        product: batchData.productName || '',
+        productionDate: batchData.productionDate || '',
+        expiryDate: batchData.expiryDate || '',
+    };
+
+    const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement);
+    modalInstance.show();
+}
+
+function printSingleBatchBarcode() {
+    if (!lastCreatedBatchInfo || !lastCreatedBatchInfo.number) {
+        alert('لا يوجد باركود متاح للطباعة حالياً.');
+        return;
+    }
+    const url = `${PRINT_BARCODE_URL}?batch=${encodeURIComponent(lastCreatedBatchInfo.number)}&quantity=1&format=single&print=1`;
+    window.open(url, '_blank', 'noopener');
+}
+
+function printMultipleBatchBarcodes() {
+    if (!lastCreatedBatchInfo || !lastCreatedBatchInfo.number) {
+        alert('لا يوجد باركود متاح للطباعة حالياً.');
+        return;
+    }
+    const quantityInput = document.getElementById('batchBarcodeQuantityInput');
+    const quantity = quantityInput ? Math.max(1, parseInt(quantityInput.value, 10) || 1) : 1;
+    const url = `${PRINT_BARCODE_URL}?batch=${encodeURIComponent(lastCreatedBatchInfo.number)}&quantity=${quantity}&format=multiple&print=1`;
+    window.open(url, '_blank', 'noopener');
+}
+
+function downloadBatchBarcodePdf() {
+    if (!lastCreatedBatchInfo || !lastCreatedBatchInfo.number) {
+        alert('لا يوجد باركود متاح للتحميل حالياً.');
+        return;
+    }
+    if (typeof window.jspdf === 'undefined' || typeof window.jspdf.jsPDF === 'undefined') {
+        alert('مكتبة إنشاء ملفات PDF غير متاحة حالياً. يرجى تحديث الصفحة والمحاولة مرة أخرى.');
+        return;
+    }
+    const quantityInput = document.getElementById('batchBarcodeQuantityInput');
+    const quantity = quantityInput ? Math.max(1, parseInt(quantityInput.value, 10) || 1) : 1;
+    const canvasEl = document.getElementById('batchBarcodeCanvas');
+    if (!canvasEl) {
+        alert('تعذر الوصول إلى صورة الباركود.');
+        return;
+    }
+
+    const canvasDataUrl = canvasEl.toDataURL('image/png');
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF('p', 'mm', 'A4');
+
+    const marginX = 15;
+    const marginY = 20;
+    const labelWidth = 80;
+    const labelHeight = 50;
+    const horizontalGap = 10;
+    const verticalGap = 12;
+    const labelsPerRow = 2;
+
+    let currentX = marginX;
+    let currentY = marginY;
+    let labelsPlaced = 0;
+
+    for (let i = 0; i < quantity; i += 1) {
+        doc.setDrawColor(200, 200, 200);
+        doc.rect(currentX - 2, currentY - 8, labelWidth + 4, labelHeight + 20, 'S');
+
+        doc.setFontSize(11);
+        doc.setTextColor(30, 58, 95);
+        doc.text(`رقم التشغيلة: ${lastCreatedBatchInfo.number}`, currentX, currentY);
+
+        doc.setFontSize(10);
+        doc.setTextColor(55, 65, 81);
+        doc.text(`المنتج: ${lastCreatedBatchInfo.product}`, currentX, currentY + 6);
+
+        doc.addImage(canvasDataUrl, 'PNG', currentX, currentY + 10, labelWidth, 25);
+
+        doc.setFontSize(9);
+        doc.setTextColor(75, 85, 99);
+        doc.text(`الإنتاج: ${lastCreatedBatchInfo.productionDate}`, currentX, currentY + 40);
+        if (lastCreatedBatchInfo.expiryDate && lastCreatedBatchInfo.expiryDate !== '-') {
+            doc.text(`انتهاء: ${lastCreatedBatchInfo.expiryDate}`, currentX, currentY + 46);
+        }
+
+        labelsPlaced += 1;
+        if (labelsPlaced % labelsPerRow === 0) {
+            currentX = marginX;
+            currentY += labelHeight + verticalGap + 20;
+            if (currentY + labelHeight + marginY > doc.internal.pageSize.getHeight()) {
+                doc.addPage();
+                currentY = marginY;
+            }
+        } else {
+            currentX += labelWidth + horizontalGap;
+        }
+    }
+
+    doc.save(`barcode-${lastCreatedBatchInfo.number}.pdf`);
+}
 </script>

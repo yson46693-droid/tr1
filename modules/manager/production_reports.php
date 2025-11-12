@@ -9,8 +9,12 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/consumption_reports.php';
 require_once __DIR__ . '/../../includes/table_styles.php';
+require_once __DIR__ . '/../../includes/audit_log.php';
 
 requireRole('manager');
+
+$db = db();
+$currentUser = getCurrentUser();
 
 $successMessage = $_SESSION['success_message'] ?? '';
 $errorMessage = $_SESSION['error_message'] ?? '';
@@ -23,47 +27,404 @@ $monthSummary = getConsumptionSummary($monthStart, $today);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
+    $action = $_POST['action'] ?? 'send_report';
+    $redirectPeriod = $_POST['period'] ?? $_GET['period'] ?? 'current_month';
+    $redirectDate = $_POST['date'] ?? $_GET['date'] ?? $today;
+    $redirectParams = [
+        'page' => 'reports',
+        'section' => 'production_reports',
+        'period' => $redirectPeriod
+    ];
+    if ($redirectPeriod === 'day') {
+        $redirectParams['date'] = $redirectDate;
+    }
+
     if (!verifyCSRFToken($token)) {
         $_SESSION['error_message'] = 'رمز الأمان غير صالح. يرجى إعادة المحاولة.';
-    } else {
-        $scope = $_POST['report_scope'] ?? 'day';
-        $reportDate = $_POST['report_date'] ?? $today;
-
-        switch ($scope) {
-            case 'day':
-                $dateObj = DateTime::createFromFormat('Y-m-d', $reportDate);
-                $reportDay = $dateObj ? $dateObj->format('Y-m-d') : $today;
-                $result = sendConsumptionReport($reportDay, $reportDay, 'تقرير اليوم');
-                break;
-            case 'current_month':
-                $result = sendConsumptionReport($monthStart, $today, 'تقرير الشهر الحالي');
-                break;
-            case 'previous_month':
-                $prevStart = new DateTime('first day of last month');
-                $prevEnd = new DateTime('last day of last month');
-                $result = sendConsumptionReport($prevStart->format('Y-m-d'), $prevEnd->format('Y-m-d'), 'تقرير الشهر السابق');
-                break;
-            default:
-                $result = ['success' => false, 'message' => 'نوع التقرير غير معروف.'];
-                break;
-        }
-        if ($result['success']) {
-            $_SESSION['success_message'] = $result['message'] ?? 'تم إرسال التقرير.';
-        } else {
-            $_SESSION['error_message'] = $result['message'] ?? 'تعذر إنشاء التقرير.';
-        }
+        preventDuplicateSubmission(null, $redirectParams, null, 'manager');
     }
-    preventDuplicateSubmission(
-        null,
-        [
-            'page' => 'reports',
-            'section' => 'production_reports',
-            'period' => $_GET['period'] ?? 'current_month',
-            'date' => $_GET['date'] ?? $today
-        ],
-        null,
-        'manager'
-    );
+
+    try {
+        switch ($action) {
+            case 'log_packaging_damage': {
+                $materialId = intval($_POST['packaging_material_id'] ?? 0);
+                $damagedQuantity = isset($_POST['damaged_quantity']) ? max(0.0, round((float)$_POST['damaged_quantity'], 4)) : 0.0;
+                $reason = trim($_POST['damage_reason'] ?? '');
+
+                if ($materialId <= 0) {
+                    throw new RuntimeException('يرجى اختيار أداة التعبئة.');
+                }
+                if ($damagedQuantity <= 0) {
+                    throw new RuntimeException('يرجى إدخال كمية تالفة أكبر من الصفر.');
+                }
+                if ($reason === '') {
+                    throw new RuntimeException('يرجى إدخال سبب التلف.');
+                }
+
+                $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
+                $usePackagingTable = !empty($packagingTableCheck);
+
+                $db->beginTransaction();
+                if ($usePackagingTable) {
+                    $material = $db->queryOne(
+                        "SELECT id, name, quantity, unit 
+                         FROM packaging_materials 
+                         WHERE id = ? AND status = 'active' 
+                         FOR UPDATE",
+                        [$materialId]
+                    );
+                } else {
+                    $material = $db->queryOne(
+                        "SELECT id, name, quantity, unit 
+                         FROM products 
+                         WHERE id = ? AND status = 'active' 
+                         FOR UPDATE",
+                        [$materialId]
+                    );
+                }
+
+                if (!$material) {
+                    throw new RuntimeException('أداة التعبئة غير موجودة أو غير مفعّلة.');
+                }
+
+                $quantityBefore = (float)($material['quantity'] ?? 0);
+                if ($quantityBefore < $damagedQuantity) {
+                    throw new RuntimeException('الكمية التالفة تتجاوز الكمية المتاحة.');
+                }
+                $quantityAfter = max($quantityBefore - $damagedQuantity, 0);
+
+                if ($usePackagingTable) {
+                    $db->execute(
+                        "UPDATE packaging_materials 
+                         SET quantity = ?, updated_at = NOW() 
+                         WHERE id = ?",
+                        [$quantityAfter, $materialId]
+                    );
+                } else {
+                    $db->execute(
+                        "UPDATE products 
+                         SET quantity = ? 
+                         WHERE id = ?",
+                        [$quantityAfter, $materialId]
+                    );
+                }
+
+                    $db->execute(
+                        "INSERT INTO packaging_damage_logs 
+                         (material_id, material_name, source_table, quantity_before, damaged_quantity, quantity_after, unit, reason, recorded_by) 
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        [
+                            $materialId,
+                            $material['name'] ?? null,
+                            $usePackagingTable ? 'packaging_materials' : 'products',
+                            $quantityBefore,
+                            $damagedQuantity,
+                            $quantityAfter,
+                            $material['unit'] ?? null,
+                            mb_substr($reason, 0, 500, 'UTF-8'),
+                            $currentUser['id'] ?? null
+                        ]
+                    );
+
+                logAudit(
+                    $currentUser['id'] ?? null,
+                    'record_packaging_damage',
+                    $usePackagingTable ? 'packaging_materials' : 'products',
+                    $materialId,
+                    [
+                        'quantity_before' => $quantityBefore
+                    ],
+                    [
+                        'quantity_after' => $quantityAfter,
+                        'reason' => mb_substr($reason, 0, 500, 'UTF-8')
+                    ]
+                );
+
+                $db->commit();
+
+                $_SESSION['success_message'] = sprintf(
+                    'تم تسجيل %.2f %s تالف من %s.',
+                    $damagedQuantity,
+                    $material['unit'] ?? 'وحدة',
+                    $material['name'] ?? ('أداة #' . $materialId)
+                );
+                preventDuplicateSubmission(null, $redirectParams, null, 'manager');
+            }
+            break;
+
+            case 'log_raw_damage': {
+                $stockKey = $_POST['raw_stock_key'] ?? '';
+                $damageQuantity = isset($_POST['damage_quantity']) ? max(0.0, round((float)$_POST['damage_quantity'], 3)) : 0.0;
+                $reason = trim($_POST['damage_reason'] ?? '');
+                $honeyType = $_POST['honey_type'] ?? 'raw';
+
+                if (!preg_match('/^([a-z_]+)\|([a-z_]+)\|(\d+)$/', $stockKey, $matches)) {
+                    throw new RuntimeException('يرجى اختيار المادة الخام بشكل صحيح.');
+                }
+
+                [$fullMatch, $materialCategory, $stockSource, $stockIdString] = $matches;
+                $stockId = (int)$stockIdString;
+
+                if ($damageQuantity <= 0) {
+                    throw new RuntimeException('يرجى إدخال كمية تالفة أكبر من الصفر.');
+                }
+                if ($reason === '') {
+                    throw new RuntimeException('يرجى إدخال سبب التلف.');
+                }
+
+                $validCategories = ['honey', 'olive_oil', 'beeswax', 'derivatives', 'nuts'];
+                if (!in_array($materialCategory, $validCategories, true)) {
+                    throw new RuntimeException('نوع المادة الخام غير صالح.');
+                }
+                if ($stockId <= 0) {
+                    throw new RuntimeException('يرجى اختيار سجل المخزون.');
+                }
+
+                $currentUserId = $currentUser['id'] ?? null;
+                $logDetails = [
+                    'material_category' => $materialCategory,
+                    'stock_id' => $stockId,
+                    'supplier_id' => null,
+                    'item_label' => '',
+                    'variety' => null,
+                    'unit' => 'كجم'
+                ];
+
+                $db->beginTransaction();
+
+                if ($materialCategory === 'honey') {
+                    $honeyType = $honeyType === 'filtered' ? 'filtered' : 'raw';
+                    $stock = $db->queryOne(
+                        "SELECT hs.*, s.name AS supplier_name 
+                         FROM honey_stock hs 
+                         LEFT JOIN suppliers s ON hs.supplier_id = s.id 
+                         WHERE hs.id = ? 
+                         FOR UPDATE",
+                        [$stockId]
+                    );
+                    if (!$stock) {
+                        throw new RuntimeException('سجل العسل غير موجود.');
+                    }
+                    $available = $honeyType === 'filtered'
+                        ? (float)$stock['filtered_honey_quantity']
+                        : (float)$stock['raw_honey_quantity'];
+                    if ($available < $damageQuantity) {
+                        throw new RuntimeException('الكمية المدخلة أكبر من الكمية المتاحة.');
+                    }
+                    $column = $honeyType === 'filtered' ? 'filtered_honey_quantity' : 'raw_honey_quantity';
+                    $itemLabel = $honeyType === 'filtered' ? 'عسل مصفى' : 'عسل خام';
+
+                    $db->execute(
+                        "UPDATE honey_stock 
+                         SET {$column} = {$column} - ?, updated_at = NOW() 
+                         WHERE id = ?",
+                        [$damageQuantity, $stockId]
+                    );
+
+                    $logDetails['supplier_id'] = $stock['supplier_id'];
+                    $logDetails['item_label'] = $itemLabel;
+                    $logDetails['variety'] = $stock['honey_variety'] ?? null;
+                } elseif ($materialCategory === 'olive_oil') {
+                    $stock = $db->queryOne(
+                        "SELECT os.*, s.name AS supplier_name 
+                         FROM olive_oil_stock os 
+                         LEFT JOIN suppliers s ON os.supplier_id = s.id 
+                         WHERE os.id = ? 
+                         FOR UPDATE",
+                        [$stockId]
+                    );
+                    if (!$stock) {
+                        throw new RuntimeException('سجل زيت الزيتون غير موجود.');
+                    }
+                    if ((float)$stock['quantity'] < $damageQuantity) {
+                        throw new RuntimeException('الكمية المدخلة أكبر من الكمية المتاحة.');
+                    }
+                    $db->execute(
+                        "UPDATE olive_oil_stock 
+                         SET quantity = quantity - ?, updated_at = NOW() 
+                         WHERE id = ?",
+                        [$damageQuantity, $stockId]
+                    );
+                    $logDetails['supplier_id'] = $stock['supplier_id'];
+                    $logDetails['item_label'] = 'زيت زيتون';
+                    $logDetails['unit'] = 'لتر';
+                } elseif ($materialCategory === 'beeswax') {
+                    $stock = $db->queryOne(
+                        "SELECT ws.*, s.name AS supplier_name 
+                         FROM beeswax_stock ws 
+                         LEFT JOIN suppliers s ON ws.supplier_id = s.id 
+                         WHERE ws.id = ? 
+                         FOR UPDATE",
+                        [$stockId]
+                    );
+                    if (!$stock) {
+                        throw new RuntimeException('سجل شمع العسل غير موجود.');
+                    }
+                    if ((float)$stock['weight'] < $damageQuantity) {
+                        throw new RuntimeException('الكمية المدخلة أكبر من الكمية المتاحة.');
+                    }
+                    $db->execute(
+                        "UPDATE beeswax_stock 
+                         SET weight = weight - ?, updated_at = NOW() 
+                         WHERE id = ?",
+                        [$damageQuantity, $stockId]
+                    );
+                    $logDetails['supplier_id'] = $stock['supplier_id'];
+                    $logDetails['item_label'] = 'شمع عسل';
+                } elseif ($materialCategory === 'derivatives') {
+                    $stock = $db->queryOne(
+                        "SELECT ds.*, s.name AS supplier_name 
+                         FROM derivatives_stock ds 
+                         LEFT JOIN suppliers s ON ds.supplier_id = s.id 
+                         WHERE ds.id = ? 
+                         FOR UPDATE",
+                        [$stockId]
+                    );
+                    if (!$stock) {
+                        throw new RuntimeException('سجل المشتقات غير موجود.');
+                    }
+                    if ((float)$stock['weight'] < $damageQuantity) {
+                        throw new RuntimeException('الكمية المدخلة أكبر من الكمية المتاحة.');
+                    }
+                    $db->execute(
+                        "UPDATE derivatives_stock 
+                         SET weight = weight - ?, updated_at = NOW() 
+                         WHERE id = ?",
+                        [$damageQuantity, $stockId]
+                    );
+                    $logDetails['supplier_id'] = $stock['supplier_id'];
+                    $logDetails['item_label'] = 'مشتق';
+                    $logDetails['variety'] = $stock['derivative_type'] ?? null;
+                } elseif ($materialCategory === 'nuts') {
+                    if ($stockSource === 'mixed') {
+                        $stock = $db->queryOne(
+                            "SELECT mn.*, s.name AS supplier_name 
+                             FROM mixed_nuts mn 
+                             LEFT JOIN suppliers s ON mn.supplier_id = s.id 
+                             WHERE mn.id = ? 
+                             FOR UPDATE",
+                            [$stockId]
+                        );
+                        if (!$stock) {
+                            throw new RuntimeException('سجل المكسرات المشكلة غير موجود.');
+                        }
+                        if ((float)$stock['total_quantity'] < $damageQuantity) {
+                            throw new RuntimeException('الكمية المدخلة أكبر من الكمية المتاحة في الخلطة.');
+                        }
+                        $db->execute(
+                            "UPDATE mixed_nuts 
+                             SET total_quantity = total_quantity - ?, updated_at = NOW() 
+                             WHERE id = ?",
+                            [$damageQuantity, $stockId]
+                        );
+                        $logDetails['supplier_id'] = $stock['supplier_id'];
+                        $logDetails['item_label'] = 'مكسرات مشكلة';
+                        $logDetails['variety'] = $stock['batch_name'] ?? null;
+                    } else {
+                        $stock = $db->queryOne(
+                            "SELECT ns.*, s.name AS supplier_name 
+                             FROM nuts_stock ns 
+                             LEFT JOIN suppliers s ON ns.supplier_id = s.id 
+                             WHERE ns.id = ? 
+                             FOR UPDATE",
+                            [$stockId]
+                        );
+                        if (!$stock) {
+                            throw new RuntimeException('سجل المكسرات غير موجود.');
+                        }
+                        if ((float)$stock['quantity'] < $damageQuantity) {
+                            throw new RuntimeException('الكمية المدخلة أكبر من الكمية المتاحة.');
+                        }
+                        $db->execute(
+                            "UPDATE nuts_stock 
+                             SET quantity = quantity - ?, updated_at = NOW() 
+                             WHERE id = ?",
+                            [$damageQuantity, $stockId]
+                        );
+                        $logDetails['supplier_id'] = $stock['supplier_id'];
+                        $logDetails['item_label'] = 'مكسرات';
+                        $logDetails['variety'] = $stock['nut_type'] ?? null;
+                    }
+                }
+
+                $db->execute(
+                    "INSERT INTO raw_material_damage_logs 
+                     (material_category, stock_id, supplier_id, item_label, variety, quantity, unit, reason, created_by) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        $logDetails['material_category'],
+                        $logDetails['stock_id'],
+                        $logDetails['supplier_id'],
+                        $logDetails['item_label'],
+                        $logDetails['variety'],
+                        $damageQuantity,
+                        $logDetails['unit'],
+                        $reason ?: null,
+                        $currentUserId
+                    ]
+                );
+
+                logAudit(
+                    $currentUserId,
+                    'record_damage',
+                    'raw_material_damage_logs',
+                    $stockId,
+                    null,
+                    [
+                        'category' => $materialCategory,
+                        'quantity' => $damageQuantity,
+                        'unit' => $logDetails['unit'],
+                        'reason' => $reason
+                    ]
+                );
+
+                $db->commit();
+
+                $_SESSION['success_message'] = 'تم تسجيل التالف للمواد الخام بنجاح.';
+                preventDuplicateSubmission(null, $redirectParams, null, 'manager');
+            }
+            break;
+
+            case 'send_report':
+            default: {
+                $scope = $_POST['report_scope'] ?? 'day';
+                $reportDate = $_POST['report_date'] ?? $today;
+                switch ($scope) {
+                    case 'day':
+                        $dateObj = DateTime::createFromFormat('Y-m-d', $reportDate);
+                        $reportDay = $dateObj ? $dateObj->format('Y-m-d') : $today;
+                        $result = sendConsumptionReport($reportDay, $reportDay, 'تقرير اليوم');
+                        break;
+                    case 'current_month':
+                        $result = sendConsumptionReport($monthStart, $today, 'تقرير الشهر الحالي');
+                        break;
+                    case 'previous_month':
+                        $prevStart = new DateTime('first day of last month');
+                        $prevEnd = new DateTime('last day of last month');
+                        $result = sendConsumptionReport($prevStart->format('Y-m-d'), $prevEnd->format('Y-m-d'), 'تقرير الشهر السابق');
+                        break;
+                    default:
+                        $result = ['success' => false, 'message' => 'نوع التقرير غير معروف.'];
+                        break;
+                }
+                if (!empty($result['success'])) {
+                    $_SESSION['success_message'] = $result['message'] ?? 'تم إرسال التقرير.';
+                } else {
+                    $_SESSION['error_message'] = $result['message'] ?? 'تعذر إنشاء التقرير.';
+                }
+
+                preventDuplicateSubmission(null, $redirectParams, null, 'manager');
+            }
+        }
+    } catch (Throwable $handlerError) {
+        try {
+            $db->rollback();
+        } catch (Throwable $rollbackError) {
+            // ignore rollback errors
+        }
+        $_SESSION['error_message'] = $handlerError->getMessage();
+        preventDuplicateSubmission(null, $redirectParams, null, 'manager');
+    }
 }
 
 function renderConsumptionTable($items, $includeCategory = false)
@@ -297,6 +658,7 @@ $csrfToken = generateCSRFToken();
     </div>
     <form method="post" class="row g-2 align-items-end">
         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+        <input type="hidden" name="action" value="send_report">
         <input type="hidden" name="section" value="production_reports">
         <div class="col-sm-5 col-lg-4">
             <label class="form-label">نوع التقرير</label>
@@ -363,6 +725,10 @@ $csrfToken = generateCSRFToken();
             <button class="btn btn-outline-primary js-report-nav" type="button" data-target="#summarySection">
                 <i class="bi bi-clipboard-data me-1"></i>
                 ملخص الفترة
+            </button>
+            <button class="btn btn-outline-primary js-report-nav" type="button" data-target="#damageLoggingSection">
+                <i class="bi bi-journal-plus me-1"></i>
+                تسجيل التوالف
             </button>
             <button class="btn btn-outline-primary js-report-nav" type="button" data-target="#complianceSection">
                 <i class="bi bi-shield-check me-1"></i>
@@ -486,6 +852,169 @@ $combinedData = buildCombinedReportRows($selectedSummary);
 $combinedRows = $combinedData['rows'];
 $combinedTotals = $combinedData['totals'];
 $recordsCount = count($combinedRows);
+
+// بيانات التوالف - أدوات التعبئة
+$packagingMaterialsOptions = [];
+$usePackagingTableForForm = false;
+try {
+    $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
+    $usePackagingTableForForm = !empty($packagingTableCheck);
+    if ($usePackagingTableForForm) {
+        $packagingMaterialsOptions = $db->query(
+            "SELECT id, name, quantity, unit 
+             FROM packaging_materials 
+             WHERE status = 'active' 
+             ORDER BY name"
+        );
+    } else {
+        $packagingMaterialsOptions = $db->query(
+            "SELECT id, name, quantity, unit 
+             FROM products 
+             WHERE status = 'active' 
+               AND (category LIKE '%تغليف%' OR type LIKE '%تغليف%' OR name LIKE '%تغليف%')
+             ORDER BY name"
+        );
+    }
+} catch (Exception $packagingOptionsError) {
+    $packagingMaterialsOptions = [];
+}
+
+// بيانات التوالف - المواد الخام
+$rawDamageOptionsData = [
+    'honey' => [],
+    'olive_oil' => [],
+    'beeswax' => [],
+    'derivatives' => [],
+    'nuts' => []
+];
+
+try {
+    $honeyStocks = $db->query(
+        "SELECT hs.id, hs.honey_variety, hs.raw_honey_quantity, hs.filtered_honey_quantity, s.name AS supplier_name 
+         FROM honey_stock hs 
+         LEFT JOIN suppliers s ON hs.supplier_id = s.id
+         WHERE COALESCE(hs.raw_honey_quantity, 0) > 0 OR COALESCE(hs.filtered_honey_quantity, 0) > 0
+         ORDER BY s.name IS NULL, s.name ASC, hs.honey_variety ASC"
+    );
+    foreach ($honeyStocks as $item) {
+        $rawDamageOptionsData['honey'][] = [
+            'id' => (int)($item['id'] ?? 0),
+            'supplier' => $item['supplier_name'] ?? null,
+            'variety' => $item['honey_variety'] ?? null,
+            'raw_available' => (float)($item['raw_honey_quantity'] ?? 0),
+            'filtered_available' => (float)($item['filtered_honey_quantity'] ?? 0),
+            'unit' => 'كجم',
+            'source' => 'single'
+        ];
+    }
+
+    $oliveStocks = $db->query(
+        "SELECT os.id, os.quantity, s.name AS supplier_name 
+         FROM olive_oil_stock os 
+         LEFT JOIN suppliers s ON os.supplier_id = s.id
+         WHERE COALESCE(os.quantity, 0) > 0
+         ORDER BY s.name IS NULL, s.name ASC"
+    );
+    foreach ($oliveStocks as $item) {
+        $rawDamageOptionsData['olive_oil'][] = [
+            'id' => (int)($item['id'] ?? 0),
+            'supplier' => $item['supplier_name'] ?? null,
+            'available' => (float)($item['quantity'] ?? 0),
+            'unit' => 'لتر',
+            'source' => 'single'
+        ];
+    }
+
+    $beeswaxStocks = $db->query(
+        "SELECT ws.id, ws.weight, s.name AS supplier_name 
+         FROM beeswax_stock ws 
+         LEFT JOIN suppliers s ON ws.supplier_id = s.id
+         WHERE COALESCE(ws.weight, 0) > 0
+         ORDER BY s.name IS NULL, s.name ASC"
+    );
+    foreach ($beeswaxStocks as $item) {
+        $rawDamageOptionsData['beeswax'][] = [
+            'id' => (int)($item['id'] ?? 0),
+            'supplier' => $item['supplier_name'] ?? null,
+            'available' => (float)($item['weight'] ?? 0),
+            'unit' => 'كجم',
+            'source' => 'single'
+        ];
+    }
+
+    $derivativeStocks = $db->query(
+        "SELECT ds.id, ds.weight, ds.derivative_type, s.name AS supplier_name 
+         FROM derivatives_stock ds 
+         LEFT JOIN suppliers s ON ds.supplier_id = s.id
+         WHERE COALESCE(ds.weight, 0) > 0
+         ORDER BY s.name IS NULL, s.name ASC, ds.derivative_type ASC"
+    );
+    foreach ($derivativeStocks as $item) {
+        $rawDamageOptionsData['derivatives'][] = [
+            'id' => (int)($item['id'] ?? 0),
+            'supplier' => $item['supplier_name'] ?? null,
+            'available' => (float)($item['weight'] ?? 0),
+            'variety' => $item['derivative_type'] ?? null,
+            'unit' => 'كجم',
+            'source' => 'single'
+        ];
+    }
+
+    $nutsStocks = $db->query(
+        "SELECT ns.id, ns.quantity, ns.nut_type, s.name AS supplier_name 
+         FROM nuts_stock ns 
+         LEFT JOIN suppliers s ON ns.supplier_id = s.id
+         WHERE COALESCE(ns.quantity, 0) > 0
+         ORDER BY s.name IS NULL, s.name ASC, ns.nut_type ASC"
+    );
+    foreach ($nutsStocks as $item) {
+        $rawDamageOptionsData['nuts'][] = [
+            'id' => (int)($item['id'] ?? 0),
+            'supplier' => $item['supplier_name'] ?? null,
+            'available' => (float)($item['quantity'] ?? 0),
+            'variety' => $item['nut_type'] ?? null,
+            'unit' => 'كجم',
+            'source' => 'single'
+        ];
+    }
+
+    $mixedNutsStocks = $db->query(
+        "SELECT mn.id, mn.total_quantity, mn.batch_name, s.name AS supplier_name 
+         FROM mixed_nuts mn 
+         LEFT JOIN suppliers s ON mn.supplier_id = s.id
+         WHERE COALESCE(mn.total_quantity, 0) > 0
+         ORDER BY s.name IS NULL, s.name ASC, mn.batch_name ASC"
+    );
+    foreach ($mixedNutsStocks as $item) {
+        $rawDamageOptionsData['nuts'][] = [
+            'id' => (int)($item['id'] ?? 0),
+            'supplier' => $item['supplier_name'] ?? null,
+            'available' => (float)($item['total_quantity'] ?? 0),
+            'variety' => $item['batch_name'] ?? null,
+            'unit' => 'كجم',
+            'source' => 'mixed'
+        ];
+    }
+} catch (Exception $rawOptionsError) {
+    $rawDamageOptionsData = [
+        'honey' => [],
+        'olive_oil' => [],
+        'beeswax' => [],
+        'derivatives' => [],
+        'nuts' => []
+    ];
+}
+
+$rawDamageOptionsJson = json_encode($rawDamageOptionsData, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP);
+$rawDamageOptionsJson = $rawDamageOptionsJson ?: '{}';
+$hasPackagingOptions = !empty($packagingMaterialsOptions);
+$hasRawDamageOptions = false;
+foreach ($rawDamageOptionsData as $categoryItems) {
+    if (!empty($categoryItems)) {
+        $hasRawDamageOptions = true;
+        break;
+    }
+}
 ?>
 
 <div class="card mb-4 shadow-sm" id="reportFiltersSection">
@@ -520,6 +1049,147 @@ $recordsCount = count($combinedRows);
 
 <section id="summarySection" class="mb-4">
     <?php renderSummaryCards('ملخص ' . $rangeLabel, $selectedSummary); ?>
+</section>
+
+<section id="damageLoggingSection" class="mb-4">
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-danger-subtle text-danger d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-archive-dash me-2"></i>تسجيل تالف أدوات التعبئة</span>
+                    <span class="badge bg-light text-danger">يؤثر على المخزون فوراً</span>
+                </div>
+                <div class="card-body">
+                    <?php if ($hasPackagingOptions): ?>
+                    <form method="post" class="row g-3">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                        <input type="hidden" name="action" value="log_packaging_damage">
+                        <input type="hidden" name="period" value="<?php echo htmlspecialchars($selectedPeriod); ?>">
+                        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDateValue); ?>">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">أداة التعبئة <span class="text-danger">*</span></label>
+                            <select class="form-select" id="packagingDamageMaterial" name="packaging_material_id" required>
+                                <option value="">اختر أداة التعبئة</option>
+                                <?php foreach ($packagingMaterialsOptions as $option): ?>
+                                    <?php
+                                    $materialId = (int)($option['id'] ?? 0);
+                                    if ($materialId <= 0) {
+                                        continue;
+                                    }
+                                    $materialName = trim((string)($option['name'] ?? ''));
+                                    if ($materialName === '') {
+                                        $materialName = 'أداة #' . $materialId;
+                                    }
+                                    $materialQuantity = isset($option['quantity']) ? (float)$option['quantity'] : 0.0;
+                                    $materialUnit = trim((string)($option['unit'] ?? 'وحدة'));
+                                    ?>
+                                    <option
+                                        value="<?php echo $materialId; ?>"
+                                        data-unit="<?php echo htmlspecialchars($materialUnit, ENT_QUOTES, 'UTF-8'); ?>"
+                                        data-available="<?php echo htmlspecialchars(number_format($materialQuantity, 4, '.', ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                    >
+                                        <?php echo htmlspecialchars($materialName, ENT_QUOTES, 'UTF-8'); ?>
+                                        <?php if ($materialQuantity > 0): ?>
+                                            — متاح <?php echo number_format($materialQuantity, 2); ?> <?php echo htmlspecialchars($materialUnit, ENT_QUOTES, 'UTF-8'); ?>
+                                        <?php else: ?>
+                                            — لا يوجد رصيد متاح
+                                        <?php endif; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="text-muted d-block mt-2" id="packagingDamageAvailability">—</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">الكمية التالفة <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" step="0.01" min="0.01" name="damaged_quantity" id="packagingDamageQuantity" required>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <div class="alert alert-warning bg-warning-subtle text-warning-emphasis w-100 mb-0 py-2 small">
+                                سيتم خصم الكمية التالفة مباشرةً من المخزون.
+                            </div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">سبب التلف <span class="text-danger">*</span></label>
+                            <textarea class="form-control" name="damage_reason" rows="2" placeholder="مثال: تالف بسبب التخزين أو النقل" required></textarea>
+                        </div>
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-danger">
+                                <i class="bi bi-save me-1"></i>
+                                تسجيل التالف
+                            </button>
+                        </div>
+                    </form>
+                    <?php else: ?>
+                        <div class="alert alert-info mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            لا توجد أدوات تعبئة متاحة للتسجيل حالياً.
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-warning-subtle text-warning d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-droplet-half me-2"></i>تسجيل تالف المواد الخام</span>
+                    <span class="badge bg-light text-warning">يشمل العسل والزيوت والمكسرات</span>
+                </div>
+                <div class="card-body">
+                    <?php if ($hasRawDamageOptions): ?>
+                    <form method="post" class="row g-3" id="rawDamageForm">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                        <input type="hidden" name="action" value="log_raw_damage">
+                        <input type="hidden" name="period" value="<?php echo htmlspecialchars($selectedPeriod); ?>">
+                        <input type="hidden" name="date" value="<?php echo htmlspecialchars($selectedDateValue); ?>">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">نوع المادة <span class="text-danger">*</span></label>
+                            <select class="form-select" name="material_category" id="rawDamageCategory" required>
+                                <option value="honey">العسل</option>
+                                <option value="olive_oil">زيت الزيتون</option>
+                                <option value="beeswax">شمع العسل</option>
+                                <option value="derivatives">المشتقات</option>
+                                <option value="nuts">المكسرات</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">السجل المتأثر <span class="text-danger">*</span></label>
+                            <select class="form-select" name="raw_stock_key" id="rawDamageStock" required>
+                                <option value="">اختر السجل</option>
+                            </select>
+                            <small class="text-muted d-block mt-2" id="rawDamageAvailability">—</small>
+                        </div>
+                        <div class="col-md-6 d-none" id="rawDamageHoneyTypeRow">
+                            <label class="form-label fw-semibold">نوع العسل</label>
+                            <select class="form-select" name="honey_type" id="rawDamageHoneyType">
+                                <option value="raw">عسل خام</option>
+                                <option value="filtered">عسل مصفى</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">الكمية التالفة <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" step="0.01" min="0.01" name="damage_quantity" id="rawDamageQuantity" required>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">سبب التلف <span class="text-danger">*</span></label>
+                            <textarea class="form-control" name="damage_reason" rows="2" placeholder="مثال: انتهاء الصلاحية أو تلف أثناء التخزين" required></textarea>
+                        </div>
+                        <div class="col-12 text-end">
+                            <button type="submit" class="btn btn-warning text-white">
+                                <i class="bi bi-save me-1"></i>
+                                تسجيل التالف
+                            </button>
+                        </div>
+                    </form>
+                    <?php else: ?>
+                        <div class="alert alert-info mb-0">
+                            <i class="bi bi-info-circle me-2"></i>
+                            لا توجد مخزونات خام متاحة لتسجيل التوالف حالياً.
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
 </section>
 
 <?php $damageCompliance = $selectedSummary['damage_compliance'] ?? []; ?>
@@ -613,6 +1283,7 @@ $recordsCount = count($combinedRows);
 </section>
 
 <script>
+    const rawDamageOptions = <?php echo $rawDamageOptionsJson; ?>;
     document.addEventListener('DOMContentLoaded', function () {
         const periodSelect = document.getElementById('reportPeriod');
         const dayField = document.getElementById('dayFilterField');
@@ -650,6 +1321,200 @@ $recordsCount = count($combinedRows);
                 }
             });
         });
+
+        const packagingSelect = document.getElementById('packagingDamageMaterial');
+        const packagingQuantityInput = document.getElementById('packagingDamageQuantity');
+        const packagingInfo = document.getElementById('packagingDamageAvailability');
+        if (packagingSelect && packagingInfo) {
+            const updatePackagingInfo = () => {
+                const option = packagingSelect.options[packagingSelect.selectedIndex];
+                if (!option || !option.dataset.available) {
+                    packagingInfo.textContent = '—';
+                    if (packagingQuantityInput) {
+                        packagingQuantityInput.removeAttribute('max');
+                    }
+                    return;
+                }
+                const available = parseFloat(option.dataset.available || '0');
+                const unit = option.dataset.unit || 'وحدة';
+                if (Number.isFinite(available) && available > 0) {
+                    packagingInfo.textContent = `المتاح حالياً: ${available.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${unit}`;
+                    if (packagingQuantityInput) {
+                        packagingQuantityInput.max = available;
+                    }
+                } else {
+                    packagingInfo.textContent = 'لا يوجد رصيد متاح حالياً في المخزون.';
+                    if (packagingQuantityInput) {
+                        packagingQuantityInput.removeAttribute('max');
+                    }
+                }
+            };
+            packagingSelect.addEventListener('change', updatePackagingInfo);
+            updatePackagingInfo();
+        }
+
+        const rawCategorySelect = document.getElementById('rawDamageCategory');
+        const rawStockSelect = document.getElementById('rawDamageStock');
+        const rawAvailability = document.getElementById('rawDamageAvailability');
+        const honeyTypeRow = document.getElementById('rawDamageHoneyTypeRow');
+        const honeyTypeSelect = document.getElementById('rawDamageHoneyType');
+        const rawQuantityInput = document.getElementById('rawDamageQuantity');
+
+        const populateRawStocks = (category) => {
+            if (!rawStockSelect) {
+                return;
+            }
+            rawStockSelect.innerHTML = '<option value="">اختر السجل</option>';
+            if (rawAvailability) {
+                rawAvailability.textContent = '—';
+            }
+            if (honeyTypeRow) {
+                honeyTypeRow.classList.toggle('d-none', category !== 'honey');
+            }
+            if (honeyTypeSelect) {
+                honeyTypeSelect.value = 'raw';
+            }
+            if (honeyTypeSelect) {
+                honeyTypeSelect.value = 'raw';
+            }
+
+            const options = (rawDamageOptions && rawDamageOptions[category]) ? rawDamageOptions[category] : [];
+            options.forEach((item) => {
+                const option = document.createElement('option');
+                const source = item.source || 'single';
+                option.value = `${category}|${source}|${item.id}`;
+
+                const labelParts = [];
+                if (item.supplier) {
+                    labelParts.push(item.supplier);
+                }
+                if (item.variety) {
+                    labelParts.push(item.variety);
+                }
+                let labelText = `#${item.id}`;
+                if (labelParts.length) {
+                    labelText += ' - ' + labelParts.join(' | ');
+                }
+
+                const availableValue = (item.available !== undefined)
+                    ? parseFloat(item.available)
+                    : parseFloat(item.raw_available ?? item.filtered_available ?? 0);
+                const unit = item.unit || 'كجم';
+
+                option.dataset.unit = unit;
+                option.dataset.supplier = item.supplier || '';
+                option.dataset.variety = item.variety || '';
+                option.dataset.source = source;
+                if (item.raw_available !== undefined) {
+                    option.dataset.rawAvailable = item.raw_available;
+                }
+                if (item.filtered_available !== undefined) {
+                    option.dataset.filteredAvailable = item.filtered_available;
+                }
+                if (item.available !== undefined) {
+                    option.dataset.available = item.available;
+                }
+
+                const displayAvailable = Number.isFinite(availableValue) ? availableValue : 0;
+                option.textContent = `${labelText} — متاح ${displayAvailable.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${unit}`;
+                rawStockSelect.appendChild(option);
+            });
+        };
+
+        const updateRawAvailability = () => {
+            if (!rawStockSelect || !rawAvailability) {
+                return;
+            }
+            const option = rawStockSelect.options[rawStockSelect.selectedIndex];
+            if (!option || !option.value) {
+                rawAvailability.textContent = '—';
+                if (rawQuantityInput) {
+                    rawQuantityInput.removeAttribute('max');
+                }
+                return;
+            }
+            const unit = option.dataset.unit || 'كجم';
+            const [category] = option.value.split('|');
+
+            if (category === 'honey') {
+                const rawAvailable = parseFloat(option.dataset.rawAvailable || '0');
+                const filteredAvailable = parseFloat(option.dataset.filteredAvailable || '0');
+                const rawText = rawAvailable.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const filteredText = filteredAvailable.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                rawAvailability.innerHTML = `خام: ${rawText} ${unit} &mdash; مصفى: ${filteredText} ${unit}`;
+                const selectedHoneyType = honeyTypeSelect ? honeyTypeSelect.value : 'raw';
+                const availableForType = selectedHoneyType === 'filtered' ? filteredAvailable : rawAvailable;
+                if (rawQuantityInput) {
+                    if (Number.isFinite(availableForType) && availableForType > 0) {
+                        rawQuantityInput.max = availableForType;
+                    } else {
+                        rawQuantityInput.removeAttribute('max');
+                    }
+                }
+                if (honeyTypeSelect) {
+                    const rawOption = honeyTypeSelect.querySelector('option[value="raw"]');
+                    const filteredOption = honeyTypeSelect.querySelector('option[value="filtered"]');
+                    if (rawOption) {
+                        rawOption.disabled = rawAvailable <= 0;
+                    }
+                    if (filteredOption) {
+                        filteredOption.disabled = filteredAvailable <= 0;
+                    }
+                    if (honeyTypeSelect.value === 'filtered' && filteredAvailable <= 0 && rawAvailable > 0) {
+                        honeyTypeSelect.value = 'raw';
+                    }
+                    if (honeyTypeSelect.value === 'raw' && rawAvailable <= 0 && filteredAvailable > 0) {
+                        honeyTypeSelect.value = 'filtered';
+                    }
+                }
+            } else {
+                const available = parseFloat(option.dataset.available || '0');
+                if (Number.isFinite(available) && available > 0) {
+                    rawAvailability.textContent = `المتاح حالياً: ${available.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${unit}`;
+                    if (rawQuantityInput) {
+                        rawQuantityInput.max = available;
+                    }
+                } else {
+                    rawAvailability.textContent = 'لا يوجد رصيد متاح حالياً في المخزون.';
+                    if (rawQuantityInput) {
+                        rawQuantityInput.removeAttribute('max');
+                    }
+                }
+            }
+        };
+
+        const hasRawOptions = (category) => {
+            if (!rawDamageOptions || !category) {
+                return false;
+            }
+            const items = rawDamageOptions[category];
+            return Array.isArray(items) && items.length > 0;
+        };
+
+        if (rawCategorySelect) {
+            let initialCategory = rawCategorySelect.value || 'honey';
+            if (!hasRawOptions(initialCategory)) {
+                const fallbackCategory = Array.from(rawCategorySelect.options)
+                    .map(option => option.value)
+                    .find(value => value && hasRawOptions(value));
+                if (fallbackCategory) {
+                    rawCategorySelect.value = fallbackCategory;
+                    initialCategory = fallbackCategory;
+                }
+            }
+            rawCategorySelect.addEventListener('change', function () {
+                populateRawStocks(this.value);
+                updateRawAvailability();
+            });
+            populateRawStocks(initialCategory);
+        }
+        if (rawStockSelect) {
+            rawStockSelect.addEventListener('change', updateRawAvailability);
+        }
+        if (honeyTypeSelect) {
+            honeyTypeSelect.addEventListener('change', updateRawAvailability);
+        }
+        updateRawAvailability();
 
         if (!periodSelect || !dayField) {
             if (params.get('section') === 'production_reports' && targetSection) {
