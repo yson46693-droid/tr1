@@ -2083,7 +2083,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 <select class="form-select form-select-sm shadow-sm" id="debtStatusFilter" name="debt_status">
                     <option value="all" <?php echo $debtStatus === 'all' ? 'selected' : ''; ?>>الكل</option>
                     <option value="debtor" <?php echo $debtStatus === 'debtor' ? 'selected' : ''; ?>>مدين</option>
-                    <option value="clear" <?php echo $debtStatus === 'clear' ? 'selected' : ''; ?>>غير مدين</option>
+                    <option value="clear" <?php echo $debtStatus === 'clear' ? 'selected' : ''; ?>>غير مدين / لديه رصيد</option>
                 </select>
             </div>
             <div class="col-6 col-md-3 col-lg-2 d-grid">
