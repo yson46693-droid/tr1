@@ -242,44 +242,6 @@ $products = $db->query($sql, $params);
 // الحصول على الفئات
 $categories = $db->query("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND (product_type IS NULL OR product_type = 'internal') ORDER BY category");
 
-// المنتجات منخفضة المخزون
-// التحقق من وجود عمود min_stock أولاً
-$lowStock = [];
-try {
-    // محاولة التحقق من وجود العمود
-    $columnCheck = $db->queryOne("SHOW COLUMNS FROM products LIKE 'min_stock'");
-    
-    if ($columnCheck) {
-        // العمود موجود
-        $lowStock = $db->query(
-            "SELECT * FROM products 
-             WHERE quantity <= min_stock AND status = 'active' AND (product_type IS NULL OR product_type = 'internal')
-             ORDER BY (quantity / NULLIF(min_stock, 0)) ASC
-             LIMIT 10"
-        );
-    } else {
-        // العمود غير موجود - إضافته أو استخدام بديل
-        // محاولة إضافة العمود
-        try {
-            $db->execute("ALTER TABLE products ADD COLUMN min_stock DECIMAL(10,2) DEFAULT 0.00 AFTER quantity");
-            // بعد إضافة العمود، لا يوجد منتجات منخفضة المخزون بعد
-            $lowStock = [];
-        } catch (Exception $e) {
-            error_log("Error adding min_stock column: " . $e->getMessage());
-            // إذا فشل إضافة العمود، استخدم استعلام بديل بدون min_stock
-            $lowStock = [];
-        }
-    }
-} catch (Exception $e) {
-    error_log("Error checking min_stock column: " . $e->getMessage());
-    // في حالة الخطأ، استخدم استعلام بديل
-    $lowStock = $db->query(
-        "SELECT * FROM products 
-         WHERE quantity <= 0 AND status = 'active' AND (product_type IS NULL OR product_type = 'internal')
-         ORDER BY quantity ASC
-         LIMIT 10"
-    );
-}
 // ملخص سريع للمخزون
 $inventorySummary = $db->queryOne("
     SELECT 
@@ -289,8 +251,6 @@ $inventorySummary = $db->queryOne("
     FROM products
     WHERE status = 'active' AND (product_type IS NULL OR product_type = 'internal')
 ");
-
-$lowStockCount = is_array($lowStock) ? count($lowStock) : 0;
 
 $buildInventoryUrl = function(array $overrides = []) use ($search, $category) {
     $query = ['page' => 'inventory'];
@@ -393,13 +353,6 @@ $buildInventoryUrl = function(array $overrides = []) use ($search, $category) {
 .inventory-table-card .card-header {
     border-radius: 18px 18px 0 0;
 }
-.low-stock-alert ul {
-    margin-bottom: 0;
-    padding-inline-start: 1.2rem;
-}
-.low-stock-alert li {
-    margin-bottom: 0.35rem;
-}
 @media (max-width: 575.98px) {
     .inventory-summary-card {
         padding: 1rem;
@@ -429,26 +382,7 @@ $buildInventoryUrl = function(array $overrides = []) use ($search, $category) {
         <div class="meta">مجموع (الكمية × سعر الوحدة) للمنتجات النشطة</div>
         <i class="bi bi-cash-stack"></i>
     </div>
-    <div class="inventory-summary-card">
-        <span class="label">منتجات منخفضة المخزون</span>
-        <div class="value"><?php echo number_format($lowStockCount); ?></div>
-        <div class="meta"><?php echo $lowStockCount > 0 ? 'يجب إعادة التوريد لتجنّب نفاد المخزون' : 'لا توجد عناصر حرجة حالياً'; ?></div>
-        <i class="bi bi-exclamation-triangle"></i>
-    </div>
 </div>
-
-<?php if (!empty($lowStock)): ?>
-    <div class="alert alert-warning">
-        <h5><i class="bi bi-exclamation-triangle me-2"></i>تنبيه: مخزون منخفض</h5>
-        <ul class="mb-0">
-            <?php foreach ($lowStock as $item): ?>
-                <li><?php echo htmlspecialchars($item['name']); ?>: 
-                    <?php echo number_format($item['quantity'], 2); ?> 
-                    (الحد الأدنى: <?php echo isset($item['min_stock']) ? number_format($item['min_stock'], 2) : '0.00'; ?>)</li>
-            <?php endforeach; ?>
-        </ul>
-    </div>
-<?php endif; ?>
 
 <!-- البحث والفلترة -->
 <div class="card inventory-search-card mb-4">
