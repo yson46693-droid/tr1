@@ -1850,18 +1850,28 @@ document.addEventListener('DOMContentLoaded', function() {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-            .then(response => {
-                const contentType = response.headers.get('content-type') || '';
+            .then(async response => {
+                const rawBody = await response.text();
+                let data = null;
+
+                if (rawBody.trim().length > 0) {
+                    try {
+                        data = JSON.parse(rawBody);
+                    } catch (parseError) {
+                        console.error('Failed to parse advance response JSON:', parseError, rawBody);
+                    }
+                }
+
                 if (!response.ok) {
-                    throw new Error('تعذر الاتصال بالخادم. يرجى المحاولة مرة أخرى.');
+                    const message = (data && data.message) ? data.message : 'تعذر الاتصال بالخادم. يرجى المحاولة مرة أخرى.';
+                    throw new Error(message);
                 }
-                if (contentType.includes('application/json')) {
-                    return response.json();
-                }
-                return response.text().then(text => {
-                    console.error('Unexpected response body:', text);
+
+                if (!data) {
                     throw new Error('حدث خطأ غير متوقع في الخادم. يرجى المحاولة لاحقاً.');
-                });
+                }
+
+                return data;
             })
             .then(data => {
                 const alert = document.createElement('div');

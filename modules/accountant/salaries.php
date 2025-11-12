@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/salary_calculator.php';
+require_once __DIR__ . '/../../includes/attendance.php';
 require_once __DIR__ . '/../../includes/approval_system.php';
 require_once __DIR__ . '/../../includes/notifications.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
@@ -123,6 +124,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $success = "تم حساب $successCount راتب بنجاح";
         $view = 'list'; // الانتقال إلى قائمة الرواتب
+    } elseif ($action === 'send_attendance_report') {
+        $month = intval($_POST['month'] ?? $selectedMonth);
+        $year  = intval($_POST['year'] ?? $selectedYear);
+
+        $reportResult = sendMonthlyAttendanceReportToTelegram($month, $year, [
+            'force' => true,
+            'triggered_by' => $currentUser['id'] ?? null,
+        ]);
+
+        if ($reportResult['success']) {
+            $success = $reportResult['message'];
+        } else {
+            $error = $reportResult['message'];
+        }
+
+        $selectedMonth = $month;
+        $selectedYear  = $year;
+        $showReport = true;
+        $monthlyReport = generateMonthlySalaryReport($selectedMonth, $selectedYear);
     } elseif ($action === 'modify_salary') {
         // وظيفة تعديل الراتب من salary_details.php
         $salaryId = intval($_POST['salary_id'] ?? 0);
@@ -749,14 +769,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 <?php if ($showReport && $monthlyReport): ?>
 <!-- تقرير رواتب شهري -->
 <div class="card shadow-sm mb-4">
-    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+    <div class="card-header bg-info text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h5 class="mb-0">
             <i class="bi bi-file-earmark-text me-2"></i>
             تقرير رواتب شهري - <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?>
         </h5>
-        <a href="<?php echo $currentUrl; ?>?page=salaries&view=<?php echo $view; ?>&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>" class="btn btn-light btn-sm">
-            <i class="bi bi-x-lg"></i> إغلاق التقرير
-        </a>
+        <div class="d-flex align-items-center gap-2">
+            <form method="POST" class="d-inline">
+                <input type="hidden" name="action" value="send_attendance_report">
+                <input type="hidden" name="month" value="<?php echo (int) $selectedMonth; ?>">
+                <input type="hidden" name="year" value="<?php echo (int) $selectedYear; ?>">
+                <button type="submit" class="btn btn-warning btn-sm text-dark">
+                    <i class="bi bi-send-fill me-1"></i> إرسال تقرير التأخيرات إلى Telegram
+                </button>
+            </form>
+            <a href="<?php echo $currentUrl; ?>?page=salaries&view=<?php echo $view; ?>&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>" class="btn btn-light btn-sm">
+                <i class="bi bi-x-lg"></i> إغلاق التقرير
+            </a>
+        </div>
     </div>
     <div class="card-body">
         <!-- ملخص التقرير -->
@@ -801,6 +831,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                 </div>
             </div>
         </div>
+        <div class="row mb-4">
+            <div class="col-md-6 col-sm-6 mb-3">
+                <div class="card bg-dark text-white">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">إجمالي التأخيرات (دقائق)</h6>
+                        <h3 class="mb-0"><?php echo number_format($monthlyReport['total_delay_minutes'], 2); ?></h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6 col-sm-6 mb-3">
+                <div class="card bg-secondary text-white">
+                    <div class="card-body text-center">
+                        <h6 class="card-title">متوسط التأخير لكل موظف (دقيقة)</h6>
+                        <h3 class="mb-0"><?php echo number_format($monthlyReport['average_delay_minutes'], 2); ?></h3>
+                    </div>
+                </div>
+            </div>
+        </div>
         
         <!-- جدول الرواتب -->
         <div class="table-responsive dashboard-table-wrapper">
@@ -812,6 +860,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                         <th>الدور</th>
                         <th>سعر الساعة</th>
                         <th>عدد الساعات</th>
+                        <th>إجمالي التأخير (دقائق)</th>
+                        <th>متوسط التأخير</th>
                         <th>الراتب الأساسي</th>
                         <th>مكافأة</th>
                         <th>نسبة التحصيلات (2%)</th>
@@ -823,7 +873,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                 <tbody>
                     <?php if (empty($monthlyReport['salaries'])): ?>
                         <tr>
-                            <td colspan="11" class="text-center text-muted">لا توجد رواتب</td>
+                            <td colspan="13" class="text-center text-muted">لا توجد رواتب</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($monthlyReport['salaries'] as $index => $salary): ?>
@@ -838,6 +888,18 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                                 <td data-label="سعر الساعة"><?php echo formatCurrency($salary['hourly_rate']); ?></td>
                                 <td data-label="عدد الساعات">
                                     <strong><?php echo number_format($salary['total_hours'], 2); ?> ساعة</strong>
+                                </td>
+                                <td data-label="إجمالي التأخير (دقائق)">
+                                    <strong><?php echo number_format($salary['total_delay_minutes'] ?? 0, 2); ?></strong>
+                                    <?php if (!empty($salary['delay_days'])): ?>
+                                        <div class="text-muted small"><?php echo (int) $salary['delay_days']; ?> يوم متأخر</div>
+                                    <?php endif; ?>
+                                </td>
+                                <td data-label="متوسط التأخير">
+                                    <strong><?php echo number_format($salary['average_delay_minutes'] ?? 0, 2); ?> دقيقة</strong>
+                                    <?php if (!empty($salary['attendance_days'])): ?>
+                                        <div class="text-muted small">من <?php echo (int) $salary['attendance_days']; ?> يوم حضور</div>
+                                    <?php endif; ?>
                                 </td>
                                 <td data-label="الراتب الأساسي"><?php echo formatCurrency($salary['base_amount']); ?></td>
                                 <td data-label="مكافأة"><?php echo formatCurrency($salary['bonus'] ?? 0); ?></td>
@@ -882,6 +944,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                     <tr class="table-info">
                         <td colspan="4" class="text-end"><strong>الإجمالي:</strong></td>
                         <td><strong><?php echo number_format($monthlyReport['total_hours'], 2); ?> ساعة</strong></td>
+                        <td><strong><?php echo number_format($monthlyReport['total_delay_minutes'], 2); ?> دقيقة</strong></td>
+                        <td><strong><?php echo number_format($monthlyReport['average_delay_minutes'], 2); ?> دقيقة</strong></td>
                         <td colspan="4"></td>
                         <td><strong><?php echo formatCurrency($monthlyReport['total_amount']); ?></strong></td>
                         <td></td>
