@@ -2858,18 +2858,23 @@ function normalizeSupplierKey(value) {
     return String(value);
 }
 
-function populateHoneyVarietyOptions(inputEl, datalistEl, supplierId, component) {
-    if (!inputEl || !datalistEl) {
+function populateHoneyVarietyOptions(selectEl, supplierId, component) {
+    if (!selectEl) {
         return;
     }
 
     const normalizedKey = normalizeSupplierKey(supplierId);
+    selectEl.innerHTML = '';
+
+    const placeholderOption = document.createElement('option');
+    placeholderOption.value = '';
+    placeholderOption.disabled = true;
+    placeholderOption.selected = true;
+    placeholderOption.textContent = normalizedKey ? 'اختر نوع العسل' : 'اختر المورد أولاً';
+    selectEl.appendChild(placeholderOption);
+
     if (!normalizedKey) {
-        datalistEl.innerHTML = '';
-        inputEl.value = '';
-        inputEl.disabled = true;
-        inputEl.placeholder = 'اختر المورد أولاً';
-        inputEl.dataset.defaultApplied = '';
+        selectEl.disabled = true;
         return;
     }
 
@@ -2888,32 +2893,62 @@ function populateHoneyVarietyOptions(inputEl, datalistEl, supplierId, component)
         }
     }
 
-    datalistEl.innerHTML = '';
-    const uniqueVarieties = new Set();
+    const aggregated = {};
     items.forEach(item => {
-        const varietyName = item && item.variety ? String(item.variety) : '';
-        if (!varietyName || uniqueVarieties.has(varietyName)) {
-            return;
+        const varietyName = (item && item.variety) ? String(item.variety) : 'غير محدد';
+        if (!aggregated[varietyName]) {
+            aggregated[varietyName] = {
+                raw: 0,
+                filtered: 0
+            };
         }
-        uniqueVarieties.add(varietyName);
-        const option = document.createElement('option');
-        option.value = varietyName;
-        datalistEl.appendChild(option);
+        aggregated[varietyName].raw += Number(item.raw_quantity ?? 0);
+        aggregated[varietyName].filtered += Number(item.filtered_quantity ?? 0);
     });
 
-    inputEl.disabled = false;
-    inputEl.placeholder = uniqueVarieties.size > 0
-        ? 'اختر أو اكتب نوع العسل'
-        : 'اكتب نوع العسل المتوفر لدى المورد';
+    const entries = Object.entries(aggregated);
+    if (entries.length === 0) {
+        placeholderOption.textContent = 'لا توجد كميات متاحة لدى المورد المختار';
+        selectEl.disabled = true;
+        return;
+    }
 
-    if (!inputEl.dataset.defaultApplied) {
-        const defaultValue = inputEl.dataset.defaultValue || '';
-        if (defaultValue !== '') {
-            if (uniqueVarieties.size === 0 || uniqueVarieties.has(defaultValue)) {
-                inputEl.value = defaultValue;
+    selectEl.disabled = false;
+
+    entries.forEach(([varietyName, quantities]) => {
+        const rawQty = Number(quantities.raw ?? 0);
+        const filteredQty = Number(quantities.filtered ?? 0);
+        const parts = [];
+
+        if (componentType === 'honey_filtered') {
+            parts.push(`المصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+        } else if (componentType === 'honey_raw') {
+            parts.push(`الخام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+        } else {
+            if (rawQty > 0) {
+                parts.push(`الخام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+            }
+            if (filteredQty > 0) {
+                parts.push(`المصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
             }
         }
-        inputEl.dataset.defaultApplied = '1';
+
+        const option = document.createElement('option');
+        option.value = varietyName;
+        option.dataset.raw = rawQty;
+        option.dataset.filtered = filteredQty;
+        option.textContent = parts.length
+            ? `${varietyName} — ${parts.join(' | ')}`
+            : varietyName;
+        selectEl.appendChild(option);
+    });
+
+    if (component?.honey_variety) {
+        const defaultValue = String(component.honey_variety);
+        const hasDefault = entries.some(([name]) => name === defaultValue);
+        if (hasDefault) {
+            selectEl.value = defaultValue;
+        }
     }
 }
 
@@ -3284,39 +3319,59 @@ function renderTemplateSuppliers(details) {
             honeyLabel.className = 'form-label fw-bold mb-1';
             honeyLabel.textContent = 'نوع العسل لدى المورد المختار';
 
-            const honeyInput = document.createElement('input');
-            honeyInput.type = 'text';
-            honeyInput.className = 'form-control form-control-sm';
-            honeyInput.name = 'material_honey_varieties[' + componentKey + ']';
-            honeyInput.required = true;
-            honeyInput.dataset.role = 'honey-variety-input';
-            honeyInput.dataset.defaultValue = component.honey_variety ? component.honey_variety : '';
-            honeyInput.placeholder = 'اختر المورد أولاً';
-            honeyInput.disabled = true;
+            const honeySelect = document.createElement('select');
+            honeySelect.className = 'form-select form-select-sm';
+            honeySelect.name = 'material_honey_varieties[' + componentKey + ']';
+            honeySelect.dataset.role = 'honey-variety';
+            honeySelect.required = true;
+            honeySelect.disabled = true;
+
+            const honeyPlaceholder = document.createElement('option');
+            honeyPlaceholder.value = '';
+            honeyPlaceholder.textContent = 'اختر المورد أولاً';
+            honeyPlaceholder.disabled = true;
+            honeyPlaceholder.selected = true;
+            honeySelect.appendChild(honeyPlaceholder);
 
             const honeyHelper = document.createElement('small');
             honeyHelper.className = 'text-muted d-block mt-1';
-            honeyHelper.textContent = 'اختر أو اكتب نوع العسل المتوفر لدى المورد.';
-
-            const datalist = document.createElement('datalist');
-            const sanitizedKey = componentKey.toString().replace(/[^a-zA-Z0-9_-]/g, '');
-            datalist.id = 'honey-variety-list-' + sanitizedKey + '-' + Math.random().toString(36).slice(2, 6);
-            honeyInput.setAttribute('list', datalist.id);
+            honeyHelper.textContent = 'اختر نوع العسل المناسب حسب الكمية المتاحة لدى المورد.';
 
             honeyWrapper.appendChild(honeyLabel);
-            honeyWrapper.appendChild(honeyInput);
-            honeyWrapper.appendChild(datalist);
+            honeyWrapper.appendChild(honeySelect);
             honeyWrapper.appendChild(honeyHelper);
 
+            const updateHoneyHelperMessage = () => {
+                const selectedOption = honeySelect.options[honeySelect.selectedIndex];
+                if (!selectedOption || !selectedOption.value) {
+                    honeyHelper.textContent = 'اختر نوع العسل المناسب حسب الكمية المتاحة لدى المورد.';
+                    return;
+                }
+                const rawQty = parseFloat(selectedOption.dataset.raw || '0');
+                const filteredQty = parseFloat(selectedOption.dataset.filtered || '0');
+                const parts = [];
+                if (rawQty > 0) {
+                    parts.push(`خام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+                }
+                if (filteredQty > 0) {
+                    parts.push(`مصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+                }
+                honeyHelper.textContent = parts.length
+                    ? `الكميات المتاحة لدى المورد: ${parts.join(' | ')}`
+                    : 'لا توجد كميات مسجلة لهذا النوع لدى المورد.';
+            };
+
             select.addEventListener('change', function() {
-                honeyInput.dataset.defaultApplied = '';
-                honeyInput.dataset.defaultValue = '';
-                populateHoneyVarietyOptions(honeyInput, datalist, this.value, component);
+                populateHoneyVarietyOptions(honeySelect, this.value, component);
+                updateHoneyHelperMessage();
             });
+
+            honeySelect.addEventListener('change', updateHoneyHelperMessage);
 
             card.appendChild(honeyWrapper);
 
-            populateHoneyVarietyOptions(honeyInput, datalist, select.value, component);
+            populateHoneyVarietyOptions(honeySelect, select.value, component);
+            updateHoneyHelperMessage();
         }
 
         col.appendChild(card);
@@ -3545,18 +3600,18 @@ document.getElementById('createFromTemplateForm')?.addEventListener('submit', fu
             }
     }
 
-    const honeyVarietyInputs = document.querySelectorAll('#templateSuppliersContainer input[data-role="honey-variety-input"]');
-    for (let input of honeyVarietyInputs) {
-        if (input.disabled) {
+    const honeyVarietyFields = document.querySelectorAll('#templateSuppliersContainer [data-role="honey-variety"]');
+    for (let field of honeyVarietyFields) {
+        if (field.disabled) {
             e.preventDefault();
             alert('يرجى اختيار مورد العسل بعد تحديد النوع');
-            input.focus();
+            field.focus();
             return false;
         }
-        if (!input.value || !input.value.trim()) {
+        if (!field.value || !field.value.trim()) {
             e.preventDefault();
             alert('يرجى إدخال نوع العسل لدى المورد المختار');
-            input.focus();
+            field.focus();
             return false;
         }
     }
