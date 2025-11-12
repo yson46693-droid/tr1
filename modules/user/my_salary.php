@@ -1901,7 +1901,12 @@ document.addEventListener('DOMContentLoaded', function() {
                                 window.location.reload();
                             }, 1200);
 
-                            return null;
+                            return {
+                                success: true,
+                                message: 'تم إرسال طلب السلفة بنجاح.',
+                                redirect: null,
+                                _handledInternally: true
+                            };
                         }
                     }
                 }
@@ -1918,6 +1923,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return data;
             })
             .then(data => {
+                if (data && data._handledInternally) {
+                    return;
+                }
+
                 const alert = document.createElement('div');
                 alert.className = 'alert alert-dismissible fade show ' + (data.success ? 'alert-success' : 'alert-danger');
                 alert.innerHTML = `<i class="bi ${data.success ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'} me-2"></i>${data.message || (data.success ? 'تم إرسال طلب السلفة بنجاح.' : 'تعذر إرسال طلب السلفة.')}` +
