@@ -353,6 +353,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if ($customerMode === 'new') {
                     $dueAmount = $baseDueAmount;
+                    $creditUsed = 0.0;
                     $db->execute(
                         "INSERT INTO customers (name, phone, address, balance, status, created_by) VALUES (?, ?, ?, ?, 'active', ?)",
                         [

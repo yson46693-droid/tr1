@@ -15,29 +15,12 @@ require_once __DIR__ . '/../../includes/path_helper.php';
 
 requireLogin();
 
-$groupChatCssPath = getRelativeUrl('assets/css/group-chat.css');
-$groupChatScriptPath = getRelativeUrl('assets/js/group-chat.js');
-
-if (!defined('HEADER_INCLUDED')) {
-    $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
-    if (!in_array('assets/css/group-chat.css', $pageStylesheets, true)) {
-        $pageStylesheets[] = 'assets/css/group-chat.css';
-    }
-
-    $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts : [];
-    if (!in_array($groupChatScriptPath, $extraScripts, true)) {
-        $extraScripts[] = $groupChatScriptPath;
-    }
-} else {
-    if (!defined('GROUP_CHAT_INLINE_STYLES_LOADED')) {
-        define('GROUP_CHAT_INLINE_STYLES_LOADED', true);
-        $cacheVersion = time();
-        echo '<link rel="stylesheet" href="' . htmlspecialchars($groupChatCssPath, ENT_QUOTES, 'UTF-8') . '?v=' . $cacheVersion . '" />';
-    }
-    if (!defined('GROUP_CHAT_INLINE_SCRIPT_LOADED')) {
-        define('GROUP_CHAT_INLINE_SCRIPT_LOADED', true);
-        echo '<script defer src="' . htmlspecialchars($groupChatScriptPath, ENT_QUOTES, 'UTF-8') . '"></script>';
-    }
+if (!defined('GROUP_CHAT_ASSETS_EMITTED')) {
+    $chatCssHref = htmlspecialchars(getRelativeUrl('assets/css/group-chat.css'), ENT_QUOTES, 'UTF-8');
+    $chatJsSrc = htmlspecialchars(getRelativeUrl('assets/js/group-chat.js'), ENT_QUOTES, 'UTF-8');
+    echo '<link rel="stylesheet" href="' . $chatCssHref . '">';
+    echo '<script defer src="' . $chatJsSrc . '"></script>';
+    define('GROUP_CHAT_ASSETS_EMITTED', true);
 }
 
 $currentUser = getCurrentUser();
