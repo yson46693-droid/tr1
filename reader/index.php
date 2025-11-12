@@ -198,6 +198,31 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             padding: 10px 8px;
             font-size: 0.95rem;
         }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 28px 12px;
+            }
+            .reader-wrapper {
+                padding: 24px 18px;
+                border-radius: 18px;
+            }
+            .input-group {
+                gap: 10px;
+            }
+            input[type="text"] {
+                flex: 1 1 200px;
+                max-width: 260px;
+                padding: 8px 16px 8px 12px;
+                min-height: 40px;
+                font-size: 0.95rem;
+            }
+            .input-group button {
+                padding: 12px 22px;
+                font-size: 0.95rem;
+                border-radius: 12px;
+            }
+        }
         .card th {
             width: 160px;
             color: #475569;
