@@ -2535,11 +2535,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         );
 
                         if ($legacyPackagingTableExists) {
-                            $packagingUnit = 'قطعة';
-                            if (!empty($packagingRow['unit'])) {
-                                $packagingUnit = $packagingRow['unit'];
-                            }
-
+                            $packagingUnit = 'كجم';
                             $db->execute(
                                 "UPDATE product_template_packaging 
                                  SET unit = IFNULL(unit, ?), is_required = 1, sort_order = ? 
@@ -4617,7 +4613,7 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
                     <div class="mb-4">
                         <label class="form-label fw-bold">اسم المنتج <span class="text-danger">*</span></label>
                         <input type="text" class="form-control form-control-lg" name="product_name" required 
-                               placeholder="مثال: مكسرات بالعسل 500 جرام">
+                               placeholder="مثال: مكسرات بالعسل 500 كجم">
                     </div>
                     
                     <!-- المواد الخام -->
@@ -4657,7 +4653,7 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
                                             <label class="form-check-label" for="pkg_<?php echo $pkg['id']; ?>">
                                                 <strong><?php echo htmlspecialchars($pkg['name']); ?></strong>
                                                 <span class="badge bg-secondary ms-2">
-                                                    <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? 'قطعة'); ?>
+                                                    <?php echo number_format($pkg['quantity'], 2); ?> كجم
                                                 </span>
                                             </label>
                                         </div>
@@ -4820,11 +4816,8 @@ function addMaterialRow() {
                     </div>
                     <div class="col-md-1">
                         <label class="form-label small">الوحدة</label>
-                        <select class="form-select form-select-sm" name="materials[${materialRowCount}][unit]">
-                            <option value="كجم">كجم</option>
-                            <option value="جرام">جرام</option>
-                            <option value="لتر">لتر</option>
-                        </select>
+                        <input type="text" class="form-control form-control-sm text-center bg-light" value="كجم" readonly>
+                        <input type="hidden" name="materials[${materialRowCount}][unit]" value="كجم">
                     </div>
                     <div class="col-md-1">
                         <button type="button" class="btn btn-danger btn-sm w-100" 
