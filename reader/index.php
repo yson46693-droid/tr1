@@ -493,7 +493,6 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             <img src="assets/icon.svg" alt="شعار القارئ" loading="lazy">
             <div>
                 <h1>قارئ باركود التشغيلات</h1>
-                <p>حل سريع وآمن للوصول إلى بيانات التشغيلات باستخدام أجهزة سطح المكتب أو الهواتف الذكية.</p>
             </div>
         </div>
         <div class="top-bar">
