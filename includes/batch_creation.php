@@ -1154,15 +1154,54 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
 
         $packagingSql = 'SELECT ' . implode(",\n                    ", $packSelectParts) . "\n"
             . "FROM {$templatePackagingTable} tp\n"
-            . "JOIN {$packagingInventoryTable} pm ON pm.id = tp.{$packagingIdColumn}\n"
+            . "LEFT JOIN {$packagingInventoryTable} pm ON pm.id = tp.{$packagingIdColumn}\n"
             . "WHERE tp.template_id = ?";
 
         $packagingStmt = $pdo->prepare($packagingSql);
         $packagingStmt->execute([$templateId]);
-        $packaging = $packagingStmt->fetchAll();
+        $packaging = $packagingStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($packaging) && !empty($packagingUsage)) {
+            foreach ($packagingUsage as $usagePack) {
+                if (!is_array($usagePack)) {
+                    continue;
+                }
+
+                $usageTemplateId = isset($usagePack['template_item_id']) ? (int)$usagePack['template_item_id'] : 0;
+                $usageMaterialId = isset($usagePack['material_id']) ? (int)$usagePack['material_id'] : null;
+                $usageName = trim((string)($usagePack['name'] ?? $usagePack['packaging_name'] ?? ''));
+                $usageUnit = isset($usagePack['unit']) ? (string)$usagePack['unit'] : null;
+                $usageSupplierId = isset($usagePack['supplier_id']) && is_numeric($usagePack['supplier_id'])
+                    ? (int)$usagePack['supplier_id']
+                    : null;
+
+                $usagePerUnit = 0.0;
+                if (isset($usagePack['quantity_per_unit']) && is_numeric($usagePack['quantity_per_unit'])) {
+                    $usagePerUnit = (float)$usagePack['quantity_per_unit'];
+                } elseif (isset($usagePack['quantity']) && is_numeric($usagePack['quantity']) && $units > 0) {
+                    $computed = (float)$usagePack['quantity'] / $units;
+                    if ($computed > 0) {
+                        $usagePerUnit = $computed;
+                    }
+                }
+
+                $packaging[] = [
+                    'template_item_id' => $usageTemplateId,
+                    'pack_id' => $usageMaterialId,
+                    'pack_name' => $usageName,
+                    'quantity_per_unit' => $usagePerUnit,
+                    'available_stock' => null,
+                    'unit' => $usageUnit,
+                    'supplier_id' => $usageSupplierId,
+                ];
+            }
+        }
 
         foreach ($packaging as &$pack) {
             $supplierId = null;
+            if (!empty($pack['supplier_id'])) {
+                $supplierId = (int)$pack['supplier_id'];
+            }
             if (!empty($pack['template_supplier_id'])) {
                 $supplierId = (int) $pack['template_supplier_id'];
             } elseif (!empty($pack['inventory_supplier_id'])) {
@@ -1171,9 +1210,10 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
                 $supplierId = (int) $templatePackagingDetailsById[(int) $pack['pack_id']]['supplier_id'];
             }
 
-            $packName = (string) ($pack['pack_name'] ?? '');
+            $packName = trim((string) ($pack['pack_name'] ?? ''));
             $normalizedPackName = $normalizeName($packName);
             $templatePackId = isset($pack['template_item_id']) ? (int)$pack['template_item_id'] : 0;
+            $usagePack = null;
 
             if ($supplierId === null && $normalizedPackName !== '' && isset($templatePackagingDetailsByName[$normalizedPackName]['supplier_id'])) {
                 $supplierId = (int) $templatePackagingDetailsByName[$normalizedPackName]['supplier_id'];
@@ -1193,9 +1233,54 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
                 }
             }
 
+            if ($usagePack === null && $templatePackId > 0 && isset($packagingUsageByTemplateId[$templatePackId])) {
+                $usagePack = $packagingUsageByTemplateId[$templatePackId];
+            }
+            if ($usagePack === null && $normalizedPackName !== '' && isset($packagingUsageByName[$normalizedPackName])) {
+                $usagePack = $packagingUsageByName[$normalizedPackName];
+            }
+
             $pack['supplier_id'] = $supplierId ?: null;
             if ($supplierId) {
                 $collectSupplier($supplierId, 'packaging');
+            }
+
+            $quantityPerUnit = isset($pack['quantity_per_unit']) && is_numeric($pack['quantity_per_unit'])
+                ? (float)$pack['quantity_per_unit']
+                : 0.0;
+
+            if (is_array($usagePack)) {
+                if (isset($usagePack['quantity_per_unit']) && is_numeric($usagePack['quantity_per_unit'])) {
+                    $quantityPerUnit = (float)$usagePack['quantity_per_unit'];
+                } elseif (isset($usagePack['quantity']) && is_numeric($usagePack['quantity']) && $units > 0) {
+                    $computed = (float)$usagePack['quantity'] / $units;
+                    if ($computed > 0) {
+                        $quantityPerUnit = $computed;
+                    }
+                }
+
+                if ($packName === '' && !empty($usagePack['name'])) {
+                    $packName = trim((string)$usagePack['name']);
+                } elseif ($packName === '' && !empty($usagePack['packaging_name'])) {
+                    $packName = trim((string)$usagePack['packaging_name']);
+                }
+
+                if (empty($pack['unit']) && !empty($usagePack['unit'])) {
+                    $pack['unit'] = (string)$usagePack['unit'];
+                }
+            }
+
+            if ($packName === '') {
+                $packName = 'أداة تعبئة';
+            }
+
+            $pack['pack_name'] = $packName;
+            if ($quantityPerUnit <= 0) {
+                $quantityPerUnit = 1.0;
+            }
+            $pack['quantity_per_unit'] = $quantityPerUnit;
+            if (empty($pack['unit'])) {
+                $pack['unit'] = 'قطعة';
             }
         }
         unset($pack);

@@ -4581,6 +4581,13 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
         return;
     }
 
+    const normalizeVariety = (value) => {
+        if (value === null || value === undefined) {
+            return '';
+        }
+        return String(value).trim();
+    };
+
     const normalizedKey = normalizeSupplierKey(supplierId);
     selectEl.innerHTML = '';
 
@@ -4591,8 +4598,27 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
     placeholderOption.textContent = normalizedKey ? 'اختر نوع العسل' : 'اختر المورد أولاً';
     selectEl.appendChild(placeholderOption);
 
+    const defaultValue = normalizeVariety(
+        selectEl.dataset.defaultValue !== undefined
+            ? selectEl.dataset.defaultValue
+            : (component?.honey_variety ?? component?.variety ?? '')
+    );
+    const defaultValueLower = defaultValue.toLocaleLowerCase('ar');
+
     if (!normalizedKey) {
-        selectEl.disabled = true;
+        if (defaultValue !== '') {
+            const fallbackOption = document.createElement('option');
+            fallbackOption.value = defaultValue;
+            fallbackOption.dataset.raw = 0;
+            fallbackOption.dataset.filtered = 0;
+            fallbackOption.textContent = `${defaultValue} — (القيمة المعرّفة في القالب)`;
+            fallbackOption.selected = true;
+            selectEl.appendChild(fallbackOption);
+            placeholderOption.selected = false;
+            selectEl.disabled = false;
+        } else {
+            selectEl.disabled = true;
+        }
         return;
     }
 
@@ -4625,48 +4651,67 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
     });
 
     const entries = Object.entries(aggregated);
+    let matchedOption = null;
+
     if (entries.length === 0) {
         placeholderOption.textContent = 'لا توجد كميات متاحة لدى المورد المختار';
-        selectEl.disabled = true;
-        return;
+    } else {
+        selectEl.disabled = false;
+
+        entries.forEach(([varietyName, quantities]) => {
+            const rawQty = Number(quantities.raw ?? 0);
+            const filteredQty = Number(quantities.filtered ?? 0);
+            const parts = [];
+
+            if (componentType === 'honey_filtered') {
+                parts.push(`المصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+            } else if (componentType === 'honey_raw') {
+                parts.push(`الخام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+            } else {
+                if (rawQty > 0) {
+                    parts.push(`الخام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+                }
+                if (filteredQty > 0) {
+                    parts.push(`المصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
+                }
+            }
+
+            const option = document.createElement('option');
+            const normalizedVariety = normalizeVariety(varietyName);
+            option.value = normalizedVariety;
+            option.dataset.raw = rawQty;
+            option.dataset.filtered = filteredQty;
+            option.textContent = parts.length
+                ? `${normalizedVariety} — ${parts.join(' | ')}`
+                : normalizedVariety;
+            selectEl.appendChild(option);
+
+            if (!matchedOption && normalizedDefault !== '' && normalizedVariety.toLocaleLowerCase('ar') === defaultValueLower) {
+                matchedOption = option;
+            }
+        });
     }
 
-    selectEl.disabled = false;
+    if (!matchedOption && defaultValue !== '') {
+        const fallbackOption = document.createElement('option');
+        fallbackOption.value = defaultValue;
+        fallbackOption.dataset.raw = 0;
+        fallbackOption.dataset.filtered = 0;
+        fallbackOption.textContent = entries.length === 0
+            ? `${defaultValue} — (القيمة المعرّفة في القالب)`
+            : `${defaultValue} — (غير متوفر في المخزون الحالي)`;
+        selectEl.appendChild(fallbackOption);
+        matchedOption = fallbackOption;
+        placeholderOption.selected = false;
+        selectEl.disabled = false;
+    }
 
-    entries.forEach(([varietyName, quantities]) => {
-        const rawQty = Number(quantities.raw ?? 0);
-        const filteredQty = Number(quantities.filtered ?? 0);
-        const parts = [];
-
-        if (componentType === 'honey_filtered') {
-            parts.push(`المصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
-        } else if (componentType === 'honey_raw') {
-            parts.push(`الخام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
-        } else {
-            if (rawQty > 0) {
-                parts.push(`الخام: ${rawQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
-            }
-            if (filteredQty > 0) {
-                parts.push(`المصفى: ${filteredQty.toLocaleString('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} كجم`);
-            }
-        }
-
-        const option = document.createElement('option');
-        option.value = varietyName;
-        option.dataset.raw = rawQty;
-        option.dataset.filtered = filteredQty;
-        option.textContent = parts.length
-            ? `${varietyName} — ${parts.join(' | ')}`
-            : varietyName;
-        selectEl.appendChild(option);
-    });
-
-    if (component?.honey_variety) {
-        const defaultValue = String(component.honey_variety);
-        const hasDefault = entries.some(([name]) => name === defaultValue);
-        if (hasDefault) {
-            selectEl.value = defaultValue;
-        }
+    if (matchedOption) {
+        matchedOption.selected = true;
+        selectEl.value = matchedOption.value;
+        placeholderOption.selected = false;
+    } else if (entries.length === 0) {
+        selectEl.disabled = true;
     }
 }
 
