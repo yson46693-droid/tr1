@@ -383,6 +383,7 @@
   flex-direction: column;
   gap: 8px;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
+  color: var(--chat-text);
 }
 
 .chat-message-bubble:hover {
