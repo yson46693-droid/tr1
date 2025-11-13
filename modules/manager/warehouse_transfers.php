@@ -181,7 +181,9 @@ if (isset($_GET['id'])) {
                     fp.quantity_produced - COALESCE((
                         SELECT SUM(wti2.quantity)
                         FROM warehouse_transfer_items wti2
+                        INNER JOIN warehouse_transfers wt2 ON wt2.id = wti2.transfer_id
                         WHERE wti2.batch_id = wti.batch_id
+                          AND wt2.status IN ('approved', 'completed')
                     ), 0)
                 ) AS batch_quantity_available
              FROM warehouse_transfer_items wti

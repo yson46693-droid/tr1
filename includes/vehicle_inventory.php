@@ -150,10 +150,16 @@ function getFinishedProductBatchOptions($onlyAvailable = true): array
                 fp.batch_number,
                 fp.production_date,
                 fp.quantity_produced,
-                COALESCE(SUM(wti.quantity), 0) AS transferred_quantity
+                COALESCE(SUM(
+                    CASE
+                        WHEN wt.status IN ('approved', 'completed') THEN wti.quantity
+                        ELSE 0
+                    END
+                ), 0) AS transferred_quantity
             FROM finished_products fp
             LEFT JOIN products p ON fp.product_id = p.id
             LEFT JOIN warehouse_transfer_items wti ON wti.batch_id = fp.id
+            LEFT JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
             GROUP BY fp.id, fp.product_id, fp.product_name, fp.batch_number, fp.production_date, fp.quantity_produced, p.name
             ORDER BY fp.production_date DESC, product_name ASC, fp.batch_number ASC
         ";

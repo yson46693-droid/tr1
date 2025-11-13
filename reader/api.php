@@ -431,12 +431,68 @@ try {
         }
     }
 
-    $suppliersFormatted = array_map(static function (array $row) {
+    $suppliersTableExists = readerTableExists($db, 'suppliers');
+    $supplierNameCache = [];
+
+    $resolveSupplierName = static function (?int $supplierId) use ($db, $suppliersTableExists, &$supplierNameCache) {
+        if ($supplierId === null || $supplierId <= 0) {
+            return null;
+        }
+        if (array_key_exists($supplierId, $supplierNameCache)) {
+            return $supplierNameCache[$supplierId];
+        }
+
+        $resolvedName = null;
+        if ($suppliersTableExists) {
+            try {
+                $row = $db->queryOne("SELECT name FROM suppliers WHERE id = ? LIMIT 1", [$supplierId]);
+                if ($row && isset($row['name'])) {
+                    $candidate = trim((string) $row['name']);
+                    if ($candidate !== '') {
+                        $resolvedName = $candidate;
+                    }
+                }
+            } catch (Throwable $supplierLookupError) {
+                error_log('Reader supplier lookup error for ID ' . $supplierId . ': ' . $supplierLookupError->getMessage());
+            }
+        }
+
+        if ($resolvedName === null || $resolvedName === '') {
+            $resolvedName = 'مورد #' . $supplierId;
+        }
+
+        $supplierNameCache[$supplierId] = $resolvedName;
+        return $resolvedName;
+    };
+
+    foreach ($suppliersRows as $row) {
+        $supplierIdValue = isset($row['supplier_id']) ? (int) $row['supplier_id'] : null;
+        if ($supplierIdValue !== null && $supplierIdValue > 0) {
+            $storedNameValue = '';
+            if (array_key_exists('supplier_name', $row)) {
+                $storedNameValue = trim((string) $row['supplier_name']);
+            }
+            if ($storedNameValue === '') {
+                $storedNameValue = $resolveSupplierName($supplierIdValue) ?? ('مورد #' . $supplierIdValue);
+            }
+            $supplierNameMap[$supplierIdValue] = $storedNameValue;
+            $supplierNameCache[$supplierIdValue] = $storedNameValue;
+        }
+    }
+
+    $suppliersFormatted = array_map(static function (array $row) use (&$supplierNameMap, &$supplierNameCache, $resolveSupplierName) {
         $supplierId = isset($row['supplier_id']) ? (int) $row['supplier_id'] : null;
         $storedName = array_key_exists('supplier_name', $row) ? trim((string) $row['supplier_name']) : '';
+        if ($storedName === '' && $supplierId) {
+            $storedName = $supplierNameMap[$supplierId] ?? $resolveSupplierName($supplierId) ?? '';
+        }
         $finalName = $storedName !== '' ? $storedName : ($supplierId ? 'مورد #' . $supplierId : 'مورد غير معروف');
         $rolesRaw = isset($row['role']) ? (string) $row['role'] : '';
         $rolesList = array_values(array_filter(array_map('trim', explode(',', $rolesRaw))));
+        if ($supplierId) {
+            $supplierNameMap[$supplierId] = $finalName;
+            $supplierNameCache[$supplierId] = $finalName;
+        }
         return [
             'supplier_id' => $supplierId,
             'name' => $finalName,
@@ -445,7 +501,7 @@ try {
         ];
     }, $suppliersRows);
 
-    $lookupSupplierName = static function (?int $supplierId) use ($supplierNameMap, $suppliersFormatted) {
+    $lookupSupplierName = static function (?int $supplierId) use (&$supplierNameMap, $suppliersFormatted, $resolveSupplierName) {
         if ($supplierId === null || $supplierId <= 0) {
             return null;
         }
@@ -454,10 +510,15 @@ try {
         }
         foreach ($suppliersFormatted as $entry) {
             if (isset($entry['supplier_id']) && (int) $entry['supplier_id'] === $supplierId && !empty($entry['name'])) {
+                $supplierNameMap[$supplierId] = $entry['name'];
                 return $entry['name'];
             }
         }
-        return 'مورد #' . $supplierId;
+        $resolved = $resolveSupplierName($supplierId);
+        if ($resolved !== null) {
+            $supplierNameMap[$supplierId] = $resolved;
+        }
+        return $resolved;
     };
 
     $honeySupplierName = $lookupSupplierName($honeySupplierId);
@@ -478,9 +539,17 @@ try {
         }
     }
 
-    $packagingFormatted = array_map(static function (array $row) use ($supplierNameMap) {
+    $packagingFormatted = array_map(static function (array $row) use (&$supplierNameMap, &$supplierNameCache, $resolveSupplierName) {
         $supplierId = isset($row['supplier_id']) ? (int) $row['supplier_id'] : null;
         $quantity = isset($row['quantity_used']) ? (float) $row['quantity_used'] : null;
+        $supplierName = null;
+        if ($supplierId) {
+            $supplierName = $supplierNameMap[$supplierId] ?? $resolveSupplierName($supplierId);
+            if ($supplierName !== null && $supplierName !== '') {
+                $supplierNameMap[$supplierId] = $supplierName;
+                $supplierNameCache[$supplierId] = $supplierName;
+            }
+        }
         return [
             'id' => $row['id'] ?? null,
             'packaging_material_id' => isset($row['packaging_material_id']) ? (int) $row['packaging_material_id'] : null,
@@ -488,9 +557,7 @@ try {
             'unit' => $row['unit'] ?? null,
             'quantity_used' => $quantity,
             'supplier_id' => $supplierId,
-            'supplier_name' => ($supplierId && isset($supplierNameMap[$supplierId]))
-                ? $supplierNameMap[$supplierId]
-                : ($supplierId ? 'مورد #' . $supplierId : null),
+            'supplier_name' => $supplierName,
         ];
     }, $packagingRows);
 
@@ -538,9 +605,17 @@ try {
         }
     }
 
-    $rawMaterialsFormatted = array_map(static function (array $row) use ($supplierNameMap) {
+    $rawMaterialsFormatted = array_map(static function (array $row) use (&$supplierNameMap, &$supplierNameCache, $resolveSupplierName) {
         $supplierId = isset($row['supplier_id']) ? (int) $row['supplier_id'] : null;
         $quantity = isset($row['quantity_used']) ? (float) $row['quantity_used'] : null;
+        $supplierName = null;
+        if ($supplierId) {
+            $supplierName = $supplierNameMap[$supplierId] ?? $resolveSupplierName($supplierId);
+            if ($supplierName !== null && $supplierName !== '') {
+                $supplierNameMap[$supplierId] = $supplierName;
+                $supplierNameCache[$supplierId] = $supplierName;
+            }
+        }
         return [
             'id' => $row['id'] ?? null,
             'raw_material_id' => isset($row['raw_material_id']) ? (int) $row['raw_material_id'] : null,
@@ -548,9 +623,7 @@ try {
             'unit' => $row['unit'] ?? null,
             'quantity_used' => $quantity,
             'supplier_id' => $supplierId,
-            'supplier_name' => ($supplierId && isset($supplierNameMap[$supplierId]))
-                ? $supplierNameMap[$supplierId]
-                : ($supplierId ? 'مورد #' . $supplierId : null),
+            'supplier_name' => $supplierName,
         ];
     }, $rawRows);
 

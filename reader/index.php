@@ -664,6 +664,16 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             'pdf417'
         ];
 
+        const statusLabels = {
+            in_production: 'قيد الإنتاج',
+            completed: 'مكتملة',
+            in_stock: 'في المخزون',
+            sold: 'مباعة',
+            expired: 'منتهية',
+            archived: 'مؤرشفة',
+            cancelled: 'ملغاة',
+        };
+
         const supplierRoleLabels = {
             raw_material: 'مواد خام',
             packaging: 'تعبئة',
@@ -803,10 +813,38 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 ['الكمية المنتجة', quantityLabel ?? data.quantity_produced ?? data.quantity ?? '—'],
             ];
 
+            const statusLabel = data.status_label
+                ?? (data.status ? (statusLabels[data.status] || data.status) : null);
+            if (statusLabel) {
+                summaryRows.push(['حالة التشغيلة', statusLabel]);
+            }
+
+            const primarySupplierNames = new Set();
+            if (data.honey_supplier_name) {
+                const honeyName = String(data.honey_supplier_name).trim();
+                summaryRows.push(['مورد العسل', honeyName || '—']);
+                if (honeyName) {
+                    primarySupplierNames.add(honeyName);
+                }
+            }
+            if (data.packaging_supplier_name) {
+                const packagingName = String(data.packaging_supplier_name).trim();
+                summaryRows.push(['مورد مواد التعبئة', packagingName || '—']);
+                if (packagingName) {
+                    primarySupplierNames.add(packagingName);
+                }
+            }
+
             const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
+            const seenSupplierNames = new Set(primarySupplierNames);
             const suppliersText = suppliers
                 .map(supplier => {
-                    const name = supplier?.name ?? 'مورد';
+                    const rawName = supplier?.name;
+                    const name = rawName ? String(rawName).trim() : '';
+                    if (!name || seenSupplierNames.has(name)) {
+                        return '';
+                    }
+                    seenSupplierNames.add(name);
                     const rolesLabel = formatSupplierRoles(supplier);
                     return rolesLabel ? `${name} (${rolesLabel})` : name;
                 })
@@ -829,6 +867,10 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
 
             if (data.notes) {
                 summaryRows.push(['ملاحظات', data.notes]);
+            }
+
+            if (data.created_by_name) {
+                summaryRows.push(['مسؤول الإدخال', data.created_by_name]);
             }
 
             batchSummary.hidden = false;
