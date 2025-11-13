@@ -362,13 +362,6 @@ if ($isPackagingPost) {
 
 $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
 $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts : [];
-if ($page === 'group_chat') {
-    if (!defined('GROUP_CHAT_ASSETS_EMITTED')) {
-        define('GROUP_CHAT_ASSETS_EMITTED', true);
-    }
-    $pageStylesheets[] = 'assets/css/group-chat.css';
-    $extraScripts[] = getRelativeUrl('assets/js/group-chat.js');
-}
 
 $isAjaxRequest = (
     (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') ||
@@ -403,9 +396,6 @@ if ($page === 'packaging_warehouse' && isset($_GET['ajax']) && $_GET['ajax'] == 
 require_once __DIR__ . '/../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = isset($translations) ? $translations : [];
 $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'] : 'لوحة الإنتاج';
-if ($page === 'group_chat') {
-    $pageTitle = $lang['menu_group_chat'] ?? 'الدردشة الجماعية';
-}
 ?>
 <?php include __DIR__ . '/../templates/header.php'; ?>
 
