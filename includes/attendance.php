@@ -178,13 +178,40 @@ function calculateMonthlyDelaySummary(int $userId, $month, ?int $year = null): a
         foreach ($records as $record) {
             $attendanceDate = $record['date'];
             if (!isset($summary['details'][$attendanceDate])) {
-                $delayValue = isset($record['delay_minutes']) ? (float) $record['delay_minutes'] : 0.0;
+                $delayValue = 0.0;
+                $firstCheckInRaw = $record['check_in_time'] ?? null;
+                $firstCheckInCombined = null;
+
+                if ($firstCheckInRaw) {
+                    $firstCheckInCombined = $firstCheckInRaw;
+
+                    // في بعض قواعد البيانات قد يتم تخزين الوقت فقط بدون التاريخ
+                    if (strpos($firstCheckInRaw, '-') === false && strpos($firstCheckInRaw, 'T') === false && strlen($firstCheckInRaw) <= 8) {
+                        $firstCheckInCombined = $attendanceDate . ' ' . $firstCheckInRaw;
+                    }
+
+                    $checkInTs = strtotime($firstCheckInCombined);
+                    $officialTs = strtotime($attendanceDate . ' ' . ($workTime['start'] ?? '00:00:00'));
+
+                    if ($checkInTs !== false && $officialTs !== false && $checkInTs > $officialTs) {
+                        $delayValue = round(($checkInTs - $officialTs) / 60, 2);
+                    }
+                }
+
+                if ($delayValue <= 0 && isset($record['delay_minutes'])) {
+                    $fallbackDelay = (float) $record['delay_minutes'];
+                    if ($fallbackDelay > 0) {
+                        $delayValue = $fallbackDelay;
+                    }
+                }
+
                 if ($delayValue < 0) {
                     $delayValue = 0.0;
                 }
+
                 $summary['details'][$attendanceDate] = [
                     'delay'           => $delayValue,
-                    'first_check_in'  => $record['check_in_time'] ?? null,
+                    'first_check_in'  => $firstCheckInCombined,
                 ];
             }
         }

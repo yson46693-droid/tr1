@@ -26,6 +26,21 @@ $finalProductsUrl = getRelativeUrl('production.php?page=final_products');
 $error = '';
 $success = '';
 
+if (!function_exists('productionSafeRedirect')) {
+    function productionSafeRedirect(string $url): void
+    {
+        if (!headers_sent()) {
+            header('Location: ' . $url);
+            exit;
+        }
+
+        $escapedUrl = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        echo '<script>window.location.href = "' . $escapedUrl . '";</script>';
+        echo '<noscript><meta http-equiv="refresh" content="0;url=' . $escapedUrl . '"></noscript>';
+        exit;
+    }
+}
+
 $sessionErrorKey = 'production_inventory_error';
 $sessionSuccessKey = 'production_inventory_success';
 
@@ -458,8 +473,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
                         $result['transfer_number'] ?? '#'
                     );
-                    header('Location: ' . $productionInventoryUrl);
-                    exit;
+                    productionSafeRedirect($productionInventoryUrl);
                 }
 
                 $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
