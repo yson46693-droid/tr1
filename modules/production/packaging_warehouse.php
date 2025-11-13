@@ -2107,7 +2107,7 @@ $packagingReportGeneratedAt = $packagingReport['generated_at'] ?? date('Y-m-d H:
             data-generated-at="<?php echo htmlspecialchars((string)$packagingReportGeneratedAt, ENT_QUOTES, 'UTF-8'); ?>"
         >
             <i class="bi bi-file-bar-graph me-1"></i>
-            توليد تقرير المخزن
+            انشاء تقرير المخزن
         </button>
     </div>
 </div>

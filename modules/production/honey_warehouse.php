@@ -643,7 +643,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST">
-                <div class="modal-body">
+                <div class="modal-body" style="max-height: calc(100vh - 180px); overflow-y: auto;">
                     <input type="hidden" name="action" value="add_honey">
                     <div class="mb-3">
                         <label class="form-label">المورد <span class="text-danger">*</span></label>
@@ -689,7 +689,7 @@ $stats['total_honey'] = $stats['total_raw_honey'] + $stats['total_filtered_honey
 
 <!-- Modal لتصفية العسل -->
 <div class="modal fade" id="filterHoneyModal" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">تصفية العسل</h5>

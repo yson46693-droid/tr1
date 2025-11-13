@@ -2287,8 +2287,34 @@ if (!empty($packagingTableCheck)) {
 
 $productionReportsTodayDate = date('Y-m-d');
 $productionReportsMonthStart = date('Y-m-01');
-$productionReportsToday = getConsumptionSummary($productionReportsTodayDate, $productionReportsTodayDate);
-$productionReportsMonth = getConsumptionSummary($productionReportsMonthStart, $productionReportsTodayDate);
+$productionReportsMonthEnd = date('Y-m-t');
+if (strtotime($productionReportsMonthEnd) > strtotime($productionReportsTodayDate)) {
+    $productionReportsMonthEnd = $productionReportsTodayDate;
+}
+
+$reportDayParam = isset($_GET['report_day']) ? trim((string)$_GET['report_day']) : '';
+$reportFilterType = isset($_GET['report_type']) ? strtolower(trim((string)$_GET['report_type'])) : 'all';
+if (!in_array($reportFilterType, ['all', 'packaging', 'raw'], true)) {
+    $reportFilterType = 'all';
+}
+$reportFilterQuery = isset($_GET['report_query']) ? trim((string)$_GET['report_query']) : '';
+
+$selectedReportDay = $productionReportsTodayDate;
+if ($reportDayParam !== '') {
+    $reportDayDate = DateTime::createFromFormat('Y-m-d', $reportDayParam);
+    if ($reportDayDate && $reportDayDate->format('Y-m-d') === $reportDayParam) {
+        $selectedReportDay = $reportDayParam;
+    }
+}
+if (strtotime($selectedReportDay) < strtotime($productionReportsMonthStart)) {
+    $selectedReportDay = $productionReportsMonthStart;
+}
+if (strtotime($selectedReportDay) > strtotime($productionReportsMonthEnd)) {
+    $selectedReportDay = $productionReportsMonthEnd;
+}
+
+$productionReportsMonth = getConsumptionSummary($productionReportsMonthStart, $productionReportsMonthEnd);
+$productionReportsSelectedDay = getConsumptionSummary($selectedReportDay, $selectedReportDay);
 
 $additionalSuppliersOptions = [];
 try {
@@ -2343,6 +2369,117 @@ try {
 $specificationsCount = is_countable($productSpecifications) ? count($productSpecifications) : 0;
 if ($totalSpecificationsCount === 0 && $specificationsCount > 0) {
     $totalSpecificationsCount = $specificationsCount;
+}
+
+if (!function_exists('productionPageNormalizeText')) {
+    function productionPageNormalizeText($value): string
+    {
+        $value = (string)$value;
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($value, 'UTF-8');
+        }
+        return strtolower($value);
+    }
+}
+
+if (!function_exists('productionPageFilterItems')) {
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    function productionPageFilterItems(array $items, string $activeType, string $query, string $category): array
+    {
+        if ($activeType !== 'all' && $activeType !== $category) {
+            return [];
+        }
+
+        $normalizedQuery = productionPageNormalizeText($query);
+        if ($normalizedQuery === '') {
+            return array_values($items);
+        }
+
+        $filtered = [];
+        foreach ($items as $item) {
+            $name = productionPageNormalizeText($item['name'] ?? '');
+            $subCategory = productionPageNormalizeText($item['sub_category'] ?? '');
+            if (strpos($name, $normalizedQuery) !== false || strpos($subCategory, $normalizedQuery) !== false) {
+                $filtered[] = $item;
+            }
+        }
+
+        return array_values($filtered);
+    }
+}
+
+if (!function_exists('productionPageAggregateTotals')) {
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array{total_out: float, total_in: float, net: float, movements: int}
+     */
+    function productionPageAggregateTotals(array $items): array
+    {
+        $totals = [
+            'total_out' => 0.0,
+            'total_in' => 0.0,
+            'net' => 0.0,
+            'movements' => 0,
+        ];
+
+        foreach ($items as $item) {
+            $totals['total_out'] += (float)($item['total_out'] ?? 0);
+            $totals['total_in'] += (float)($item['total_in'] ?? 0);
+            $totals['movements'] += (int)($item['movements'] ?? 0);
+        }
+
+        $totals['net'] = $totals['total_out'] - $totals['total_in'];
+        $totals['total_out'] = round($totals['total_out'], 3);
+        $totals['total_in'] = round($totals['total_in'], 3);
+        $totals['net'] = round($totals['net'], 3);
+
+        return $totals;
+    }
+}
+
+if (!function_exists('productionPageBuildSubTotals')) {
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    function productionPageBuildSubTotals(array $items): array
+    {
+        $groups = [];
+        $order = [];
+
+        foreach ($items as $item) {
+            $label = trim((string)($item['sub_category'] ?? 'غير مصنف'));
+            if ($label === '') {
+                $label = 'غير مصنف';
+            }
+            if (!isset($groups[$label])) {
+                $groups[$label] = [
+                    'label' => $label,
+                    'total_out' => 0.0,
+                    'total_in' => 0.0,
+                    'net' => 0.0,
+                ];
+                $order[] = $label;
+            }
+
+            $groups[$label]['total_out'] += (float)($item['total_out'] ?? 0);
+            $groups[$label]['total_in'] += (float)($item['total_in'] ?? 0);
+        }
+
+        $results = [];
+        foreach ($order as $label) {
+            $group = $groups[$label];
+            $group['net'] = round($group['total_out'] - $group['total_in'], 3);
+            $group['total_out'] = round($group['total_out'], 3);
+            $group['total_in'] = round($group['total_in'], 3);
+            $results[] = $group;
+        }
+
+        return $results;
+    }
 }
 
 if (!function_exists('productionPageRenderConsumptionTable')) {

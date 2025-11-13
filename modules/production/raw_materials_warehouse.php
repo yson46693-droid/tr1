@@ -2699,7 +2699,7 @@ $rawMaterialsReportGeneratedAt = $rawWarehouseReport['generated_at'] ?? date('Y-
             data-generated-at="<?php echo htmlspecialchars((string)$rawMaterialsReportGeneratedAt, ENT_QUOTES, 'UTF-8'); ?>"
         >
             <i class="bi bi-file-bar-graph me-1"></i>
-            توليد تقرير المخزن
+            انشاء تقرير المخزن
         </button>
         <button type="button" class="btn text-white" style="background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);" data-bs-toggle="modal" data-bs-target="#createUnifiedTemplateModal">
             <i class="bi bi-plus-circle me-2"></i>إنشاء قالب منتج
