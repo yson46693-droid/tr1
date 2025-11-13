@@ -1776,6 +1776,51 @@ if (isset($_GET['ajax']) && isset($_GET['material_id'])) {
 
 // الحصول على استخدامات أدوات التعبئة
 $usageData = [];
+$usageDataHasLogs = false;
+
+if ($hasPackagingUsageLogs) {
+    try {
+        $usageLogRows = $db->query(
+            "SELECT 
+                material_id,
+                source_table,
+                SUM(quantity_used) AS total_used,
+                COUNT(*) AS usage_count,
+                MIN(created_at) AS first_used,
+                MAX(created_at) AS last_used
+             FROM packaging_usage_logs
+             GROUP BY material_id, source_table"
+        );
+
+        foreach ($usageLogRows as $logRow) {
+            $materialId = isset($logRow['material_id']) ? (int) $logRow['material_id'] : 0;
+            if ($materialId <= 0) {
+                continue;
+            }
+
+            $sourceTable = $logRow['source_table'] ?? ($usePackagingTable ? 'packaging_materials' : 'products');
+            if ($usePackagingTable && $sourceTable !== 'packaging_materials') {
+                continue;
+            }
+            if (!$usePackagingTable && $sourceTable !== 'products') {
+                continue;
+            }
+
+            $usageData[$materialId] = [
+                'total_used' => max(0.0, (float)($logRow['total_used'] ?? 0)),
+                'production_count' => max(0, (int)($logRow['usage_count'] ?? 0)),
+                'first_used' => $logRow['first_used'] ?? null,
+                'last_used' => $logRow['last_used'] ?? null
+            ];
+        }
+    } catch (Exception $usageLogError) {
+        error_log("Packaging usage logs aggregation error: " . $usageLogError->getMessage());
+        $usageData = [];
+    }
+
+    $usageDataHasLogs = !empty($usageData);
+}
+
 if ($materialColumn) {
     if ($usePackagingTable) {
         // إذا كنا نستخدم packaging_materials، نحتاج لربط material_id من packaging_materials
@@ -1801,18 +1846,45 @@ if ($materialColumn) {
         
         $usageResults = $db->query($usageQuery);
         foreach ($usageResults as $usage) {
-            $materialId = $usage['material_id'];
-            // البحث عن packaging_material_id المقابل
+            $materialId = isset($usage['material_id']) ? (int) $usage['material_id'] : 0;
+            if ($materialId <= 0) {
+                continue;
+            }
+
             $pkgMaterial = $db->queryOne(
                 "SELECT id FROM packaging_materials WHERE id = ? OR material_id LIKE ?",
                 [$materialId, '%' . $materialId . '%']
             );
-            if ($pkgMaterial) {
-                $usageData[$pkgMaterial['id']] = $usage;
-            } else {
-                // إذا لم نجد، استخدم material_id مباشرة
-                $usageData[$materialId] = $usage;
+
+            $mappedId = $pkgMaterial ? (int) $pkgMaterial['id'] : $materialId;
+
+            if (isset($usageData[$mappedId])) {
+                if ($usageDataHasLogs) {
+                    continue;
+                }
+
+                $usageData[$mappedId]['total_used'] += (float)($usage['total_used'] ?? 0);
+                $usageData[$mappedId]['production_count'] += (int)($usage['production_count'] ?? 0);
+
+                $firstUsed = $usage['first_used'] ?? null;
+                $lastUsed = $usage['last_used'] ?? null;
+
+                if ($firstUsed && (empty($usageData[$mappedId]['first_used']) || $firstUsed < $usageData[$mappedId]['first_used'])) {
+                    $usageData[$mappedId]['first_used'] = $firstUsed;
+                }
+                if ($lastUsed && (empty($usageData[$mappedId]['last_used']) || $lastUsed > $usageData[$mappedId]['last_used'])) {
+                    $usageData[$mappedId]['last_used'] = $lastUsed;
+                }
+
+                continue;
             }
+
+            $usageData[$mappedId] = [
+                'total_used' => max(0.0, (float)($usage['total_used'] ?? 0)),
+                'production_count' => max(0, (int)($usage['production_count'] ?? 0)),
+                'first_used' => $usage['first_used'] ?? null,
+                'last_used' => $usage['last_used'] ?? null
+            ];
         }
     } else {
         // استخدام products (الطريقة القديمة)
@@ -1831,7 +1903,38 @@ if ($materialColumn) {
         
         $usageResults = $db->query($usageQuery);
         foreach ($usageResults as $usage) {
-            $usageData[$usage['material_id']] = $usage;
+            $materialId = isset($usage['material_id']) ? (int) $usage['material_id'] : 0;
+            if ($materialId <= 0) {
+                continue;
+            }
+
+            if (isset($usageData[$materialId])) {
+                if ($usageDataHasLogs) {
+                    continue;
+                }
+
+                $usageData[$materialId]['total_used'] += (float)($usage['total_used'] ?? 0);
+                $usageData[$materialId]['production_count'] += (int)($usage['production_count'] ?? 0);
+
+                $firstUsed = $usage['first_used'] ?? null;
+                $lastUsed = $usage['last_used'] ?? null;
+
+                if ($firstUsed && (empty($usageData[$materialId]['first_used']) || $firstUsed < $usageData[$materialId]['first_used'])) {
+                    $usageData[$materialId]['first_used'] = $firstUsed;
+                }
+                if ($lastUsed && (empty($usageData[$materialId]['last_used']) || $lastUsed > $usageData[$materialId]['last_used'])) {
+                    $usageData[$materialId]['last_used'] = $lastUsed;
+                }
+
+                continue;
+            }
+
+            $usageData[$materialId] = [
+                'total_used' => max(0.0, (float)($usage['total_used'] ?? 0)),
+                'production_count' => max(0, (int)($usage['production_count'] ?? 0)),
+                'first_used' => $usage['first_used'] ?? null,
+                'last_used' => $usage['last_used'] ?? null
+            ];
         }
     }
 }
@@ -1866,8 +1969,13 @@ try {
                     }
                     
                     if (isset($usageData[$materialId])) {
-                        $usageData[$materialId]['total_used'] += $batch['quantity'];
+                        if ($usageDataHasLogs) {
+                            continue;
+                        }
+
+                        $usageData[$materialId]['total_used'] += (float)$batch['quantity'];
                         $usageData[$materialId]['production_count'] += 1;
+
                         if (empty($usageData[$materialId]['first_used']) || $batch['production_date'] < $usageData[$materialId]['first_used']) {
                             $usageData[$materialId]['first_used'] = $batch['production_date'];
                         }
@@ -1876,7 +1984,7 @@ try {
                         }
                     } else {
                         $usageData[$materialId] = [
-                            'total_used' => $batch['quantity'],
+                            'total_used' => (float)$batch['quantity'],
                             'production_count' => 1,
                             'first_used' => $batch['production_date'],
                             'last_used' => $batch['production_date']
@@ -1891,7 +1999,7 @@ try {
     error_log("Batch usage processing error: " . $e->getMessage());
 }
 
-if ($hasPackagingUsageLogs) {
+if ($hasPackagingUsageLogs && !$usageDataHasLogs) {
     try {
         $manualUsageRows = $db->query(
             "SELECT material_id, source_table, 
