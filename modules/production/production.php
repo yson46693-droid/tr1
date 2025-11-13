@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
+require_once __DIR__ . '/../../includes/simple_telegram.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/batch_numbers.php';
 require_once __DIR__ . '/../../includes/simple_barcode.php';
@@ -1540,7 +1541,155 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'honey_supplier_id' => $honeySupplierId,
                     'packaging_supplier_id' => $packagingSupplierId
                 ]);
-                
+
+                // إعداد بيانات التشغيله لإعادة استخدامها في الإشعارات
+                $workerNames = [];
+                if (!empty($workersList)) {
+                    $workerIdsForQuery = array_values(array_filter(array_map('intval', $workersList), static function ($value) {
+                        return $value > 0;
+                    }));
+                    if (!empty($workerIdsForQuery)) {
+                        $workerPlaceholders = implode(',', array_fill(0, count($workerIdsForQuery), '?'));
+                        try {
+                            $workerRows = $db->query(
+                                "SELECT id, COALESCE(NULLIF(full_name, ''), username) AS display_name 
+                                 FROM users 
+                                 WHERE id IN ($workerPlaceholders)",
+                                $workerIdsForQuery
+                            );
+                            foreach ($workerRows as $workerRow) {
+                                $displayName = trim((string)($workerRow['display_name'] ?? ''));
+                                if ($displayName === '') {
+                                    $displayName = 'مستخدم #' . ($workerRow['id'] ?? '?');
+                                }
+                                $workerNames[] = $displayName;
+                            }
+                        } catch (Throwable $workerFetchError) {
+                            error_log('Production workers fetch failed: ' . $workerFetchError->getMessage());
+                        }
+                    }
+                }
+                $workerNames = array_values(array_unique($workerNames));
+
+                $honeySupplierName = null;
+                if (!empty($honeySupplierId)) {
+                    try {
+                        $honeySupplierRow = $db->queryOne(
+                            "SELECT name FROM suppliers WHERE id = ? LIMIT 1",
+                            [$honeySupplierId]
+                        );
+                        if (!empty($honeySupplierRow['name'])) {
+                            $honeySupplierName = $honeySupplierRow['name'];
+                        }
+                    } catch (Throwable $supplierError) {
+                        error_log('Production honey supplier fetch failed: ' . $supplierError->getMessage());
+                    }
+                }
+
+                $packagingSupplierName = null;
+                if (!empty($packagingSupplierId)) {
+                    try {
+                        $packagingSupplierRow = $db->queryOne(
+                            "SELECT name FROM suppliers WHERE id = ? LIMIT 1",
+                            [$packagingSupplierId]
+                        );
+                        if (!empty($packagingSupplierRow['name'])) {
+                            $packagingSupplierName = $packagingSupplierRow['name'];
+                        }
+                    } catch (Throwable $supplierError) {
+                        error_log('Production packaging supplier fetch failed: ' . $supplierError->getMessage());
+                    }
+                }
+
+                $extraSuppliersNames = [];
+                if (!empty($extraSuppliersDetails) && is_array($extraSuppliersDetails)) {
+                    foreach ($extraSuppliersDetails as $supplierRow) {
+                        $label = trim((string)($supplierRow['name'] ?? ''));
+                        if ($label === '' && !empty($supplierRow['type'])) {
+                            $label = 'مورد (' . $supplierRow['type'] . ')';
+                        }
+                        if ($label !== '') {
+                            $extraSuppliersNames[] = $label;
+                        }
+                    }
+                }
+                $extraSuppliersNames = array_values(array_unique($extraSuppliersNames));
+
+                $rawMaterialsSummary = [];
+                if (!empty($materialsConsumption['raw']) && is_array($materialsConsumption['raw'])) {
+                    foreach ($materialsConsumption['raw'] as $rawItem) {
+                        $rawMaterialsSummary[] = [
+                            'name' => trim((string)($rawItem['material_name'] ?? $rawItem['honey_variety'] ?? '')),
+                            'quantity' => isset($rawItem['quantity']) ? (float)$rawItem['quantity'] : null,
+                            'unit' => $rawItem['unit'] ?? ($rawItem['material_unit'] ?? null),
+                            'supplier_id' => isset($rawItem['supplier_id']) ? (int)$rawItem['supplier_id'] : null,
+                        ];
+                    }
+                }
+                $rawMaterialsSummary = array_values($rawMaterialsSummary);
+
+                $packagingMaterialsSummary = [];
+                if (!empty($materialsConsumption['packaging']) && is_array($materialsConsumption['packaging'])) {
+                    foreach ($materialsConsumption['packaging'] as $packItem) {
+                        $packagingMaterialsSummary[] = [
+                            'name' => trim((string)($packItem['name'] ?? '')),
+                            'quantity' => isset($packItem['quantity']) ? (float)$packItem['quantity'] : null,
+                            'unit' => $packItem['unit'] ?? null,
+                            'material_id' => isset($packItem['material_id']) ? (int)$packItem['material_id'] : null,
+                        ];
+                    }
+                }
+                $packagingMaterialsSummary = array_values($packagingMaterialsSummary);
+
+                $contextToken = null;
+                if (function_exists('random_bytes')) {
+                    try {
+                        $contextToken = bin2hex(random_bytes(16));
+                    } catch (Throwable $tokenError) {
+                        $contextToken = null;
+                    }
+                }
+                if (!$contextToken && function_exists('openssl_random_pseudo_bytes')) {
+                    $opensslBytes = @openssl_random_pseudo_bytes(16);
+                    if ($opensslBytes !== false) {
+                        $contextToken = bin2hex($opensslBytes);
+                    }
+                }
+                if (!$contextToken) {
+                    $contextToken = sha1(uniqid((string) mt_rand(), true));
+                }
+
+                $_SESSION['created_batch_context_token'] = $contextToken;
+                $_SESSION['created_batch_metadata'] = [
+                    'batch_number' => $batchNumber,
+                    'batch_id' => $batchResult['batch_id'] ?? null,
+                    'production_id' => $productionId,
+                    'product_id' => $productId,
+                    'product_name' => $batchResult['product_name'] ?? ($template['product_name'] ?? ''),
+                    'production_date' => $batchResult['production_date'] ?? $productionDate,
+                    'quantity' => $quantity,
+                    'unit' => 'قطعة',
+                    'quantity_unit_label' => $template['unit'] ?? null,
+                    'created_by' => $currentUser['full_name'] ?? ($currentUser['username'] ?? ''),
+                    'created_by_id' => $currentUser['id'] ?? null,
+                    'workers' => $workerNames,
+                    'workers_ids' => array_values(array_map('intval', $workersList)),
+                    'honey_supplier_name' => $honeySupplierName,
+                    'honey_supplier_id' => !empty($honeySupplierId) ? (int)$honeySupplierId : null,
+                    'packaging_supplier_name' => $packagingSupplierName,
+                    'packaging_supplier_id' => !empty($packagingSupplierId) ? (int)$packagingSupplierId : null,
+                    'extra_suppliers' => $extraSuppliersNames,
+                    'extra_suppliers_ids' => isset($extraSupplierIds) && is_array($extraSupplierIds)
+                        ? array_values(array_map('intval', $extraSupplierIds))
+                        : [],
+                    'notes' => $batchNotes,
+                    'raw_materials' => $rawMaterialsSummary,
+                    'packaging_materials' => $packagingMaterialsSummary,
+                    'template_id' => $templateId,
+                    'timestamp' => date('c'),
+                    'context_token' => $contextToken,
+                ];
+
                 // حفظ أرقام التشغيلة في الجلسة لعرضها في نافذة الطباعة
                 $_SESSION['created_batch_numbers'] = $batchNumbersToPrint; // أرقام باركود بعدد الكمية
                 $_SESSION['created_batch_product_name'] = $template['product_name'];
@@ -3220,6 +3369,7 @@ window.honeyStockData = <?php echo json_encode($honeyStockDataForJs, JSON_UNESCA
 let currentTemplateMode = 'advanced';
 const TEMPLATE_DETAILS_BASE_URL = '<?php echo addslashes(getRelativeUrl('dashboard/production.php')); ?>';
 const PRINT_BARCODE_URL = '<?php echo addslashes(getRelativeUrl('print_barcode.php')); ?>';
+const SEND_BARCODE_TELEGRAM_URL = '<?php echo addslashes(getRelativeUrl('api/production/send_barcode_link.php')); ?>';
 
 const HONEY_COMPONENT_TYPES = ['honey_raw', 'honey_filtered', 'honey_general', 'honey_main'];
 
@@ -4286,7 +4436,8 @@ document.getElementById('createFromTemplateModal')?.addEventListener('hidden.bs.
 // طباعة الباركودات
 function printBarcodes() {
     const batchNumbers = window.batchNumbersToPrint || [];
-    const printQuantity = parseInt(document.getElementById('barcode_print_quantity').value) || 1;
+    const quantityInput = document.getElementById('barcode_print_quantity');
+    const printQuantity = parseInt(quantityInput && quantityInput.value ? quantityInput.value : '1', 10) || 1;
     
     if (batchNumbers.length === 0) {
         alert('لا توجد أرقام تشغيل للطباعة');
@@ -4297,8 +4448,66 @@ function printBarcodes() {
     // الكمية المطلوبة للطباعة
     const batchNumber = batchNumbers[0]; // كل الباركودات تشترك في نفس الرقم
     const printUrl = `${PRINT_BARCODE_URL}?batch=${encodeURIComponent(batchNumber)}&quantity=${printQuantity}&print=1`;
-    
-    window.open(printUrl, '_blank');
+
+    const openedWindow = window.open(printUrl, '_blank');
+    if (openedWindow && typeof openedWindow.focus === 'function') {
+        openedWindow.focus();
+    }
+
+    const batchInfo = (typeof window.batchPrintInfo === 'object' && window.batchPrintInfo !== null)
+        ? window.batchPrintInfo
+        : {};
+    const telegramEnabled = !!(batchInfo.telegram_enabled);
+    const contextToken = batchInfo.context_token || '';
+    const hasEndpoint = typeof SEND_BARCODE_TELEGRAM_URL === 'string' && SEND_BARCODE_TELEGRAM_URL !== '';
+
+    if (!telegramEnabled || !contextToken || !hasEndpoint) {
+        return;
+    }
+
+    const payload = {
+        batch_number: batchNumber,
+        labels: printQuantity,
+        context_token: contextToken,
+        product_name: batchInfo.product_name || '',
+        production_id: batchInfo.production_id || null,
+        production_date: batchInfo.production_date || null,
+        quantity: batchInfo.quantity || null,
+        unit: batchInfo.unit || null,
+        metadata: {
+            workers: Array.isArray(batchInfo.workers) ? batchInfo.workers : [],
+            honey_supplier_name: batchInfo.honey_supplier_name || null,
+            packaging_supplier_name: batchInfo.packaging_supplier_name || null,
+            extra_suppliers: Array.isArray(batchInfo.extra_suppliers) ? batchInfo.extra_suppliers : [],
+            raw_materials: Array.isArray(batchInfo.raw_materials) ? batchInfo.raw_materials : [],
+            packaging_materials: Array.isArray(batchInfo.packaging_materials) ? batchInfo.packaging_materials : [],
+            notes: batchInfo.notes || null,
+            template_id: batchInfo.template_id || null,
+            quantity_unit_label: batchInfo.quantity_unit_label || null,
+        },
+    };
+
+    fetch(SEND_BARCODE_TELEGRAM_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+    })
+        .then((response) => response.json().catch(() => ({})))
+        .then((data) => {
+            if (!data || data.success !== true) {
+                console.warn('فشل إرسال إشعار الطباعة إلى تليجرام', data && data.error ? data.error : data);
+                return;
+            }
+            batchInfo.telegram_last_sent_at = Date.now();
+            batchInfo.telegram_last_response = data;
+        })
+        .catch((error) => {
+            console.error('خطأ أثناء إرسال إشعار الطباعة إلى تليجرام', error);
+        });
 }
 
 // إدارة المواد الخام في نافذة إنشاء القالب
@@ -4378,12 +4587,18 @@ if (isset($_GET['show_barcode_modal']) && isset($_SESSION['created_batch_numbers
     $batchNumbers = $_SESSION['created_batch_numbers'];
     $productName = $_SESSION['created_batch_product_name'] ?? '';
     $quantity = $_SESSION['created_batch_quantity'] ?? count($batchNumbers);
-    
-    // تنظيف بيانات الجلسة
+    $batchMetadata = $_SESSION['created_batch_metadata'] ?? null;
+    $contextTokenValue = $_SESSION['created_batch_context_token'] ?? '';
+
+    if (is_array($batchMetadata) && $contextTokenValue !== '' && empty($batchMetadata['context_token'])) {
+        $batchMetadata['context_token'] = $contextTokenValue;
+    }
+
+    // تنظيف بيانات الجلسة للقيم المؤقتة
     unset($_SESSION['created_batch_numbers']);
     unset($_SESSION['created_batch_product_name']);
     unset($_SESSION['created_batch_quantity']);
-    
+
     $batchNumbersJson = json_encode(array_values($batchNumbers), JSON_UNESCAPED_UNICODE);
     if ($batchNumbersJson === false) {
         $batchNumbersJson = '[]';
@@ -4400,6 +4615,14 @@ if (isset($_GET['show_barcode_modal']) && isset($_SESSION['created_batch_numbers
     }
 
     $quantityValue = (int) $quantity;
+    $batchMetadataJson = json_encode($batchMetadata, JSON_UNESCAPED_UNICODE);
+    if ($batchMetadataJson === false) {
+        $batchMetadataJson = 'null';
+    }
+    $contextTokenJs = json_encode($contextTokenValue, JSON_UNESCAPED_UNICODE);
+    if ($contextTokenJs === false) {
+        $contextTokenJs = 'null';
+    }
     ?>
     <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -4407,8 +4630,23 @@ if (isset($_GET['show_barcode_modal']) && isset($_SESSION['created_batch_numbers
         const firstBatchNumber = <?= $firstBatchNumberJson ?>;
         const productName = <?= $productNameJson ?>;
         const barcodeQuantity = <?= $quantityValue ?>;
+        const batchMeta = <?= $batchMetadataJson ?>;
+        const contextToken = <?= $contextTokenJs ?>;
+        const telegramEnabled = <?= isTelegramConfigured() ? 'true' : 'false'; ?>;
 
         window.batchNumbersToPrint = Array.isArray(batchNumbers) ? batchNumbers : [];
+        if (batchMeta && typeof batchMeta === 'object') {
+            batchMeta.telegram_enabled = telegramEnabled;
+            if (contextToken && !batchMeta.context_token) {
+                batchMeta.context_token = contextToken;
+            }
+            window.batchPrintInfo = batchMeta;
+        } else {
+            window.batchPrintInfo = {
+                telegram_enabled: telegramEnabled,
+                context_token: contextToken || ''
+            };
+        }
 
         const productNameInput = document.getElementById('barcode_product_name');
         const quantityText = document.getElementById('barcode_quantity');
