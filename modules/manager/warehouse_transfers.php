@@ -15,6 +15,19 @@ require_once __DIR__ . '/../../includes/approval_system.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/table_styles.php';
 
+$warehouseTransfersParentPage = $warehouseTransfersParentPage ?? 'warehouse_transfers';
+$warehouseTransfersSectionParam = $warehouseTransfersSectionParam ?? null;
+$warehouseTransfersShowHeading = $warehouseTransfersShowHeading ?? true;
+$warehouseTransfersBaseQueryParams = ['page' => $warehouseTransfersParentPage];
+if ($warehouseTransfersSectionParam !== null && $warehouseTransfersSectionParam !== '') {
+    $warehouseTransfersBaseQueryParams['section'] = $warehouseTransfersSectionParam;
+}
+
+$buildWarehouseTransfersUrl = static function (array $params = []) use ($warehouseTransfersBaseQueryParams): string {
+    $query = array_merge($warehouseTransfersBaseQueryParams, $params);
+    return '?' . http_build_query($query);
+};
+
 requireRole('manager');
 
 $approvalsEntityColumn = getApprovalsEntityColumn();
@@ -108,7 +121,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // إعادة التوجيه بعد معالجة POST (POST-Redirect-GET pattern)
     // الحفاظ على query parameters للفلترة فقط (إزالة id)
     require_once __DIR__ . '/../../includes/path_helper.php';
-    redirectAfterPost('warehouse_transfers', $filters, ['id'], 'manager', $pageNum);
+    $redirectFilters = $filters;
+    if (!empty($warehouseTransfersSectionParam)) {
+        $redirectFilters['section'] = $warehouseTransfersSectionParam;
+    }
+    redirectAfterPost($warehouseTransfersParentPage, $redirectFilters, ['id'], 'manager', $pageNum);
 }
 
 // الحصول على البيانات - حساب العدد الإجمالي مع الفلترة
@@ -196,9 +213,11 @@ if (isset($_GET['id'])) {
     }
 }
 ?>
+<?php if ($warehouseTransfersShowHeading): ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-arrow-left-right me-2"></i>طلبات النقل بين المخازن</h2>
 </div>
+<?php endif; ?>
 
 <?php if ($error): ?>
     <div class="alert alert-danger alert-dismissible fade show">
@@ -221,7 +240,7 @@ if (isset($_GET['id'])) {
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
             <h5 class="mb-0">طلب نقل رقم: <?php echo htmlspecialchars($selectedTransfer['transfer_number']); ?></h5>
-            <a href="?page=warehouse_transfers" class="btn btn-light btn-sm">
+            <a href="<?php echo $buildWarehouseTransfersUrl($filters); ?>" class="btn btn-light btn-sm">
                 <i class="bi bi-x"></i>
             </a>
         </div>
@@ -387,7 +406,10 @@ if (isset($_GET['id'])) {
 <div class="card shadow-sm mb-4">
     <div class="card-body">
         <form method="GET" class="row g-3">
-            <input type="hidden" name="page" value="warehouse_transfers">
+            <input type="hidden" name="page" value="<?php echo htmlspecialchars($warehouseTransfersParentPage); ?>">
+            <?php if (!empty($warehouseTransfersSectionParam)): ?>
+                <input type="hidden" name="section" value="<?php echo htmlspecialchars($warehouseTransfersSectionParam); ?>">
+            <?php endif; ?>
             <div class="col-md-3">
                 <label class="form-label">من المخزن</label>
                 <select class="form-select" name="from_warehouse_id">
@@ -472,7 +494,7 @@ if (isset($_GET['id'])) {
                         <?php foreach ($transfers as $transfer): ?>
                             <tr>
                                 <td>
-                                    <a href="?page=warehouse_transfers&id=<?php echo $transfer['id']; ?>" class="text-decoration-none">
+                                    <a href="<?php echo $buildWarehouseTransfersUrl(array_merge($filters, ['id' => $transfer['id']])); ?>" class="text-decoration-none">
                                         <strong><?php echo htmlspecialchars($transfer['transfer_number']); ?></strong>
                                     </a>
                                 </td>
@@ -511,7 +533,7 @@ if (isset($_GET['id'])) {
                                     </span>
                                 </td>
                                 <td>
-                                    <a href="?page=warehouse_transfers&id=<?php echo $transfer['id']; ?>" 
+                                    <a href="<?php echo $buildWarehouseTransfersUrl(array_merge($filters, ['id' => $transfer['id']])); ?>" 
                                        class="btn btn-info btn-sm" title="عرض">
                                         <i class="bi bi-eye"></i>
                                     </a>
@@ -528,21 +550,21 @@ if (isset($_GET['id'])) {
         <nav aria-label="Page navigation" class="mt-3">
             <ul class="pagination justify-content-center flex-wrap">
                 <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?page=warehouse_transfers&p=<?php echo $pageNum - 1; ?>&<?php echo http_build_query($filters); ?>">
+                    <a class="page-link" href="<?php echo $buildWarehouseTransfersUrl(array_merge($filters, ['p' => $pageNum - 1])); ?>">
                         <i class="bi bi-chevron-right"></i>
                     </a>
                 </li>
                 
                 <?php for ($i = max(1, $pageNum - 2); $i <= min($totalPages, $pageNum + 2); $i++): ?>
                     <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
-                        <a class="page-link" href="?page=warehouse_transfers&p=<?php echo $i; ?>&<?php echo http_build_query($filters); ?>">
+                        <a class="page-link" href="<?php echo $buildWarehouseTransfersUrl(array_merge($filters, ['p' => $i])); ?>">
                             <?php echo $i; ?>
                         </a>
                     </li>
                 <?php endfor; ?>
                 
                 <li class="page-item <?php echo $pageNum >= $totalPages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?page=warehouse_transfers&p=<?php echo $pageNum + 1; ?>&<?php echo http_build_query($filters); ?>">
+                    <a class="page-link" href="<?php echo $buildWarehouseTransfersUrl(array_merge($filters, ['p' => $pageNum + 1])); ?>">
                         <i class="bi bi-chevron-left"></i>
                     </a>
                 </li>

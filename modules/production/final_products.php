@@ -90,6 +90,97 @@ if ($currentSection !== null && $currentSection !== '') {
 }
 $managerRedirectRole = 'manager';
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isManager) {
+    $postAction = $_POST['action'] ?? '';
+    if ($postAction === 'update_manager_price') {
+        $finishedProductId = isset($_POST['finished_product_id']) ? (int) $_POST['finished_product_id'] : 0;
+        $clearPriceRequested = isset($_POST['clear_price']) && (string)$_POST['clear_price'] === '1';
+        $rawPrice = trim((string) ($_POST['manager_unit_price'] ?? ''));
+        $priceValue = null;
+        $hasValidationError = false;
+        $validationMessage = '';
+
+        if ($finishedProductId <= 0) {
+            $hasValidationError = true;
+            $validationMessage = 'معرف التشغيلة غير صالح.';
+        }
+
+        if (!$hasValidationError && !$clearPriceRequested) {
+            if ($rawPrice === '') {
+                $hasValidationError = true;
+                $validationMessage = 'يرجى إدخال سعر صالح أو استخدام خيار الإزالة.';
+            } else {
+                $normalizedPrice = preg_replace('/[^\d,.\-]/', '', $rawPrice);
+                if ($normalizedPrice !== null) {
+                    $normalizedPrice = str_replace(',', '.', $normalizedPrice);
+                }
+                if ($normalizedPrice === '' || !is_numeric($normalizedPrice)) {
+                    $hasValidationError = true;
+                    $validationMessage = 'السعر المدخل غير صالح.';
+                } else {
+                    $priceValue = round((float)$normalizedPrice, 2);
+                    if ($priceValue < 0) {
+                        $hasValidationError = true;
+                        $validationMessage = 'لا يمكن أن يكون السعر سالباً.';
+                    }
+                }
+            }
+        }
+
+        if ($hasValidationError) {
+            $_SESSION[$sessionErrorKey] = $validationMessage ?: 'تعذر تحديث السعر.';
+            productionSafeRedirect($finalProductsUrl, $managerRedirectParams, $managerRedirectRole);
+        }
+
+        try {
+            $existingFinishedProduct = $db->queryOne(
+                "SELECT id FROM finished_products WHERE id = ? LIMIT 1",
+                [$finishedProductId]
+            );
+
+            if (!$existingFinishedProduct) {
+                $_SESSION[$sessionErrorKey] = 'لم يتم العثور على التشغيلة المحددة.';
+                productionSafeRedirect($finalProductsUrl, $managerRedirectParams, $managerRedirectRole);
+            }
+
+            if ($clearPriceRequested) {
+                $db->execute(
+                    "UPDATE finished_products SET manager_unit_price = NULL WHERE id = ?",
+                    [$finishedProductId]
+                );
+            } else {
+                $db->execute(
+                    "UPDATE finished_products SET manager_unit_price = ? WHERE id = ?",
+                    [$priceValue, $finishedProductId]
+                );
+            }
+
+            if (function_exists('logAudit')) {
+                logAudit(
+                    $currentUser['id'] ?? null,
+                    'update_finished_product_price',
+                    'finished_products',
+                    $finishedProductId,
+                    null,
+                    [
+                        'manager_unit_price' => $clearPriceRequested ? null : $priceValue,
+                        'cleared' => $clearPriceRequested,
+                    ]
+                );
+            }
+
+            $_SESSION[$sessionSuccessKey] = $clearPriceRequested
+                ? 'تمت إزالة سعر التشغيلة بنجاح.'
+                : 'تم تحديث سعر التشغيلة بنجاح.';
+        } catch (Exception $updatePriceError) {
+            error_log('Final products manager price update error: ' . $updatePriceError->getMessage());
+            $_SESSION[$sessionErrorKey] = 'حدث خطأ أثناء تحديث السعر.';
+        }
+
+        productionSafeRedirect($finalProductsUrl, $managerRedirectParams, $managerRedirectRole);
+    }
+}
+
 // التحقق من وجود عمود date أو production_date
 $dateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'date'");
 $productionDateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'production_date'");
@@ -919,6 +1010,14 @@ $finishedProductsCount = 0;
 $finishedProductsTableExists = $db->queryOne("SHOW TABLES LIKE 'finished_products'");
 if (!empty($finishedProductsTableExists)) {
     try {
+        $managerPriceColumn = $db->queryOne("SHOW COLUMNS FROM finished_products LIKE 'manager_unit_price'");
+        if (empty($managerPriceColumn)) {
+            $db->execute("ALTER TABLE `finished_products` ADD COLUMN `manager_unit_price` DECIMAL(12,2) NULL DEFAULT NULL AFTER `quantity_produced`");
+        }
+    } catch (Exception $priceColumnError) {
+        error_log('Finished products ensure manager_unit_price column error: ' . $priceColumnError->getMessage());
+    }
+    try {
         $finishedProductsRows = $db->query("
             SELECT 
                 fp.id,
@@ -928,6 +1027,7 @@ if (!empty($finishedProductsTableExists)) {
                 COALESCE(pr.name, fp.product_name) AS product_name,
                 fp.production_date,
                 fp.quantity_produced,
+                fp.manager_unit_price,
                 GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
             FROM finished_products fp
             LEFT JOIN products pr ON fp.product_id = pr.id
@@ -1122,6 +1222,9 @@ if ($isManager) {
                             <th>اسم المنتج</th>
                             <th>تاريخ الإنتاج</th>
                             <th>الكمية المنتجة</th>
+                            <?php if ($isManager): ?>
+                                <th style="min-width: 220px;">سعر البيع</th>
+                            <?php endif; ?>
                             <th>العمال المشاركون</th>
                             <th>إجراءات</th>
                         </tr>
@@ -1143,6 +1246,35 @@ if ($isManager) {
                                 <td><?php echo htmlspecialchars($finishedRow['product_name'] ?? 'غير محدد'); ?></td>
                                 <td><?php echo !empty($finishedRow['production_date']) ? htmlspecialchars(formatDate($finishedRow['production_date'])) : '—'; ?></td>
                                 <td><?php echo number_format((float)($finishedRow['quantity_produced'] ?? 0), 2); ?></td>
+                                <?php if ($isManager): ?>
+                                    <td>
+                                        <form method="POST" class="d-flex align-items-center gap-2 manager-price-form">
+                                            <input type="hidden" name="action" value="update_manager_price">
+                                            <input type="hidden" name="finished_product_id" value="<?php echo (int)($finishedRow['id'] ?? 0); ?>">
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text"><?php echo htmlspecialchars(CURRENCY_SYMBOL ?? 'ج.م'); ?></span>
+                                                <input
+                                                    type="number"
+                                                    step="0.01"
+                                                    min="0"
+                                                    class="form-control form-control-sm"
+                                                    name="manager_unit_price"
+                                                    value="<?php echo isset($finishedRow['manager_unit_price']) ? htmlspecialchars(number_format((float)$finishedRow['manager_unit_price'], 2, '.', '')) : ''; ?>"
+                                                    placeholder="0.00"
+                                                >
+                                            </div>
+                                            <button type="submit" class="btn btn-success btn-sm">
+                                                <i class="bi bi-save"></i>
+                                                <span class="d-none d-md-inline">حفظ</span>
+                                            </button>
+                                            <?php if (!empty($finishedRow['manager_unit_price'])): ?>
+                                                <button type="submit" name="clear_price" value="1" class="btn btn-outline-secondary btn-sm" title="إزالة السعر">
+                                                    <i class="bi bi-x-circle"></i>
+                                                </button>
+                                            <?php endif; ?>
+                                        </form>
+                                    </td>
+                                <?php endif; ?>
                                 <td><?php echo $workersDisplay; ?></td>
                                 <td>
                                     <div class="btn-group btn-group-sm" role="group">

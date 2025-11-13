@@ -70,6 +70,24 @@ if (!isset($existing['product_unit_price'])) {
 if (!isset($existing['product_snapshot'])) {
     $alterParts[] = "ADD COLUMN `product_snapshot` longtext DEFAULT NULL AFTER `product_unit_price`";
 }
+if (!isset($existing['manager_unit_price'])) {
+    $alterParts[] = "ADD COLUMN `manager_unit_price` decimal(15,2) DEFAULT NULL AFTER `product_unit_price`";
+}
+if (!isset($existing['finished_batch_id'])) {
+    $alterParts[] = "ADD COLUMN `finished_batch_id` int(11) DEFAULT NULL AFTER `manager_unit_price`";
+}
+if (!isset($existing['finished_batch_number'])) {
+    $alterParts[] = "ADD COLUMN `finished_batch_number` varchar(100) DEFAULT NULL AFTER `finished_batch_id`";
+}
+if (!isset($existing['finished_production_date'])) {
+    $alterParts[] = "ADD COLUMN `finished_production_date` date DEFAULT NULL AFTER `finished_batch_number`";
+}
+if (!isset($existing['finished_quantity_produced'])) {
+    $alterParts[] = "ADD COLUMN `finished_quantity_produced` decimal(12,2) DEFAULT NULL AFTER `finished_production_date`";
+}
+if (!isset($existing['finished_workers'])) {
+    $alterParts[] = "ADD COLUMN `finished_workers` text DEFAULT NULL AFTER `finished_quantity_produced`";
+}
 if (!isset($existing['last_updated_at'])) {
     $alterParts[] = "ADD COLUMN `last_updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP AFTER `last_updated_by`";
 }

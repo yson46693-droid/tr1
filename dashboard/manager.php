@@ -258,107 +258,140 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 <?php include __DIR__ . '/../modules/manager/production_tasks.php'; ?>
 
             <?php elseif ($page === 'approvals'): ?>
-                <h2><i class="bi bi-check-circle me-2"></i><?php echo isset($lang['approvals']) ? $lang['approvals'] : 'الموافقات'; ?></h2>
-                
                 <?php
-                // Pagination
-                $pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
-                $perPageApprovals = 10;
-                $offsetApprovals = ($pageNum - 1) * $perPageApprovals;
-                
-                $totalApprovals = getPendingApprovalsCount();
-                $totalPagesApprovals = ceil($totalApprovals / $perPageApprovals);
-                $approvals = getPendingApprovals($perPageApprovals, $offsetApprovals);
+                $pendingApprovalsCount = getPendingApprovalsCount();
+                $approvalsSection = $_GET['section'] ?? 'pending';
+                $validApprovalSections = ['pending', 'warehouse_transfers'];
+                if (!in_array($approvalsSection, $validApprovalSections, true)) {
+                    $approvalsSection = 'pending';
+                }
                 ?>
-                
-                <div class="card shadow-sm">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">الموافقات المعلقة (<?php echo $totalApprovals; ?>)</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="table-responsive dashboard-table-wrapper">
-                            <table class="table dashboard-table align-middle">
-                                <thead>
-                                    <tr>
-                                        <th>النوع</th>
-                                        <th>الطلب من</th>
-                                        <th>التاريخ</th>
-                                        <th>الإجراءات</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (empty($approvals)): ?>
-                                        <tr>
-                                            <td colspan="4" class="text-center text-muted">لا توجد موافقات معلقة</td>
-                                        </tr>
-                                    <?php else: ?>
-                                        <?php foreach ($approvals as $approval): ?>
-                                            <tr>
-                                                <td><?php echo $approval['type']; ?></td>
-                                                <td><?php echo htmlspecialchars($approval['requested_by_full_name'] ?? $approval['requested_by_name']); ?></td>
-                                                <td><?php echo formatDateTime($approval['created_at']); ?></td>
-                                                <td>
-                                                    <div class="btn-group btn-group-sm" role="group">
-                                                        <button class="btn btn-success" onclick="approveRequest(<?php echo $approval['id']; ?>, event)">
-                                                            <i class="bi bi-check"></i> موافقة
-                                                        </button>
-                                                        <button class="btn btn-danger" onclick="rejectRequest(<?php echo $approval['id']; ?>, event)">
-                                                            <i class="bi bi-x"></i> رفض
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                        
-                        <!-- Pagination -->
-                        <?php if ($totalPagesApprovals > 1): ?>
-                        <nav aria-label="Page navigation" class="mt-3">
-                            <ul class="pagination justify-content-center flex-wrap">
-                                <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
-                                    <a class="page-link" href="?page=approvals&p=<?php echo $pageNum - 1; ?>">
-                                        <i class="bi bi-chevron-right"></i>
-                                    </a>
-                                </li>
-                                
-                                <?php
-                                $startPageApprovals = max(1, $pageNum - 2);
-                                $endPageApprovals = min($totalPagesApprovals, $pageNum + 2);
-                                
-                                if ($startPageApprovals > 1): ?>
-                                    <li class="page-item"><a class="page-link" href="?page=approvals&p=1">1</a></li>
-                                    <?php if ($startPageApprovals > 2): ?>
-                                        <li class="page-item disabled"><span class="page-link">...</span></li>
-                                    <?php endif; ?>
-                                <?php endif; ?>
-                                
-                                <?php for ($i = $startPageApprovals; $i <= $endPageApprovals; $i++): ?>
-                                    <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
-                                        <a class="page-link" href="?page=approvals&p=<?php echo $i; ?>"><?php echo $i; ?></a>
-                                    </li>
-                                <?php endfor; ?>
-                                
-                                <?php if ($endPageApprovals < $totalPagesApprovals): ?>
-                                    <?php if ($endPageApprovals < $totalPagesApprovals - 1): ?>
-                                        <li class="page-item disabled"><span class="page-link">...</span></li>
-                                    <?php endif; ?>
-                                    <li class="page-item"><a class="page-link" href="?page=approvals&p=<?php echo $totalPagesApprovals; ?>"><?php echo $totalPagesApprovals; ?></a></li>
-                                <?php endif; ?>
-                                
-                                <li class="page-item <?php echo $pageNum >= $totalPagesApprovals ? 'disabled' : ''; ?>">
-                                    <a class="page-link" href="?page=approvals&p=<?php echo $pageNum + 1; ?>">
-                                        <i class="bi bi-chevron-left"></i>
-                                    </a>
-                                </li>
-                            </ul>
-                        </nav>
-                        <?php endif; ?>
-                    </div>
+
+                <h2><i class="bi bi-check-circle me-2"></i><?php echo isset($lang['approvals']) ? $lang['approvals'] : 'الموافقات'; ?></h2>
+
+                <div class="btn-group btn-group-sm mb-3" role="group" aria-label="Approvals sections">
+                    <a href="?page=approvals&section=pending"
+                       class="btn <?php echo $approvalsSection === 'pending' ? 'btn-primary' : 'btn-outline-primary'; ?>">
+                        الموافقات المعلقة
+                        <span class="badge bg-light text-dark ms-1"><?php echo $pendingApprovalsCount; ?></span>
+                    </a>
+                    <a href="?page=approvals&section=warehouse_transfers"
+                       class="btn <?php echo $approvalsSection === 'warehouse_transfers' ? 'btn-primary' : 'btn-outline-primary'; ?>">
+                        طلبات النقل بين المخازن
+                    </a>
                 </div>
-                
+
+                <?php if ($approvalsSection === 'pending'): ?>
+                    <?php
+                    $pageNum = isset($_GET['p']) ? max(1, intval($_GET['p'])) : 1;
+                    $perPageApprovals = 10;
+                    $offsetApprovals = ($pageNum - 1) * $perPageApprovals;
+                    $totalPagesApprovals = (int) ceil(($pendingApprovalsCount ?: 0) / $perPageApprovals);
+                    if ($totalPagesApprovals < 1) {
+                        $totalPagesApprovals = 1;
+                    }
+                    if ($pageNum > $totalPagesApprovals) {
+                        $pageNum = $totalPagesApprovals;
+                        $offsetApprovals = ($pageNum - 1) * $perPageApprovals;
+                    }
+                    $approvals = getPendingApprovals($perPageApprovals, $offsetApprovals);
+                    ?>
+
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">الموافقات المعلقة (<?php echo $pendingApprovalsCount; ?>)</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="table-responsive dashboard-table-wrapper">
+                                <table class="table dashboard-table align-middle">
+                                    <thead>
+                                        <tr>
+                                            <th>النوع</th>
+                                            <th>الطلب من</th>
+                                            <th>التاريخ</th>
+                                            <th>الإجراءات</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (empty($approvals)): ?>
+                                            <tr>
+                                                <td colspan="4" class="text-center text-muted">لا توجد موافقات معلقة</td>
+                                            </tr>
+                                        <?php else: ?>
+                                            <?php foreach ($approvals as $approval): ?>
+                                                <tr>
+                                                    <td><?php echo htmlspecialchars($approval['type']); ?></td>
+                                                    <td><?php echo htmlspecialchars($approval['requested_by_full_name'] ?? $approval['requested_by_name']); ?></td>
+                                                    <td><?php echo formatDateTime($approval['created_at']); ?></td>
+                                                    <td>
+                                                        <div class="btn-group btn-group-sm" role="group">
+                                                            <button class="btn btn-success" onclick="approveRequest(<?php echo $approval['id']; ?>, event)">
+                                                                <i class="bi bi-check"></i> موافقة
+                                                            </button>
+                                                            <button class="btn btn-danger" onclick="rejectRequest(<?php echo $approval['id']; ?>, event)">
+                                                                <i class="bi bi-x"></i> رفض
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <?php if ($totalPagesApprovals > 1): ?>
+                            <nav aria-label="Page navigation" class="mt-3">
+                                <ul class="pagination justify-content-center flex-wrap">
+                                    <li class="page-item <?php echo $pageNum <= 1 ? 'disabled' : ''; ?>">
+                                        <a class="page-link" href="?page=approvals&section=pending&p=<?php echo $pageNum - 1; ?>">
+                                            <i class="bi bi-chevron-right"></i>
+                                        </a>
+                                    </li>
+
+                                    <?php
+                                    $startPageApprovals = max(1, $pageNum - 2);
+                                    $endPageApprovals = min(max(1, $totalPagesApprovals), $pageNum + 2);
+
+                                    if ($startPageApprovals > 1): ?>
+                                        <li class="page-item"><a class="page-link" href="?page=approvals&section=pending&p=1">1</a></li>
+                                        <?php if ($startPageApprovals > 2): ?>
+                                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+
+                                    <?php for ($i = $startPageApprovals; $i <= $endPageApprovals; $i++): ?>
+                                        <li class="page-item <?php echo $i == $pageNum ? 'active' : ''; ?>">
+                                            <a class="page-link" href="?page=approvals&section=pending&p=<?php echo $i; ?>"><?php echo $i; ?></a>
+                                        </li>
+                                    <?php endfor; ?>
+
+                                    <?php if ($endPageApprovals < $totalPagesApprovals): ?>
+                                        <?php if ($endPageApprovals < $totalPagesApprovals - 1): ?>
+                                            <li class="page-item disabled"><span class="page-link">...</span></li>
+                                        <?php endif; ?>
+                                        <li class="page-item"><a class="page-link" href="?page=approvals&section=pending&p=<?php echo $totalPagesApprovals; ?>"><?php echo $totalPagesApprovals; ?></a></li>
+                                    <?php endif; ?>
+
+                                    <li class="page-item <?php echo $pageNum >= $totalPagesApprovals ? 'disabled' : ''; ?>">
+                                        <a class="page-link" href="?page=approvals&section=pending&p=<?php echo $pageNum + 1; ?>">
+                                            <i class="bi bi-chevron-left"></i>
+                                        </a>
+                                    </li>
+                                </ul>
+                            </nav>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php elseif ($approvalsSection === 'warehouse_transfers'): ?>
+                    <?php
+                    $warehouseTransfersParentPage = 'approvals';
+                    $warehouseTransfersSectionParam = 'warehouse_transfers';
+                    $warehouseTransfersShowHeading = false;
+                    include __DIR__ . '/../modules/manager/warehouse_transfers.php';
+                    ?>
+                <?php endif; ?>
+
             <?php elseif ($page === 'audit'): ?>
                 <h2><i class="bi bi-journal-text me-2"></i><?php echo isset($lang['audit_logs']) ? $lang['audit_logs'] : 'سجل التدقيق'; ?></h2>
                 

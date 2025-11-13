@@ -104,13 +104,6 @@ $baseUrl = getDashboardUrl();
                 </li>
                 
                 <li class="nav-item">
-                    <a class="nav-link" href="<?php echo $baseUrl; ?>manager.php?page=warehouse_transfers">
-                        <i class="bi bi-arrow-left-right"></i>
-                        <span>نقل المخازن</span>
-                    </a>
-                </li>
-                
-                <li class="nav-item">
                     <a class="nav-link" href="<?php echo $baseUrl; ?>manager.php?page=returns">
                         <i class="bi bi-arrow-return-left"></i>
                         <span>المرتجعات</span>

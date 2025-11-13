@@ -82,6 +82,24 @@ if (!function_exists('ensureVehicleInventoryProductColumns')) {
         if (!isset($existing['product_snapshot'])) {
             $alterParts[] = "ADD COLUMN `product_snapshot` longtext DEFAULT NULL AFTER `product_unit_price`";
         }
+        if (!isset($existing['manager_unit_price'])) {
+            $alterParts[] = "ADD COLUMN `manager_unit_price` decimal(15,2) DEFAULT NULL AFTER `product_unit_price`";
+        }
+        if (!isset($existing['finished_batch_id'])) {
+            $alterParts[] = "ADD COLUMN `finished_batch_id` int(11) DEFAULT NULL AFTER `manager_unit_price`";
+        }
+        if (!isset($existing['finished_batch_number'])) {
+            $alterParts[] = "ADD COLUMN `finished_batch_number` varchar(100) DEFAULT NULL AFTER `finished_batch_id`";
+        }
+        if (!isset($existing['finished_production_date'])) {
+            $alterParts[] = "ADD COLUMN `finished_production_date` date DEFAULT NULL AFTER `finished_batch_number`";
+        }
+        if (!isset($existing['finished_quantity_produced'])) {
+            $alterParts[] = "ADD COLUMN `finished_quantity_produced` decimal(12,2) DEFAULT NULL AFTER `finished_production_date`";
+        }
+        if (!isset($existing['finished_workers'])) {
+            $alterParts[] = "ADD COLUMN `finished_workers` text DEFAULT NULL AFTER `finished_quantity_produced`";
+        }
 
         if (!isset($existing['created_at'])) {
             $alterParts[] = "ADD COLUMN `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP AFTER `last_updated_at`";
@@ -282,7 +300,7 @@ function getVehicleInventory($vehicleId, $filters = []) {
     $nameExpr = "COALESCE(p.name, vi.product_name)";
     $categoryExpr = "COALESCE(p.category, vi.product_category)";
     $unitExpr = "COALESCE(p.unit, vi.product_unit)";
-    $unitPriceExpr = "COALESCE(p.unit_price, vi.product_unit_price, 0)";
+    $unitPriceExpr = "COALESCE(vi.manager_unit_price, vi.product_unit_price, p.unit_price, 0)";
 
     $sql = "SELECT 
                 vi.*,
@@ -318,7 +336,7 @@ function getVehicleInventory($vehicleId, $filters = []) {
 /**
  * تحديث مخزون سيارة
  */
-function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = null) {
+function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = null, $unitPriceOverride = null, array $finishedProductData = []) {
     try {
         $db = db();
         ensureVehicleInventoryProductColumns();
@@ -343,7 +361,9 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
         
         // التحقق من وجود السجل
         $existing = $db->queryOne(
-            "SELECT id, quantity, product_name, product_category, product_unit, product_unit_price, product_snapshot 
+            "SELECT id, quantity, product_name, product_category, product_unit, product_unit_price, product_snapshot,
+                    manager_unit_price, finished_batch_id, finished_batch_number, finished_production_date,
+                    finished_quantity_produced, finished_workers
              FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ?",
             [$vehicleId, $productId]
         );
@@ -353,6 +373,12 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
         $productUnit = null;
         $productUnitPrice = null;
         $productSnapshot = null;
+        $managerUnitPriceValue = $finishedProductData['manager_unit_price'] ?? $finishedProductData['manager_price'] ?? null;
+        $finishedBatchId = $finishedProductData['batch_id'] ?? $finishedProductData['finished_batch_id'] ?? null;
+        $finishedBatchNumber = $finishedProductData['batch_number'] ?? $finishedProductData['finished_batch_number'] ?? null;
+        $finishedProductionDate = $finishedProductData['production_date'] ?? $finishedProductData['finished_production_date'] ?? null;
+        $finishedQuantityProduced = $finishedProductData['quantity_produced'] ?? $finishedProductData['finished_quantity_produced'] ?? null;
+        $finishedWorkers = $finishedProductData['workers'] ?? $finishedProductData['finished_workers'] ?? null;
 
         if ($productId > 0) {
             try {
@@ -369,8 +395,32 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
                 $productName = $productRecord['name'] ?? null;
                 $productCategory = $productRecord['category'] ?? null;
                 $productUnit = $productRecord['unit'] ?? null;
-                $productUnitPrice = isset($productRecord['unit_price']) ? (float)$productRecord['unit_price'] : null;
                 $productSnapshot = json_encode($productRecord, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                if ($managerUnitPriceValue === null && array_key_exists('unit_price', $productRecord) && $productRecord['unit_price'] !== null) {
+                    $managerUnitPriceValue = (float)$productRecord['unit_price'];
+                }
+            }
+        }
+
+        if ($unitPriceOverride !== null) {
+            $productUnitPrice = (float)$unitPriceOverride;
+            if ($managerUnitPriceValue === null) {
+                $managerUnitPriceValue = $productUnitPrice;
+            }
+        } elseif ($managerUnitPriceValue !== null) {
+            $managerUnitPriceValue = (float)$managerUnitPriceValue;
+            $productUnitPrice = $managerUnitPriceValue;
+        } elseif ($existing && isset($existing['product_unit_price']) && $existing['product_unit_price'] !== null) {
+            $productUnitPrice = (float)$existing['product_unit_price'];
+        } elseif (isset($productRecord) && $productRecord && array_key_exists('unit_price', $productRecord) && $productRecord['unit_price'] !== null) {
+            $productUnitPrice = (float)$productRecord['unit_price'];
+        }
+
+        if ($managerUnitPriceValue === null) {
+            if ($existing && isset($existing['manager_unit_price']) && $existing['manager_unit_price'] !== null) {
+                $managerUnitPriceValue = (float)$existing['manager_unit_price'];
+            } elseif ($productUnitPrice !== null) {
+                $managerUnitPriceValue = $productUnitPrice;
             }
         }
 
@@ -383,18 +433,39 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
         if ($existing && !$productUnit) {
             $productUnit = $existing['product_unit'] ?? $productUnit;
         }
-        if ($existing && ($productUnitPrice === null)) {
-            $productUnitPrice = isset($existing['product_unit_price']) ? (float)$existing['product_unit_price'] : null;
-        }
         if ($existing && !$productSnapshot) {
             $productSnapshot = $existing['product_snapshot'] ?? null;
+        }
+        if ($finishedBatchId !== null) {
+            $finishedBatchId = (int)$finishedBatchId;
+        }
+        if ($finishedQuantityProduced !== null) {
+            $finishedQuantityProduced = (float)$finishedQuantityProduced;
+        }
+
+        if ($existing && $finishedBatchId === null) {
+            $finishedBatchId = $existing['finished_batch_id'] ?? null;
+        }
+        if ($existing && $finishedBatchNumber === null) {
+            $finishedBatchNumber = $existing['finished_batch_number'] ?? null;
+        }
+        if ($existing && $finishedProductionDate === null) {
+            $finishedProductionDate = $existing['finished_production_date'] ?? null;
+        }
+        if ($existing && $finishedQuantityProduced === null) {
+            $finishedQuantityProduced = $existing['finished_quantity_produced'] ?? null;
+        }
+        if ($existing && $finishedWorkers === null) {
+            $finishedWorkers = $existing['finished_workers'] ?? null;
         }
         
         if ($existing) {
             $db->execute(
                 "UPDATE vehicle_inventory 
                  SET quantity = ?, last_updated_by = ?, last_updated_at = NOW(),
-                     product_name = ?, product_category = ?, product_unit = ?, product_unit_price = ?, product_snapshot = ?
+                     product_name = ?, product_category = ?, product_unit = ?, product_unit_price = ?, product_snapshot = ?,
+                     manager_unit_price = ?, finished_batch_id = ?, finished_batch_number = ?, finished_production_date = ?,
+                     finished_quantity_produced = ?, finished_workers = ?
                  WHERE id = ?",
                 [
                     $quantity,
@@ -404,6 +475,12 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
                     $productUnit,
                     $productUnitPrice,
                     $productSnapshot,
+                    $managerUnitPriceValue,
+                    $finishedBatchId,
+                    $finishedBatchNumber,
+                    $finishedProductionDate,
+                    $finishedQuantityProduced,
+                    $finishedWorkers,
                     $existing['id']
                 ]
             );
@@ -411,8 +488,11 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
             $db->execute(
                 "INSERT INTO vehicle_inventory (
                     vehicle_id, warehouse_id, product_id, product_name, product_category,
-                    product_unit, product_unit_price, product_snapshot, quantity, last_updated_by
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    product_unit, product_unit_price, product_snapshot, manager_unit_price,
+                    finished_batch_id, finished_batch_number, finished_production_date,
+                    finished_quantity_produced, finished_workers,
+                    quantity, last_updated_by
+                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     $vehicleId,
                     $warehouseId,
@@ -422,6 +502,12 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
                     $productUnit,
                     $productUnitPrice,
                     $productSnapshot,
+                    $managerUnitPriceValue,
+                    $finishedBatchId,
+                    $finishedBatchNumber,
+                    $finishedProductionDate,
+                    $finishedQuantityProduced,
+                    $finishedWorkers,
                     $quantity,
                     $userId
                 ]
@@ -518,11 +604,23 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
             $batchNumber = isset($item['batch_number']) ? trim((string)$item['batch_number']) : null;
             $batchName = $batchNumber ?? 'بدون رقم تشغيلة';
             $productIdForInsert = isset($item['product_id']) ? (int)$item['product_id'] : 0;
+            $finishedMetadata = [];
 
             if ($batchId) {
                 $batchRow = $db->queryOne(
-                    "SELECT quantity_produced, product_id, batch_number, product_name 
-                     FROM finished_products WHERE id = ?",
+                    "SELECT 
+                        fp.quantity_produced,
+                        fp.product_id,
+                        fp.batch_number,
+                        fp.product_name,
+                        fp.production_date,
+                        fp.manager_unit_price,
+                        GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers_summary
+                     FROM finished_products fp
+                     LEFT JOIN batch_workers bw ON bw.batch_id = fp.batch_id
+                     LEFT JOIN users u ON bw.employee_id = u.id
+                     WHERE fp.id = ?
+                     GROUP BY fp.id",
                     [$batchId]
                 );
 
@@ -595,6 +693,15 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
                 if (!$batchNumber) {
                     $batchNumber = $batchRow['batch_number'] ?? null;
                 }
+
+                $finishedMetadata = [
+                    'batch_id' => $batchId,
+                    'batch_number' => $batchNumber ?? ($batchRow['batch_number'] ?? null),
+                    'production_date' => $batchRow['production_date'] ?? null,
+                    'quantity_produced' => $batchRow['quantity_produced'] ?? null,
+                    'manager_unit_price' => $batchRow['manager_unit_price'] ?? null,
+                    'workers' => $batchRow['workers_summary'] ?? null,
+                ];
             }
 
             if ($productIdForInsert <= 0) {
@@ -759,6 +866,20 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
             // دخول إلى المخزن الوجهة
             // إذا كان المخزن الوجهة سيارة، تحديث مخزون السيارة
             if ($toWarehouse && $toWarehouse['vehicle_id']) {
+                $unitPriceOverride = null;
+                if (!empty($finishedMetadata) && isset($finishedMetadata['manager_unit_price']) && $finishedMetadata['manager_unit_price'] !== null) {
+                    $unitPriceOverride = (float)$finishedMetadata['manager_unit_price'];
+                }
+                if ($unitPriceOverride === null) {
+                    $productPriceRow = $db->queryOne(
+                        "SELECT unit_price FROM products WHERE id = ?",
+                        [$item['product_id']]
+                    );
+                    if ($productPriceRow && $productPriceRow['unit_price'] !== null) {
+                        $unitPriceOverride = (float)$productPriceRow['unit_price'];
+                    }
+                }
+
                 $currentInventory = $db->queryOne(
                     "SELECT quantity FROM vehicle_inventory 
                      WHERE vehicle_id = ? AND product_id = ?",
@@ -766,7 +887,14 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
                 );
                 
                 $newQuantity = ($currentInventory['quantity'] ?? 0) + $item['quantity'];
-                $updateVehicleResult = updateVehicleInventory($toWarehouse['vehicle_id'], $item['product_id'], $newQuantity, $approvedBy);
+                $updateVehicleResult = updateVehicleInventory(
+                    $toWarehouse['vehicle_id'],
+                    $item['product_id'],
+                    $newQuantity,
+                    $approvedBy,
+                    $unitPriceOverride,
+                    $finishedMetadata
+                );
                 if (empty($updateVehicleResult['success'])) {
                     $message = $updateVehicleResult['message'] ?? 'تعذر تحديث مخزون السيارة الوجهة.';
                     throw new Exception($message);

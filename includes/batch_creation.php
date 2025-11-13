@@ -386,6 +386,7 @@ function batchCreationEnsureTables(PDO $pdo): void
             `production_date` date NOT NULL,
             `expiry_date` date DEFAULT NULL,
             `quantity_produced` int(11) NOT NULL DEFAULT 0,
+            `manager_unit_price` decimal(12,2) DEFAULT NULL,
             `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             KEY `batch_id` (`batch_id`),
