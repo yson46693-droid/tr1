@@ -335,6 +335,84 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         return $normalizedType !== '' ? $normalizedType : 'other';
     };
 
+    $normalizeUnitLabel = static function (?string $unit): string {
+        if (!is_string($unit)) {
+            return '';
+        }
+
+        $normalized = mb_strtolower(trim($unit), 'UTF-8');
+        if ($normalized === '') {
+            return '';
+        }
+
+        $map = [
+            'كجم' => 'kg',
+            'كغ' => 'kg',
+            'كيلوجرام' => 'kg',
+            'كيلوغرام' => 'kg',
+            'kg' => 'kg',
+            'kilogram' => 'kg',
+            'كيلو' => 'kg',
+            'جرام' => 'g',
+            'جم' => 'g',
+            'غرام' => 'g',
+            'g' => 'g',
+            'gram' => 'g',
+            'مل' => 'ml',
+            'مليلتر' => 'ml',
+            'ملي لتر' => 'ml',
+            'ml' => 'ml',
+            'ميليلتر' => 'ml',
+            'لتر' => 'l',
+            'lt' => 'l',
+            'لترًا' => 'l',
+            'liter' => 'l',
+            'l' => 'l',
+            'قطعة' => 'piece',
+            'قطعه' => 'piece',
+            'pcs' => 'piece',
+            'حبة' => 'piece',
+            'حبه' => 'piece',
+        ];
+
+        return $map[$normalized] ?? $normalized;
+    };
+
+    $convertQuantityUnit = static function (float $quantity, ?string $fromUnit, ?string $toUnit) use ($normalizeUnitLabel): float {
+        if ($quantity === 0.0) {
+            return 0.0;
+        }
+
+        $fromNormalized = $normalizeUnitLabel($fromUnit);
+        $toNormalized = $normalizeUnitLabel($toUnit);
+
+        if ($fromNormalized === '' || $toNormalized === '' || $fromNormalized === $toNormalized) {
+            return $quantity;
+        }
+
+        $weightFactors = [
+            'kg' => 1.0,
+            'g' => 0.001,
+        ];
+
+        $volumeFactors = [
+            'l' => 1.0,
+            'ml' => 0.001,
+        ];
+
+        if (isset($weightFactors[$fromNormalized]) && isset($weightFactors[$toNormalized])) {
+            $quantityInKg = $quantity * $weightFactors[$fromNormalized];
+            return $quantityInKg / $weightFactors[$toNormalized];
+        }
+
+        if (isset($volumeFactors[$fromNormalized]) && isset($volumeFactors[$toNormalized])) {
+            $quantityInLiters = $quantity * $volumeFactors[$fromNormalized];
+            return $quantityInLiters / $volumeFactors[$toNormalized];
+        }
+
+        return $quantity;
+    };
+
     $checkStock = static function (string $table, string $column, ?int $supplierId = null) use ($db): float {
         $sql = "SELECT SUM({$column}) AS total_quantity FROM {$table}";
         $params = [];
@@ -346,9 +424,10 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         return (float)($stockRow['total_quantity'] ?? 0);
     };
 
-    $resolveSpecialStock = static function (?string $materialType, ?int $supplierId, string $materialName) use ($db, $checkStock, $normalizeMaterialType): array {
+    $resolveSpecialStock = static function (?string $materialType, ?int $supplierId, string $materialName) use ($db, $checkStock, $normalizeMaterialType, $normalizeUnitLabel): array {
         $resolved = false;
         $availableQuantity = 0.0;
+        $availableUnit = '';
         $normalizedType = $normalizeMaterialType($materialType, $materialName);
 
         switch ($normalizedType) {
@@ -360,6 +439,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                     $column = ($normalizedType === 'honey_raw') ? 'raw_honey_quantity' : 'filtered_honey_quantity';
                     $availableQuantity = $checkStock('honey_stock', $column, $supplierId);
                     $resolved = true;
+                    $availableUnit = 'kg';
                 }
                 break;
             case 'olive_oil':
@@ -367,6 +447,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                 if (!empty($oliveTableExists)) {
                     $availableQuantity = $checkStock('olive_oil_stock', 'quantity', $supplierId);
                     $resolved = true;
+                    $availableUnit = 'l';
                 }
                 break;
             case 'beeswax':
@@ -374,6 +455,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                 if (!empty($beeswaxTableExists)) {
                     $availableQuantity = $checkStock('beeswax_stock', 'weight', $supplierId);
                     $resolved = true;
+                    $availableUnit = 'kg';
                 }
                 break;
             case 'derivatives':
@@ -381,6 +463,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                 if (!empty($derivativesTableExists)) {
                     $availableQuantity = $checkStock('derivatives_stock', 'weight', $supplierId);
                     $resolved = true;
+                    $availableUnit = 'kg';
                 }
                 break;
             case 'nuts':
@@ -388,6 +471,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                 if (!empty($nutsTableExists)) {
                     $availableQuantity = $checkStock('nuts_stock', 'quantity', $supplierId);
                     $resolved = true;
+                    $availableUnit = 'kg';
                 }
                 break;
             default:
@@ -402,6 +486,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                         );
                         $availableQuantity = (float)($stockRow['total_quantity'] ?? 0);
                         $resolved = true;
+                        $availableUnit = $normalizeUnitLabel(null);
                     }
                 }
                 break;
@@ -410,6 +495,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         return [
             'resolved' => $resolved,
             'quantity' => $availableQuantity,
+            'unit' => $availableUnit,
         ];
     };
 
@@ -428,6 +514,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         $materialTypeMeta = $rawDetail['type'] ?? null;
         $materialSupplierMeta = isset($rawDetail['supplier_id']) ? (int)$rawDetail['supplier_id'] : null;
         $materialUnit = $raw['unit'] ?? ($rawDetail['unit'] ?? 'كجم');
+        $materialUnitNormalized = $normalizeUnitLabel($materialUnit);
         
         // البحث عن المادة في جدول المنتجات
         $product = $db->queryOne(
@@ -441,7 +528,13 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
             if ($availableQuantity < $requiredQuantity) {
                 $specialStock = $resolveSpecialStock($materialTypeMeta, $materialSupplierMeta, $materialName);
                 if ($specialStock['resolved']) {
-                    $availableQuantity += $specialStock['quantity'];
+                    $availableFromSpecial = $specialStock['quantity'];
+                    $availableFromSpecial = $convertQuantityUnit(
+                        $availableFromSpecial,
+                        $specialStock['unit'] ?? '',
+                        $materialUnitNormalized
+                    );
+                    $availableQuantity += $availableFromSpecial;
                 }
             }
 
@@ -458,6 +551,11 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
             $specialStock = $resolveSpecialStock($materialTypeMeta, $materialSupplierMeta, $materialName);
             if ($specialStock['resolved']) {
                 $availableQuantity = $specialStock['quantity'];
+                $availableQuantity = $convertQuantityUnit(
+                    $availableQuantity,
+                    $specialStock['unit'] ?? '',
+                    $materialUnitNormalized
+                );
                 if ($availableQuantity < $requiredQuantity) {
                     $insufficientMaterials[] = [
                         'name' => $materialName,
@@ -2128,9 +2226,12 @@ if (!empty($unifiedTemplatesCheck)) {
     $unifiedTemplates = $db->query(
         "SELECT upt.*, 
                 'unified' as template_type,
-                u.full_name as creator_name
+                u.full_name AS creator_name,
+                ms.name AS main_supplier_name,
+                ms.phone AS main_supplier_phone
          FROM unified_product_templates upt
          LEFT JOIN users u ON upt.created_by = u.id
+         LEFT JOIN suppliers ms ON upt.main_supplier_id = ms.id
          WHERE upt.status = 'active'
          ORDER BY upt.created_at DESC"
     );
@@ -2158,7 +2259,7 @@ if (!empty($unifiedTemplatesCheck)) {
         $template['material_details'] = [];
         foreach ($rawMaterials as $material) {
             // ترجمة اسم المادة إلى العربية إن كانت قيمة معرفية
-            $materialNameArabic = $material['material_name'];
+            $materialNameArabic = trim((string)($material['material_name'] ?? ''));
             
             // قاموس للترجمات الشائعة
             $materialTranslations = [
@@ -2192,12 +2293,20 @@ if (!empty($unifiedTemplatesCheck)) {
                 $materialDisplay .= ' (' . $material['honey_variety'] . ')';
             }
             
+            $quantityValue = isset($material['quantity']) ? (float)$material['quantity'] : 0.0;
+            $unitValue = trim((string)($material['unit'] ?? ''));
+            if ($unitValue === '') {
+                $unitValue = 'وحدة';
+            }
+
+            $materialTypeValue = isset($material['material_type']) ? (string)$material['material_type'] : 'other';
+
             $template['material_details'][] = [
-                'type' => $materialDisplay,
-                'quantity' => $material['quantity'],
-                'unit' => $material['unit'],
+                'type' => $materialDisplay !== '' ? $materialDisplay : 'مادة خام',
+                'quantity' => $quantityValue,
+                'unit' => $unitValue,
                 'honey_variety' => $material['honey_variety'] ?? null,
-                'material_type' => $material['material_type']
+                'material_type' => $materialTypeValue
             ];
         }
 
@@ -2266,6 +2375,7 @@ if (!empty($unifiedTemplatesCheck)) {
 
         $template['packaging_details'] = $packagingDetails;
         $template['packaging_count'] = count($packagingDetails);
+        $template['materials_count'] = count($template['material_details']);
     }
     unset($template);
     
@@ -2283,21 +2393,30 @@ if (!empty($honeyTemplatesCheck)) {
     $honeyTemplates = $db->query(
         "SELECT pt.*, 
                 'honey' as template_type,
-                u.full_name as creator_name
+                u.full_name AS creator_name,
+                ms.name AS main_supplier_name,
+                ms.phone AS main_supplier_phone
          FROM product_templates pt
          LEFT JOIN users u ON pt.created_by = u.id
+         LEFT JOIN suppliers ms ON pt.main_supplier_id = ms.id
          WHERE pt.status = 'active'
          ORDER BY pt.created_at DESC"
     );
     foreach ($honeyTemplates as &$template) {
-        $template['material_details'] = [
+        $honeyQuantity = isset($template['honey_quantity']) ? (float)$template['honey_quantity'] : 0.0;
+        $materialDetails = [
             [
                 'type' => 'عسل',
-                'quantity' => $template['honey_quantity'],
+                'quantity' => $honeyQuantity,
                 'unit' => 'جرام',
-                'material_type' => 'honey'
+                'material_type' => 'honey',
+                'honey_variety' => $template['honey_variety'] ?? null
             ]
         ];
+        $template['material_details'] = $materialDetails;
+        $template['packaging_details'] = [];
+        $template['packaging_count'] = 0;
+        $template['materials_count'] = count($materialDetails);
     }
     unset($template);
     $templates = array_merge($templates, $honeyTemplates);
@@ -2307,21 +2426,29 @@ if (!empty($honeyTemplatesCheck)) {
 $oliveOilTemplatesCheck = $db->queryOne("SHOW TABLES LIKE 'olive_oil_product_templates'");
 if (!empty($oliveOilTemplatesCheck)) {
     $oliveOilTemplates = $db->query(
-        "SELECT id, product_name, olive_oil_quantity, created_at,
+        "SELECT id, product_name, olive_oil_quantity, created_at, updated_at,
                 'olive_oil' as template_type
          FROM olive_oil_product_templates
          ORDER BY created_at DESC"
     );
     foreach ($oliveOilTemplates as &$template) {
-        $template['material_details'] = [
+        $oliveQuantity = isset($template['olive_oil_quantity']) ? (float)$template['olive_oil_quantity'] : 0.0;
+        $materialDetails = [
             [
                 'type' => 'زيت زيتون',
-                'quantity' => $template['olive_oil_quantity'],
+                'quantity' => $oliveQuantity,
                 'unit' => 'لتر',
-                'material_type' => 'olive_oil'
+                'material_type' => 'olive_oil',
+                'honey_variety' => null
             ]
         ];
+        $template['material_details'] = $materialDetails;
+        $template['packaging_details'] = [];
+        $template['packaging_count'] = 0;
+        $template['materials_count'] = count($materialDetails);
         $template['creator_name'] = '';
+        $template['main_supplier_name'] = $template['main_supplier_name'] ?? '';
+        $template['main_supplier_phone'] = $template['main_supplier_phone'] ?? '';
     }
     unset($template);
     $templates = array_merge($templates, $oliveOilTemplates);
@@ -2355,7 +2482,7 @@ if (!empty($beeswaxTemplatesCheck)) {
 $derivativesTemplatesCheck = $db->queryOne("SHOW TABLES LIKE 'derivatives_product_templates'");
 if (!empty($derivativesTemplatesCheck)) {
     $derivativesTemplates = $db->query(
-        "SELECT id, product_name, derivative_type, derivative_weight, created_at,
+        "SELECT id, product_name, derivative_type, derivative_weight, created_at, updated_at,
                 'derivatives' as template_type
          FROM derivatives_product_templates
          ORDER BY created_at DESC"
@@ -2373,15 +2500,23 @@ if (!empty($derivativesTemplatesCheck)) {
             $derivativeTypeArabic = $derivativeTranslations[$derivativeTypeArabic];
         }
         
-        $template['material_details'] = [
+        $derivativeQuantity = isset($template['derivative_weight']) ? (float)$template['derivative_weight'] : 0.0;
+        $materialDetails = [
             [
                 'type' => $derivativeTypeArabic,
-                'quantity' => $template['derivative_weight'],
+                'quantity' => $derivativeQuantity,
                 'unit' => 'كجم',
-                'material_type' => 'derivatives'
+                'material_type' => 'derivatives',
+                'honey_variety' => null
             ]
         ];
+        $template['material_details'] = $materialDetails;
+        $template['packaging_details'] = [];
+        $template['packaging_count'] = 0;
+        $template['materials_count'] = count($materialDetails);
         $template['creator_name'] = '';
+        $template['main_supplier_name'] = $template['main_supplier_name'] ?? '';
+        $template['main_supplier_phone'] = $template['main_supplier_phone'] ?? '';
     }
     unset($template);
     $templates = array_merge($templates, $derivativesTemplates);

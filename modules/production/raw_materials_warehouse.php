@@ -1941,9 +1941,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'details' => 'إضافة زيت زيتون خام إلى المخزون',
                         'recorded_by' => $currentUser['id'] ?? null,
                     ]);
-                    
-                    $success = 'تم إضافة زيت الزيتون بنجاح';
-                    echo '<script>window.location.href = "' . $dashboardUrl . '?page=raw_materials_warehouse&section=olive_oil";</script>';
+
+                    preventDuplicateSubmission(
+                        'تم إضافة زيت الزيتون بنجاح',
+                        ['page' => 'raw_materials_warehouse', 'section' => 'olive_oil'],
+                        null,
+                        $dashboardSlug
+                    );
                 }
             } catch (Exception $e) {
                 $error = 'حدث خطأ أثناء إضافة المخزون: ' . $e->getMessage();
@@ -2011,8 +2015,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'recorded_by' => $currentUser['id'] ?? null,
                 ]);
                 
-                $success = 'تم إضافة شمع العسل بنجاح';
-                echo '<script>window.location.href = "' . $dashboardUrl . '?page=raw_materials_warehouse&section=beeswax";</script>';
+                preventDuplicateSubmission(
+                    'تم إضافة شمع العسل بنجاح',
+                    ['page' => 'raw_materials_warehouse', 'section' => 'beeswax'],
+                    null,
+                    $dashboardSlug
+                );
             }
         }
         
@@ -2079,8 +2087,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'recorded_by' => $currentUser['id'] ?? null,
                 ]);
                 
-                $success = 'تم إضافة المشتق بنجاح';
-                echo '<script>window.location.href = "' . $dashboardUrl . '?page=raw_materials_warehouse&section=derivatives";</script>';
+                preventDuplicateSubmission(
+                    'تم إضافة المشتق بنجاح',
+                    ['page' => 'raw_materials_warehouse', 'section' => 'derivatives'],
+                    null,
+                    $dashboardSlug
+                );
             }
         }
         
@@ -2155,8 +2167,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'recorded_by' => $currentUser['id'] ?? null,
                 ]);
                 
-                $success = 'تم إضافة المكسرات بنجاح';
-                echo '<script>window.location.href = "' . $dashboardUrl . '?page=raw_materials_warehouse&section=nuts";</script>';
+                preventDuplicateSubmission(
+                    'تم إضافة المكسرات بنجاح',
+                    ['page' => 'raw_materials_warehouse', 'section' => 'nuts'],
+                    null,
+                    $dashboardSlug
+                );
             }
         }
         
@@ -2242,8 +2258,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                     logAudit($currentUser['id'], 'create_mixed_nuts', 'mixed_nuts', $mixedNutsId, null, ['name' => $batchName, 'quantity' => $totalQuantity]);
                     
-                    $success = 'تم إنشاء المكسرات المشكلة بنجاح';
-                    echo '<script>window.location.href = "' . $dashboardUrl . '?page=raw_materials_warehouse&section=nuts";</script>';
+                    preventDuplicateSubmission(
+                        'تم إنشاء المكسرات المشكلة بنجاح',
+                        ['page' => 'raw_materials_warehouse', 'section' => 'nuts'],
+                        null,
+                        $dashboardSlug
+                    );
                     
                 } catch (Exception $e) {
                     $db->rollBack();
