@@ -17,6 +17,8 @@ require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
+$approvalsEntityColumn = getApprovalsEntityColumn();
+
 $currentUser = getCurrentUser();
 $db = db();
 
@@ -53,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($transferId > 0) {
             $approval = $db->queryOne(
-                "SELECT id FROM approvals WHERE type = 'warehouse_transfer' AND entity_id = ? AND status = 'pending'",
+                "SELECT id FROM approvals WHERE type = 'warehouse_transfer' AND `{$approvalsEntityColumn}` = ? AND status = 'pending'",
                 [$transferId]
             );
             
@@ -79,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($transferId > 0 && !empty($rejectionReason)) {
             $approval = $db->queryOne(
-                "SELECT id FROM approvals WHERE type = 'warehouse_transfer' AND entity_id = ? AND status = 'pending'",
+                "SELECT id FROM approvals WHERE type = 'warehouse_transfer' AND `{$approvalsEntityColumn}` = ? AND status = 'pending'",
                 [$transferId]
             );
             

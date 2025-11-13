@@ -13,17 +13,57 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/notifications.php';
 require_once __DIR__ . '/audit_log.php';
 
+if (!function_exists('getApprovalsEntityColumn')) {
+    /**
+     * تحديد اسم عمود هوية الكيان في جدول الموافقات (لدعم قواعد بيانات أقدم).
+     */
+    function getApprovalsEntityColumn(): string
+    {
+        static $column = null;
+
+        if ($column !== null) {
+            return $column;
+        }
+
+        try {
+            $db = db();
+        } catch (Throwable $e) {
+            $column = 'entity_id';
+            return $column;
+        }
+
+        $candidates = ['entity_id', 'reference_id', 'record_id', 'request_id'];
+
+        foreach ($candidates as $candidate) {
+            try {
+                $result = $db->queryOne("SHOW COLUMNS FROM approvals LIKE ?", [$candidate]);
+            } catch (Throwable $columnError) {
+                $result = null;
+            }
+
+            if (!empty($result)) {
+                $column = $candidate;
+                return $column;
+            }
+        }
+
+        $column = 'entity_id';
+        return $column;
+    }
+}
+
 /**
  * طلب موافقة
  */
 function requestApproval($type, $entityId, $requestedBy, $notes = null) {
     try {
         $db = db();
+        $entityColumn = getApprovalsEntityColumn();
         
         // التحقق من وجود موافقة معلقة
         $existing = $db->queryOne(
             "SELECT id FROM approvals 
-             WHERE type = ? AND entity_id = ? AND status = 'pending'",
+             WHERE type = ? AND {$entityColumn} = ? AND status = 'pending'",
             [$type, $entityId]
         );
         
@@ -32,7 +72,7 @@ function requestApproval($type, $entityId, $requestedBy, $notes = null) {
         }
         
         // إنشاء موافقة جديدة
-        $sql = "INSERT INTO approvals (type, entity_id, requested_by, status, notes) 
+        $sql = "INSERT INTO approvals (type, {$entityColumn}, requested_by, status, notes) 
                 VALUES (?, ?, ?, 'pending', ?)";
         
         $result = $db->execute($sql, [
@@ -74,9 +114,15 @@ function approveRequest($approvalId, $approvedBy, $notes = null) {
             "SELECT * FROM approvals WHERE id = ? AND status = 'pending'",
             [$approvalId]
         );
+        $entityColumn = getApprovalsEntityColumn();
         
         if (!$approval) {
             return ['success' => false, 'message' => 'الموافقة غير موجودة أو تمت الموافقة عليها مسبقاً'];
+        }
+
+        $entityIdentifier = $approval[$entityColumn] ?? null;
+        if ($entityIdentifier === null) {
+            return ['success' => false, 'message' => 'تعذر تحديد الكيان المرتبط بطلب الموافقة.'];
         }
         
         // تحديث حالة الموافقة
@@ -87,7 +133,7 @@ function approveRequest($approvalId, $approvedBy, $notes = null) {
         );
         
         // تحديث حالة الكيان
-        updateEntityStatus($approval['type'], $approval['entity_id'], 'approved', $approvedBy);
+        updateEntityStatus($approval['type'], $entityIdentifier, 'approved', $approvedBy);
         
         // إرسال إشعار للمستخدم الذي طلب الموافقة
         createNotification(
@@ -95,7 +141,7 @@ function approveRequest($approvalId, $approvedBy, $notes = null) {
             'تمت الموافقة',
             "تمت الموافقة على طلبك من نوع {$approval['type']}",
             'success',
-            getEntityLink($approval['type'], $approval['entity_id'])
+            getEntityLink($approval['type'], $entityIdentifier)
         );
         
         // تسجيل سجل التدقيق
@@ -121,9 +167,15 @@ function rejectRequest($approvalId, $approvedBy, $rejectionReason) {
             "SELECT * FROM approvals WHERE id = ? AND status = 'pending'",
             [$approvalId]
         );
+        $entityColumn = getApprovalsEntityColumn();
         
         if (!$approval) {
             return ['success' => false, 'message' => 'الموافقة غير موجودة أو تمت الموافقة عليها مسبقاً'];
+        }
+
+        $entityIdentifier = $approval[$entityColumn] ?? null;
+        if ($entityIdentifier === null) {
+            return ['success' => false, 'message' => 'تعذر تحديد الكيان المرتبط بطلب الموافقة.'];
         }
         
         // تحديث حالة الموافقة
@@ -134,7 +186,7 @@ function rejectRequest($approvalId, $approvedBy, $rejectionReason) {
         );
         
         // تحديث حالة الكيان
-        updateEntityStatus($approval['type'], $approval['entity_id'], 'rejected', $approvedBy);
+        updateEntityStatus($approval['type'], $entityIdentifier, 'rejected', $approvedBy);
         
         // إرسال إشعار للمستخدم الذي طلب الموافقة
         createNotification(
@@ -142,7 +194,7 @@ function rejectRequest($approvalId, $approvedBy, $rejectionReason) {
             'تم رفض الطلب',
             "تم رفض طلبك من نوع {$approval['type']}. السبب: {$rejectionReason}",
             'error',
-            getEntityLink($approval['type'], $approval['entity_id'])
+            getEntityLink($approval['type'], $entityIdentifier)
         );
         
         // تسجيل سجل التدقيق
@@ -204,7 +256,11 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
                 // entityId هنا هو approval_id وليس salary_id
                 $approval = $db->queryOne("SELECT * FROM approvals WHERE id = ?", [$entityId]);
                 if ($approval) {
-                    $salaryId = $approval['entity_id'];
+                    $entityColumnName = getApprovalsEntityColumn();
+                    $salaryId = $approval[$entityColumnName] ?? null;
+                    if ($salaryId === null) {
+                        break;
+                    }
                     
                     // استخراج بيانات التعديل من notes
                     $modificationData = null;
@@ -271,8 +327,9 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
                     throw new Exception($result['message'] ?? 'تعذر الموافقة على طلب النقل.');
                 }
             } elseif ($status === 'rejected') {
+                $entityColumnName = getApprovalsEntityColumn();
                 $approvalRow = $db->queryOne(
-                    "SELECT rejection_reason FROM approvals WHERE type = 'warehouse_transfer' AND entity_id = ? ORDER BY updated_at DESC LIMIT 1",
+                    "SELECT rejection_reason FROM approvals WHERE type = 'warehouse_transfer' AND `{$entityColumnName}` = ? ORDER BY updated_at DESC LIMIT 1",
                     [$entityId]
                 );
                 $reason = $approvalRow['rejection_reason'] ?? 'تم رفض طلب النقل.';

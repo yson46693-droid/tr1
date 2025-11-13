@@ -461,6 +461,7 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
 function approveWarehouseTransfer($transferId, $approvedBy = null) {
     try {
         $db = db();
+        $approvalsEntityColumn = getApprovalsEntityColumn();
         
         if ($approvedBy === null) {
             require_once __DIR__ . '/auth.php';
@@ -569,7 +570,7 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
         $db->execute(
             "UPDATE approvals 
              SET status = 'approved', approved_by = ?, updated_at = NOW() 
-             WHERE type = 'warehouse_transfer' AND entity_id = ? AND status = 'pending'",
+             WHERE type = 'warehouse_transfer' AND `{$approvalsEntityColumn}` = ? AND status = 'pending'",
             [$approvedBy, $transferId]
         );
         
@@ -594,6 +595,7 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
 function rejectWarehouseTransfer($transferId, $rejectionReason, $rejectedBy = null) {
     try {
         $db = db();
+        $approvalsEntityColumn = getApprovalsEntityColumn();
         
         if ($rejectedBy === null) {
             require_once __DIR__ . '/auth.php';
@@ -617,7 +619,7 @@ function rejectWarehouseTransfer($transferId, $rejectionReason, $rejectedBy = nu
         $db->execute(
             "UPDATE approvals 
              SET status = 'rejected', approved_by = ?, rejection_reason = ?, updated_at = NOW() 
-             WHERE type = 'warehouse_transfer' AND entity_id = ? AND status = 'pending'",
+             WHERE type = 'warehouse_transfer' AND `{$approvalsEntityColumn}` = ? AND status = 'pending'",
             [$rejectedBy, $rejectionReason, $transferId]
         );
         

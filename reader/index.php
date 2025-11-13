@@ -664,6 +664,13 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             'pdf417'
         ];
 
+        const supplierRoleLabels = {
+            raw_material: 'مواد خام',
+            packaging: 'تعبئة',
+            template_main: 'مورد أساسي',
+            template_extra: 'مورد إضافي',
+        };
+
         let currentStream = null;
         let scanning = false;
         let detectionCooldown = false;
@@ -696,6 +703,26 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 return Math.round(numeric).toString();
             }
             return numeric.toFixed(3).replace(/\.?0+$/, '');
+        }
+
+        function formatSupplierRoles(entry) {
+            if (!entry) {
+                return '';
+            }
+            const rawRoles = Array.isArray(entry.roles) && entry.roles.length
+                ? entry.roles
+                : (entry.role ? String(entry.role).split(',') : []);
+            const normalizedRoles = rawRoles
+                .map(role => (role || '').trim())
+                .filter(Boolean);
+
+            if (!normalizedRoles.length) {
+                return '';
+            }
+
+            return normalizedRoles
+                .map(role => supplierRoleLabels[role] || role)
+                .join('، ');
         }
 
         function formatMaterialEntry(entry, fallbackName) {
@@ -768,27 +795,38 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             resultsContainer.hidden = false;
             feedbackArea.innerHTML = '';
 
+            const quantityLabel = formatQuantity(data.quantity_produced ?? data.quantity);
             const summaryRows = [
+                ['اسم المنتج', data.product_name ?? '—'],
                 ['رقم التشغيلة', data.batch_number ?? '—'],
-                ['المنتج', data.product_name ?? '—'],
-                ['الفئة', data.product_category ?? '—'],
-                ['التاريخ', data.production_date ?? '—'],
-                ['الكمية', data.quantity ?? '—'],
-                ['الحالة', data.status_label ?? data.status ?? '—'],
+                ['تاريخ الإنتاج', data.production_date ?? '—'],
+                ['الكمية المنتجة', quantityLabel ?? data.quantity_produced ?? data.quantity ?? '—'],
             ];
 
-            if (data.quantity_produced && data.quantity_produced !== data.quantity) {
-                summaryRows.push(['الكمية المنتجة', data.quantity_produced]);
+            const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
+            const suppliersText = suppliers
+                .map(supplier => {
+                    const name = supplier?.name ?? 'مورد';
+                    const rolesLabel = formatSupplierRoles(supplier);
+                    return rolesLabel ? `${name} (${rolesLabel})` : name;
+                })
+                .filter(Boolean)
+                .join('، ');
+
+            if (suppliersText) {
+                summaryRows.push(['الموردون المرتبطون', suppliersText]);
             }
-            if (data.honey_supplier_name) {
-                summaryRows.push(['مورد العسل', data.honey_supplier_name]);
+
+            const workers = Array.isArray(data.workers) ? data.workers : [];
+            const workersText = workers
+                .map(worker => worker?.full_name || worker?.username || 'عامل إنتاج')
+                .filter(Boolean)
+                .join('، ');
+
+            if (workersText) {
+                summaryRows.push(['طاقم الإنتاج', workersText]);
             }
-            if (data.packaging_supplier_name) {
-                summaryRows.push(['مورد التعبئة', data.packaging_supplier_name]);
-            }
-            if (data.created_by_name) {
-                summaryRows.push(['تم الإنشاء بواسطة', data.created_by_name]);
-            }
+
             if (data.notes) {
                 summaryRows.push(['ملاحظات', data.notes]);
             }
@@ -863,13 +901,11 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                     <h2>الموردون المرتبطون</h2>
                     <table>
                         ${data.suppliers.map(supplier => {
-                            const roles = Array.isArray(supplier.roles) && supplier.roles.length
-                                ? supplier.roles.join('، ')
-                                : (supplier.role ?? '—');
+                            const roles = formatSupplierRoles(supplier);
                             return `
                                 <tr>
                                     <th>${supplier.name ?? '—'}</th>
-                                    <td>${roles}</td>
+                                    <td>${roles || '—'}</td>
                                 </tr>
                             `;
                         }).join('')}

@@ -469,7 +469,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'batch_id' => $item['batch_id'] ?? null,
                             'batch_number' => $item['batch_number'] ?? null,
                             'quantity' => $item['quantity'],
-                            'notes' => $item['notes'] ?? null
+                            'notes' => $item['notes'] ?? null,
                         ];
                     }, $transferItems),
                     $reason !== '' ? $reason : null,
@@ -478,11 +478,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
                 if (!empty($result['success'])) {
-                    $_SESSION[$sessionSuccessKey] = sprintf(
-                        'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
-                        $result['transfer_number'] ?? '#'
-                    );
-                    productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+                    $isManagerInitiator = isset($currentUser['role']) && $currentUser['role'] === 'manager';
+                    $transferNumber = $result['transfer_number'] ?? '#';
+
+                    if ($isManagerInitiator && !empty($result['transfer_id'])) {
+                        try {
+                            foreach ($transferItems as $item) {
+                                $productId = isset($item['product_id']) ? (int)$item['product_id'] : null;
+                                $quantity = (float)($item['quantity'] ?? 0);
+
+                                if ($quantity <= 0) {
+                                    continue;
+                                }
+
+                                if ($productId) {
+                                    $db->execute(
+                                        "UPDATE products SET quantity = GREATEST(quantity - ?, 0) WHERE id = ?",
+                                        [$quantity, $productId]
+                                    );
+                                }
+
+                                $transferItemParams = [
+                                    $result['transfer_id'],
+                                    $productId,
+                                    $item['batch_id'] ?? null,
+                                    $item['batch_number'] ?? null,
+                                    $quantity,
+                                    $item['notes'] ?? null,
+                                ];
+
+                                $db->execute(
+                                    "INSERT INTO warehouse_transfer_items (transfer_id, product_id, batch_id, batch_number, quantity, notes)
+                                     VALUES (?, ?, ?, ?, ?, ?)",
+                                    $transferItemParams
+                                );
+                            }
+
+                            $db->execute(
+                                "UPDATE warehouse_transfers
+                                 SET status = 'completed',
+                                     approved_by = ?,
+                                     approved_at = NOW(),
+                                     notes = CONCAT(IFNULL(notes, ''), '\\n(الموافقة من نفس المدير المُنشئ)')
+                                 WHERE id = ?",
+                                [$currentUser['id'] ?? null, $result['transfer_id']]
+                            );
+
+                            if (!empty($currentUser['id'])) {
+                                logAudit(
+                                    $currentUser['id'],
+                                    'warehouse_transfer_auto_approved',
+                                    'warehouse_transfer',
+                                    $result['transfer_id'],
+                                    null,
+                                    [
+                                        'transfer_number' => $transferNumber,
+                                        'auto_approved' => true,
+                                        'initiator_role' => $currentUser['role'] ?? null,
+                                    ]
+                                );
+                            }
+
+                            $_SESSION[$sessionSuccessKey] = sprintf(
+                                'تم تنفيذ نقل المنتجات رقم %s بواسطة المدير بنجاح دون الحاجة للموافقة.',
+                                $transferNumber
+                            );
+                            productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+                        } catch (Throwable $autoApprovalError) {
+                            error_log('final_products auto-approval transfer error: ' . $autoApprovalError->getMessage());
+                            $_SESSION[$sessionErrorKey] = sprintf(
+                                'تم حفظ طلب النقل رقم %s لكن تعذر تنفيذه تلقائياً. يرجى المراجعة اليدوية.',
+                                $transferNumber
+                            );
+                            productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+                        }
+                    } else {
+                        $_SESSION[$sessionSuccessKey] = sprintf(
+                            'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
+                            $transferNumber
+                        );
+                        productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+                    }
                 }
 
                 $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
@@ -1672,17 +1748,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
 <script>
     const batchDetailsEndpoint = <?php echo json_encode(getRelativeUrl('api/production/get_batch_details.php')); ?>;
-    const statusLabelsMap = {
-        'in_production': 'قيد الإنتاج',
-        'completed': 'مكتملة',
-        'archived': 'مؤرشفة',
-        'cancelled': 'ملغاة',
-        'in_stock': 'في المخزون',
-        'sold': 'مباعة',
-        'expired': 'منتهية الصلاحية',
-        'approved': 'موافق عليها',
-        'pending': 'معلقة',
-        'rejected': 'مرفوضة'
+    const supplierRoleLabels = {
+        raw_material: 'مواد خام',
+        packaging: 'تعبئة',
+        template_main: 'مورد أساسي',
+        template_extra: 'مورد إضافي',
     };
     let batchDetailsIsLoading = false;
     const batchDetailsRetryDelay = 2000;

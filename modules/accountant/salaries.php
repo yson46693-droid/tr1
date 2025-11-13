@@ -21,6 +21,7 @@ requireAnyRole(['accountant', 'manager']);
 
 $currentUser = getCurrentUser();
 $db = db();
+$approvalsEntityColumn = getApprovalsEntityColumn();
 $error = '';
 $success = '';
 
@@ -178,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // التحقق من وجود موافقة معلقة
                     $pendingApproval = $db->queryOne(
                         "SELECT id FROM approvals 
-                         WHERE type = 'salary_modification' AND entity_id = ? AND status = 'pending'",
+                         WHERE type = 'salary_modification' AND `{$approvalsEntityColumn}` = ? AND status = 'pending'",
                         [$salaryId]
                     );
                     
@@ -550,14 +551,7 @@ $salaries = array_values(array_filter($salaries, function ($salary) {
 $pendingModifications = [];
 if ($currentUser['role'] === 'manager') {
     try {
-        $entityColumnCheck = $db->queryOne("SHOW COLUMNS FROM approvals LIKE 'entity_id'");
-        $referenceColumnCheck = $db->queryOne("SHOW COLUMNS FROM approvals LIKE 'reference_id'");
-        
-        $entityColumn = !empty($entityColumnCheck) ? 'entity_id' : (!empty($referenceColumnCheck) ? 'reference_id' : 'entity_id');
-        
-        if (!in_array($entityColumn, ['entity_id', 'reference_id'])) {
-            $entityColumn = 'entity_id';
-        }
+        $entityColumn = getApprovalsEntityColumn();
         
         $sql = "SELECT a.*, s.user_id, u.full_name, u.username
                 FROM approvals a
