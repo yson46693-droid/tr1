@@ -341,7 +341,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (empty($transferErrors)) {
-                $productIds = array_values(array_unique(array_column($transferItems, 'product_id')));
+                $productIds = array_values(array_filter(
+                    array_unique(array_column($transferItems, 'product_id')),
+                    static function ($value) {
+                        return is_numeric($value) && (int)$value > 0;
+                    }
+                ));
+
+                $stockMap = [];
 
                 if (!empty($productIds)) {
                     $placeholders = implode(',', array_fill(0, count($productIds), '?'));
@@ -349,7 +356,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         "SELECT id, name, quantity FROM products WHERE id IN ($placeholders) AND (product_type IS NULL OR product_type = 'internal')",
                         $productIds
                     );
-                    $stockMap = [];
 
                     foreach ($stockRows as $row) {
                         $stockMap[intval($row['id'])] = [
@@ -357,21 +363,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'name' => $row['name'] ?? ''
                         ];
                     }
+                }
 
-                    foreach ($transferItems as $transferItem) {
-                        $productId = $transferItem['product_id'];
-                        if (!isset($stockMap[$productId])) {
-                            $transferErrors[] = 'المنتج المحدد غير موجود في المخزن الرئيسي.';
+                foreach ($transferItems as $transferItem) {
+                    $productId = isset($transferItem['product_id']) ? (int)$transferItem['product_id'] : 0;
+                    $batchId = isset($transferItem['batch_id']) ? (int)$transferItem['batch_id'] : 0;
+
+                    if ($productId <= 0) {
+                        if ($batchId <= 0) {
+                            $transferErrors[] = 'المنتج المحدد غير صالح للنقل.';
                             break;
                         }
 
-                        if ($transferItem['quantity'] > $stockMap[$productId]['quantity']) {
-                            $transferErrors[] = sprintf(
-                                'الكمية المطلوبة للمنتج "%s" غير متاحة في المخزون الحالي.',
-                                $stockMap[$productId]['name']
-                            );
-                            break;
-                        }
+                        // سيتم التحقق من كميات التشغيلات لاحقاً أثناء إنشاء طلب النقل
+                        continue;
+                    }
+
+                    if (!isset($stockMap[$productId])) {
+                        $transferErrors[] = 'المنتج المحدد غير موجود في المخزن الرئيسي.';
+                        break;
+                    }
+
+                    if ($transferItem['quantity'] > $stockMap[$productId]['quantity']) {
+                        $transferErrors[] = sprintf(
+                            'الكمية المطلوبة للمنتج "%s" غير متاحة في المخزون الحالي.',
+                            $stockMap[$productId]['name']
+                        );
+                        break;
                     }
                 }
             }
@@ -1597,7 +1615,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 
 <script>
-    const batchDetailsEndpoint = <?php echo json_encode(getRelativeUrl('reader/api.php')); ?>;
+    const batchDetailsEndpoint = <?php echo json_encode(getRelativeUrl('api/production/get_batch_details.php')); ?>;
     const statusLabelsMap = {
         'in_production': 'قيد الإنتاج',
         'completed': 'مكتملة',
