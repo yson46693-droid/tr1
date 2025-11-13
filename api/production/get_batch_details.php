@@ -212,7 +212,7 @@ try {
 
     $suppliersRows = [];
     $supplierNameMap = [];
-    if ($batchId > 0 && readerTableExists($db, 'batch_suppliers')) {
+    if ($batchId > 0) {
         $suppliersHaveStoredNames = readerColumnExists($db, 'batch_suppliers', 'supplier_name');
         $selectSupplierColumns = ['bs.id', 'bs.supplier_id', 'bs.role'];
         if ($suppliersHaveStoredNames) {
@@ -220,12 +220,30 @@ try {
         }
         try {
             $suppliersRows = $db->query(
-                "SELECT " . implode(', ', $selectSupplierColumns) . " FROM batch_suppliers bs WHERE bs.batch_id = ?",
+                "SELECT " . implode(', ', $selectSupplierColumns) . "
+                 FROM batch_suppliers bs
+                 WHERE bs.batch_id = ?",
                 [$batchId]
             );
         } catch (Throwable $supplierError) {
             error_log('get_batch_details suppliers query error: ' . $supplierError->getMessage());
             $suppliersRows = [];
+        }
+    }
+
+    if (empty($suppliersRows) && !empty($batchNumberRecord['all_suppliers'])) {
+        $decodedSuppliers = json_decode((string) $batchNumberRecord['all_suppliers'], true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decodedSuppliers)) {
+            foreach ($decodedSuppliers as $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $suppliersRows[] = [
+                    'supplier_id' => isset($entry['id']) ? (int) $entry['id'] : null,
+                    'supplier_name' => $entry['name'] ?? ($entry['material'] ?? null),
+                    'role' => $entry['context'] ?? ($entry['role'] ?? null),
+                ];
+            }
         }
     }
 
@@ -273,7 +291,7 @@ try {
     $packagingSupplierName = $lookupSupplierName($packagingSupplierId);
 
     $packagingRows = [];
-    if ($batchId > 0 && readerTableExists($db, 'batch_packaging')) {
+    if ($batchId > 0) {
         try {
             $packagingRows = $db->query(
                 "SELECT id, packaging_material_id, packaging_name, unit, supplier_id, quantity_used
@@ -304,7 +322,7 @@ try {
     }, $packagingRows);
 
     $rawRows = [];
-    if ($batchId > 0 && readerTableExists($db, 'batch_raw_materials')) {
+    if ($batchId > 0) {
         try {
             $rawRows = $db->query(
                 "SELECT id, raw_material_id, material_name, unit, supplier_id, quantity_used
@@ -335,7 +353,7 @@ try {
     }, $rawRows);
 
     $workersFormatted = [];
-    if ($batchId > 0 && readerTableExists($db, 'batch_workers')) {
+    if ($batchId > 0) {
         $workersHaveStoredNames = readerColumnExists($db, 'batch_workers', 'worker_name');
         $selectWorkerColumns = ['id', 'employee_id'];
         if ($workersHaveStoredNames) {

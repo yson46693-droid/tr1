@@ -32,7 +32,7 @@ if (!function_exists('getApprovalsEntityColumn')) {
             return $column;
         }
 
-        $candidates = ['entity_id', 'reference_id', 'record_id', 'request_id'];
+        $candidates = ['entity_id', 'reference_id', 'record_id', 'request_id', 'approval_entity', 'entity_ref'];
 
         foreach ($candidates as $candidate) {
             try {
@@ -43,6 +43,35 @@ if (!function_exists('getApprovalsEntityColumn')) {
 
             if (!empty($result)) {
                 $column = $candidate;
+                return $column;
+            }
+        }
+
+        // البحث عن أي عمود ينتهي بـ _id باستثناء الأعمدة المعروفة
+        try {
+            $columns = $db->query("SHOW COLUMNS FROM approvals") ?? [];
+        } catch (Throwable $columnsError) {
+            $columns = [];
+        }
+
+        $exclude = [
+            'id',
+            'requested_by',
+            'approved_by',
+            'created_by',
+            'user_id',
+            'manager_id',
+            'accountant_id',
+        ];
+
+        foreach ($columns as $columnInfo) {
+            $name = $columnInfo['Field'] ?? '';
+            $lower = strtolower($name);
+            if (in_array($lower, $exclude, true)) {
+                continue;
+            }
+            if (substr($lower, -3) === '_id') {
+                $column = $name;
                 return $column;
             }
         }
