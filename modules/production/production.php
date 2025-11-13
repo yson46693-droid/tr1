@@ -350,24 +350,24 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
             'كغ' => 'kg',
             'كيلوجرام' => 'kg',
             'كيلوغرام' => 'kg',
+            'كيلو' => 'kg',
             'kg' => 'kg',
             'kilogram' => 'kg',
-            'كيلو' => 'kg',
-            'جرام' => 'g',
-            'جم' => 'g',
-            'غرام' => 'g',
-            'g' => 'g',
-            'gram' => 'g',
-            'مل' => 'ml',
-            'مليلتر' => 'ml',
-            'ملي لتر' => 'ml',
-            'ml' => 'ml',
-            'ميليلتر' => 'ml',
-            'لتر' => 'l',
-            'lt' => 'l',
-            'لترًا' => 'l',
-            'liter' => 'l',
-            'l' => 'l',
+            'جرام' => 'kg',
+            'جم' => 'kg',
+            'غرام' => 'kg',
+            'g' => 'kg',
+            'gram' => 'kg',
+            'لتر' => 'kg',
+            'لترًا' => 'kg',
+            'lt' => 'kg',
+            'liter' => 'kg',
+            'l' => 'kg',
+            'مل' => 'kg',
+            'مليلتر' => 'kg',
+            'ملي لتر' => 'kg',
+            'ميليلتر' => 'kg',
+            'ml' => 'kg',
             'قطعة' => 'piece',
             'قطعه' => 'piece',
             'pcs' => 'piece',
@@ -383,33 +383,65 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
             return 0.0;
         }
 
+        $rawFrom = '';
+        if (is_string($fromUnit)) {
+            $rawFrom = mb_strtolower(trim($fromUnit), 'UTF-8');
+        }
+
+        $rawTo = '';
+        if (is_string($toUnit)) {
+            $rawTo = mb_strtolower(trim($toUnit), 'UTF-8');
+        }
+
         $fromNormalized = $normalizeUnitLabel($fromUnit);
         $toNormalized = $normalizeUnitLabel($toUnit);
 
-        if ($fromNormalized === '' || $toNormalized === '' || $fromNormalized === $toNormalized) {
-            return $quantity;
+        if ($fromNormalized === '') {
+            $fromNormalized = 'kg';
+        }
+        if ($toNormalized === '') {
+            $toNormalized = 'kg';
         }
 
-        $weightFactors = [
+        // Legacy factors to normalize historical values to kilograms.
+        $legacyFactors = [
+            '' => 1.0,
+            'كجم' => 1.0,
+            'كغ' => 1.0,
+            'كيلوجرام' => 1.0,
+            'كيلوغرام' => 1.0,
+            'كيلو' => 1.0,
             'kg' => 1.0,
+            'kilogram' => 1.0,
+            'جرام' => 0.001,
+            'جم' => 0.001,
+            'غرام' => 0.001,
             'g' => 0.001,
-        ];
-
-        $volumeFactors = [
+            'gram' => 0.001,
+            'لتر' => 1.0,
+            'لترًا' => 1.0,
+            'lt' => 1.0,
+            'liter' => 1.0,
             'l' => 1.0,
+            'مل' => 0.001,
+            'مليلتر' => 0.001,
+            'ملي لتر' => 0.001,
+            'ميليلتر' => 0.001,
             'ml' => 0.001,
         ];
 
-        if (isset($weightFactors[$fromNormalized]) && isset($weightFactors[$toNormalized])) {
-            $quantityInKg = $quantity * $weightFactors[$fromNormalized];
-            return $quantityInKg / $weightFactors[$toNormalized];
+        // Convert legacy values into kilograms.
+        if ($fromNormalized === 'kg') {
+            $factor = $legacyFactors[$rawFrom] ?? 1.0;
+            $quantity *= $factor;
         }
 
-        if (isset($volumeFactors[$fromNormalized]) && isset($volumeFactors[$toNormalized])) {
-            $quantityInLiters = $quantity * $volumeFactors[$fromNormalized];
-            return $quantityInLiters / $volumeFactors[$toNormalized];
+        // If the target representation is also kilograms, return immediately.
+        if ($toNormalized === 'kg') {
+            return $quantity;
         }
 
+        // Fallback for other unit families (e.g., pieces) – no conversion applied.
         return $quantity;
     };
 
@@ -794,15 +826,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_SESSION['last_submit_token'] = $submitToken;
         $productId = intval($_POST['product_id'] ?? 0);
         $quantity = floatval($_POST['quantity'] ?? 0);
-        $unit = $_POST['unit'] ?? 'kg'; // كيلوغرام أو غرام
+        $unit = 'kg';
         $productionDate = $_POST['production_date'] ?? date('Y-m-d');
         $notes = trim($_POST['notes'] ?? '');
         $materialsUsed = trim($_POST['materials_used'] ?? '');
-        
-        // تحويل الجرام إلى كيلوغرام إذا لزم الأمر
-        if ($unit === 'g' || $unit === 'gram') {
-            $quantity = $quantity / 1000; // تحويل من جرام إلى كيلوجرام
-        }
         
         // تحديد معرف المستخدم المسؤول عن الإنتاج وفقًا للدور
         $selectedUserId = intval($_POST['user_id'] ?? 0);
@@ -878,16 +905,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $productionId = intval($_POST['production_id'] ?? 0);
         $productId = intval($_POST['product_id'] ?? 0);
         $quantity = floatval($_POST['quantity'] ?? 0);
-        $unit = $_POST['unit'] ?? 'kg'; // كيلوغرام أو غرام
+        $unit = 'kg';
         $productionDate = $_POST['production_date'] ?? date('Y-m-d');
         $notes = trim($_POST['notes'] ?? '');
         $materialsUsed = trim($_POST['materials_used'] ?? '');
         $status = $_POST['status'] ?? 'pending';
-        
-        // تحويل الجرام إلى كيلوغرام إذا لزم الأمر
-        if ($unit === 'g' || $unit === 'gram') {
-            $quantity = $quantity / 1000; // تحويل الجرام إلى كيلوغرام
-        }
         
         if ($productionId <= 0) {
             $error = 'معرف الإنتاج غير صحيح';
@@ -2095,7 +2117,7 @@ try {
             CREATE TABLE IF NOT EXISTS `product_templates` (
               `id` int(11) NOT NULL AUTO_INCREMENT,
               `product_name` varchar(255) NOT NULL COMMENT 'اسم المنتج',
-              `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Honey quantity in grams',
+              `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Honey quantity in kilograms',
               `status` enum('active','inactive') DEFAULT 'active',
               `created_by` int(11) NOT NULL,
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2112,7 +2134,7 @@ try {
             try {
                 $db->execute("
                     ALTER TABLE `product_templates` 
-                    ADD COLUMN `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Honey quantity in grams' 
+                    ADD COLUMN `honey_quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'Honey quantity in kilograms' 
                     AFTER `product_name`
                 ");
                 error_log("Added honey_quantity column to product_templates table");
@@ -2148,8 +2170,8 @@ try {
               `id` int(11) NOT NULL AUTO_INCREMENT,
               `template_id` int(11) NOT NULL,
               `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة الخام',
-              `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية المادة الخام بالجرام',
-              `unit` varchar(50) DEFAULT 'جرام',
+              `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية المادة الخام بالكيلوغرام',
+              `unit` varchar(50) DEFAULT 'كجم',
               `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
               PRIMARY KEY (`id`),
               KEY `template_id` (`template_id`)
@@ -2181,8 +2203,8 @@ try {
                   `id` int(11) NOT NULL AUTO_INCREMENT,
                   `template_id` int(11) NOT NULL,
                   `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة الخام',
-                  `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية المادة الخام بالجرام',
-                  `unit` varchar(50) DEFAULT 'جرام',
+                  `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'كمية المادة الخام بالكيلوغرام',
+                  `unit` varchar(50) DEFAULT 'كجم',
                   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   PRIMARY KEY (`id`),
                   KEY `template_id` (`template_id`)
@@ -3915,11 +3937,9 @@ $lang = isset($translations) ? $translations : [];
                             <input type="number" step="0.01" name="quantity" class="form-control" required min="0.01">
                         </div>
                         <div class="col-md-2">
-                            <label class="form-label">الوحدة</label>
-                            <select name="unit" class="form-select">
-                                <option value="kg">كجم</option>
-                                <option value="g">جرام</option>
-                            </select>
+                            <label class="form-label d-block">الوحدة</label>
+                            <div class="form-control-plaintext fw-semibold">كجم</div>
+                            <input type="hidden" name="unit" value="kg">
                         </div>
                     </div>
                     <div class="row mb-3">
@@ -3990,11 +4010,9 @@ $lang = isset($translations) ? $translations : [];
                             <input type="number" step="0.01" name="quantity" id="edit_quantity" class="form-control" required min="0.01">
                         </div>
                         <div class="col-md-2">
-                            <label class="form-label">الوحدة</label>
-                            <select name="unit" id="edit_unit" class="form-select">
-                                <option value="kg">كجم</option>
-                                <option value="g">جرام</option>
-                            </select>
+                            <label class="form-label d-block">الوحدة</label>
+                            <div class="form-control-plaintext fw-semibold" id="edit_unit_display">كجم</div>
+                            <input type="hidden" name="unit" id="edit_unit" value="kg">
                         </div>
                     </div>
                     <div class="row mb-3">

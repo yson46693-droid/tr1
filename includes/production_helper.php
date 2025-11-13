@@ -143,6 +143,47 @@ function ensureProductionSupplyLogsTable(): bool
 }
 
 /**
+ * التأكد من وجود جدول تلفيات المواد الخام
+ */
+function ensureRawMaterialDamageLogsTable(): bool
+{
+    static $ensured = false;
+
+    if ($ensured) {
+        return true;
+    }
+
+    $db = db();
+
+    try {
+        $db->execute("
+            CREATE TABLE IF NOT EXISTS `raw_material_damage_logs` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `material_category` varchar(50) NOT NULL COMMENT 'نوع الخام (honey, olive_oil, beeswax, derivatives, nuts)',
+              `stock_id` int(11) DEFAULT NULL COMMENT 'معرف السجل في جدول المخزون',
+              `supplier_id` int(11) DEFAULT NULL COMMENT 'المورد المرتبط',
+              `item_label` varchar(255) NOT NULL COMMENT 'اسم المادة التالفة',
+              `variety` varchar(255) DEFAULT NULL COMMENT 'النوع/الصنف (اختياري)',
+              `quantity` decimal(12,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية التالفة',
+              `unit` varchar(20) NOT NULL DEFAULT 'كجم' COMMENT 'وحدة القياس',
+              `reason` text DEFAULT NULL COMMENT 'سبب التلف',
+              `created_by` int(11) NOT NULL,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `material_category` (`material_category`),
+              KEY `created_by` (`created_by`),
+              KEY `created_at` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+        $ensured = true;
+        return true;
+    } catch (Exception $e) {
+        error_log('Production Helper: unable to ensure raw_material_damage_logs table: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * تسجيل توريد جديد في سجل الإنتاج
  *
  * @param array{

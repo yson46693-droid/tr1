@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/consumption_reports.php';
 require_once __DIR__ . '/../../includes/production_reports.php';
+require_once __DIR__ . '/../../includes/production_helper.php';
 require_once __DIR__ . '/../../includes/table_styles.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 
@@ -179,6 +180,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if ($stockId <= 0) {
                     throw new RuntimeException('يرجى اختيار سجل المخزون.');
+                }
+
+                if (!ensureRawMaterialDamageLogsTable()) {
+                    throw new RuntimeException('تعذر تجهيز سجل تلفيات المواد الخام.');
                 }
 
                 $currentUserId = $currentUser['id'] ?? null;
