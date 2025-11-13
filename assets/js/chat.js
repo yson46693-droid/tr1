@@ -1,6 +1,8 @@
 (function () {
   const API_BASE = window.CHAT_API_BASE || '/api/chat';
-  const POLL_INTERVAL = 5000;
+  const ACTIVE_POLL_INTERVAL = 1500;
+  const IDLE_POLL_INTERVAL = 4000;
+  const QUICK_RETRY_INTERVAL = 450;
   const PRESENCE_INTERVAL = 30000;
 
   const selectors = {
@@ -32,6 +34,7 @@
     statusTimer: null,
     isSending: false,
     initialized: false,
+    currentPollInterval: ACTIVE_POLL_INTERVAL,
   };
 
   const elements = {};
@@ -69,6 +72,7 @@
     bindEvents();
     fetchMessages(true);
     startPresenceUpdates();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     state.initialized = true;
   }
@@ -99,6 +103,13 @@
       stopPresenceUpdates();
       updatePresence(false).catch(() => null);
     });
+  }
+
+  function handleVisibilityChange() {
+    state.currentPollInterval = document.hidden ? IDLE_POLL_INTERVAL : ACTIVE_POLL_INTERVAL;
+    if (!document.hidden) {
+      fetchMessages();
+    }
   }
 
   function handleSearchUsers(event) {
@@ -264,6 +275,7 @@
       elements.input.value = '';
       clearReplyAndEdit();
       appendMessages([data.data], true);
+      scheduleNextPoll(QUICK_RETRY_INTERVAL);
       showToast('تم إرسال الرسالة');
     } catch (error) {
       console.error(error);
@@ -298,6 +310,7 @@
       elements.input.value = '';
       clearReplyAndEdit();
       applyMessageUpdate(data.data);
+      scheduleNextPoll(QUICK_RETRY_INTERVAL);
       showToast('تم تحديث الرسالة');
     } catch (error) {
       console.error(error);
@@ -388,8 +401,10 @@
       state.users = Array.isArray(users) ? users : [];
       updateUserList();
 
+      let hasNewMessages = false;
+
       if (Array.isArray(messages) && messages.length) {
-        appendMessages(messages, initial);
+        hasNewMessages = appendMessages(messages, initial);
       } else if (initial) {
         renderEmptyState(true);
       }
@@ -398,11 +413,11 @@
         state.latestTimestamp = latestTimestamp;
       }
 
-      startPolling();
+      scheduleNextPoll(hasNewMessages ? QUICK_RETRY_INTERVAL : state.currentPollInterval);
     } catch (error) {
       console.error(error);
       showToast(error.message || 'تعذر تحديث الرسائل', true);
-      startPolling(); // retry later even on failure
+      scheduleNextPoll(state.currentPollInterval * 2); // retry later even on failure
     }
   }
 
@@ -438,6 +453,8 @@
     } else if (initial) {
       scrollToBottom(true);
     }
+
+    return hasNew;
   }
 
   function renderMessages() {
@@ -663,14 +680,12 @@
     elements.userList.appendChild(fragment);
   }
 
-  function startPolling() {
-    if (state.pollTimer) {
-      return;
-    }
+  function scheduleNextPoll(delay) {
+    stopPolling();
     state.pollTimer = window.setTimeout(() => {
       state.pollTimer = null;
       fetchMessages();
-    }, POLL_INTERVAL);
+    }, Math.max(delay, 300));
   }
 
   function stopPolling() {

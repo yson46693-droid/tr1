@@ -94,21 +94,97 @@ if (!function_exists('dailyBackupEnsureJobTable')) {
         try {
             require_once __DIR__ . '/db.php';
             $db = db();
-            $db->execute("
-                CREATE TABLE IF NOT EXISTS `system_daily_jobs` (
-                  `job_key` varchar(120) NOT NULL,
-                  `last_sent_at` datetime DEFAULT NULL,
-                  `last_file_path` varchar(512) DEFAULT NULL,
-                  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                  PRIMARY KEY (`job_key`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-            ");
+            $db->execute("\n                CREATE TABLE IF NOT EXISTS `system_daily_jobs` (\n                  `job_key` varchar(120) NOT NULL,\n                  `last_sent_at` datetime DEFAULT NULL,\n                  `last_file_path` varchar(512) DEFAULT NULL,\n                  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n                  PRIMARY KEY (`job_key`)\n                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci\n            ");
+
+            $lastNotifiedColumn = $db->queryOne("SHOW COLUMNS FROM system_daily_jobs LIKE 'last_notified_at'");
+            if (empty($lastNotifiedColumn)) {
+                $db->execute("ALTER TABLE system_daily_jobs ADD COLUMN `last_notified_at` datetime DEFAULT NULL AFTER `last_sent_at`");
+            }
+
+            $lastNotificationHashColumn = $db->queryOne("SHOW COLUMNS FROM system_daily_jobs LIKE 'last_notification_hash'");
+            if (empty($lastNotificationHashColumn)) {
+                $db->execute("ALTER TABLE system_daily_jobs ADD COLUMN `last_notification_hash` varchar(128) DEFAULT NULL AFTER `last_notified_at`");
+            }
         } catch (Throwable $error) {
             error_log('Daily Backup: unable to ensure job table - ' . $error->getMessage());
             return;
         }
 
         $tableReady = true;
+    }
+}
+
+if (!function_exists('dailyBackupResetNotificationState')) {
+    function dailyBackupResetNotificationState(): void
+    {
+        try {
+            dailyBackupEnsureJobTable();
+            require_once __DIR__ . '/db.php';
+            $db = db();
+            $result = $db->execute(
+                "UPDATE system_daily_jobs SET last_notified_at = NULL, last_notification_hash = NULL WHERE job_key = ?",
+                [DAILY_BACKUP_JOB_KEY]
+            );
+            if (($result['affected_rows'] ?? 0) < 1) {
+                $db->execute(
+                    "INSERT IGNORE INTO system_daily_jobs (job_key) VALUES (?)",
+                    [DAILY_BACKUP_JOB_KEY]
+                );
+            }
+        } catch (Throwable $error) {
+            error_log('Daily Backup: failed resetting notification state - ' . $error->getMessage());
+        }
+    }
+}
+
+if (!function_exists('dailyBackupNotifyManagerThrottled')) {
+    function dailyBackupNotifyManagerThrottled(string $message, string $type = 'info', ?array &$jobState = null): void
+    {
+        $hash = sha1($type . '|' . $message);
+        $today = date('Y-m-d');
+
+        try {
+            dailyBackupEnsureJobTable();
+            require_once __DIR__ . '/db.php';
+            $db = db();
+
+            if ($jobState === null || !is_array($jobState)) {
+                $jobState = $db->queryOne(
+                    "SELECT last_notified_at, last_notification_hash FROM system_daily_jobs WHERE job_key = ? LIMIT 1",
+                    [DAILY_BACKUP_JOB_KEY]
+                ) ?: [];
+            }
+
+            $lastNotifiedAt = isset($jobState['last_notified_at']) ? (string) $jobState['last_notified_at'] : '';
+            $lastHash = isset($jobState['last_notification_hash']) ? (string) $jobState['last_notification_hash'] : '';
+
+            if (
+                $lastHash === $hash &&
+                $lastNotifiedAt !== '' &&
+                substr($lastNotifiedAt, 0, 10) === $today
+            ) {
+                return;
+            }
+
+            dailyBackupNotifyManager($message, $type);
+
+            $updateResult = $db->execute(
+                "UPDATE system_daily_jobs SET last_notified_at = NOW(), last_notification_hash = ? WHERE job_key = ?",
+                [$hash, DAILY_BACKUP_JOB_KEY]
+            );
+
+            if (($updateResult['affected_rows'] ?? 0) < 1) {
+                $db->execute(
+                    "INSERT INTO system_daily_jobs (job_key, last_notified_at, last_notification_hash) VALUES (?, NOW(), ?)",
+                    [DAILY_BACKUP_JOB_KEY, $hash]
+                );
+            }
+
+            $jobState['last_notified_at'] = date('Y-m-d H:i:s');
+            $jobState['last_notification_hash'] = $hash;
+        } catch (Throwable $error) {
+            error_log('Daily Backup: failed throttling notification - ' . $error->getMessage());
+        }
     }
 }
 
@@ -264,7 +340,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
         $jobState = null;
         try {
         $jobState = $db->queryOne(
-            "SELECT last_sent_at, last_file_path FROM system_daily_jobs WHERE job_key = ? LIMIT 1",
+            "SELECT last_sent_at, last_file_path, last_notified_at, last_notification_hash FROM system_daily_jobs WHERE job_key = ? LIMIT 1",
             [DAILY_BACKUP_JOB_KEY]
         );
         } catch (Throwable $stateError) {
@@ -286,7 +362,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                 $statusData['file_path'] = $jobStoredRelative ?: null;
                 $statusData['note'] = 'Backup already delivered to Telegram today';
                 dailyBackupSaveStatus($statusData);
-                dailyBackupNotifyManager('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.');
+                dailyBackupNotifyManagerThrottled('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.', 'info', $jobState);
                 return;
             }
         }
@@ -341,7 +417,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                 $existingDataHasFile
             ) {
                 $db->commit();
-                dailyBackupNotifyManager('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.');
+                dailyBackupNotifyManagerThrottled('تم إرسال النسخة الاحتياطية للبيانات إلى شات Telegram مسبقاً اليوم.', 'info', $jobState);
                 return;
             }
 
@@ -381,6 +457,13 @@ if (!function_exists('triggerDailyBackupDelivery')) {
 
         if (!$inProgress) {
             return;
+        }
+
+        dailyBackupResetNotificationState();
+
+        if (is_array($jobState)) {
+            $jobState['last_notified_at'] = null;
+            $jobState['last_notification_hash'] = null;
         }
 
         try {
@@ -446,7 +529,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                     'status' => 'failed',
                     'error' => $errorMessage,
                 ]));
-                dailyBackupNotifyManager('تعذر إنشاء النسخة الاحتياطية اليومية: ' . $errorMessage, 'danger');
+                dailyBackupNotifyManagerThrottled('تعذر إنشاء النسخة الاحتياطية اليومية: ' . $errorMessage, 'danger', $jobState);
                 return;
             }
 
@@ -459,7 +542,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                     'status' => 'failed',
                     'error' => $errorMessage,
                 ]));
-                dailyBackupNotifyManager('تعذر العثور على ملف النسخة الاحتياطية بعد إنشائه.', 'danger');
+                dailyBackupNotifyManagerThrottled('تعذر العثور على ملف النسخة الاحتياطية بعد إنشائه.', 'danger', $jobState);
                 return;
             }
 
@@ -501,7 +584,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
                 'error' => $errorMessage,
                 'file_path' => $backupRelativePath ?? $backupFilePath,
             ]));
-            dailyBackupNotifyManager($errorMessage, 'danger');
+            dailyBackupNotifyManagerThrottled($errorMessage, 'danger', $jobState);
             return;
         }
 
@@ -538,7 +621,7 @@ if (!function_exists('triggerDailyBackupDelivery')) {
         ];
 
         dailyBackupSaveStatus($completedData);
-        dailyBackupNotifyManager('تم إنشاء النسخة الاحتياطية اليومية وإرسالها إلى شات Telegram بنجاح.');
+        dailyBackupNotifyManagerThrottled('تم إنشاء النسخة الاحتياطية اليومية وإرسالها إلى شات Telegram بنجاح.', 'success', $jobState);
     }
 }
 
