@@ -1,8 +1,5 @@
 (function () {
   const API_BASE = window.CHAT_API_BASE || '/api/chat';
-  const ACTIVE_POLL_INTERVAL = 1500;
-  const IDLE_POLL_INTERVAL = 4000;
-  const QUICK_RETRY_INTERVAL = 450;
   const PRESENCE_INTERVAL = 30000;
 
   const selectors = {
@@ -30,11 +27,11 @@
     lastMessageId: 0,
     replyTo: null,
     editMessage: null,
-    pollTimer: null,
+    fetchDelayTimer: null,
     statusTimer: null,
     isSending: false,
     initialized: false,
-    currentPollInterval: ACTIVE_POLL_INTERVAL,
+    lastFetchTime: 0,
   };
 
   const elements = {};
@@ -99,15 +96,14 @@
     }
 
     window.addEventListener('beforeunload', () => {
-      stopPolling();
+      cancelScheduledFetch();
       stopPresenceUpdates();
       updatePresence(false).catch(() => null);
     });
   }
 
   function handleVisibilityChange() {
-    state.currentPollInterval = document.hidden ? IDLE_POLL_INTERVAL : ACTIVE_POLL_INTERVAL;
-    if (!document.hidden) {
+    if (!document.hidden && state.messages.length === 0) {
       fetchMessages();
     }
   }
@@ -275,7 +271,7 @@
       elements.input.value = '';
       clearReplyAndEdit();
       appendMessages([data.data], true);
-      scheduleNextPoll(QUICK_RETRY_INTERVAL);
+      scheduleFetch(400);
       showToast('تم إرسال الرسالة');
     } catch (error) {
       console.error(error);
@@ -310,7 +306,7 @@
       elements.input.value = '';
       clearReplyAndEdit();
       applyMessageUpdate(data.data);
-      scheduleNextPoll(QUICK_RETRY_INTERVAL);
+      scheduleFetch(400);
       showToast('تم تحديث الرسالة');
     } catch (error) {
       console.error(error);
@@ -374,6 +370,14 @@
 
   async function fetchMessages(initial = false) {
     try {
+      const now = Date.now();
+      if (!initial && now - state.lastFetchTime < 400) {
+        scheduleFetch(400 - (now - state.lastFetchTime));
+        return;
+      }
+
+      state.lastFetchTime = now;
+
       const params = new URLSearchParams();
       if (state.latestTimestamp) {
         params.set('since', state.latestTimestamp);
@@ -398,8 +402,10 @@
 
       const { messages, latest_timestamp: latestTimestamp, users } = payload.data;
 
-      state.users = Array.isArray(users) ? users : [];
-      updateUserList();
+      if (Array.isArray(users)) {
+        state.users = users;
+        updateUserList();
+      }
 
       let hasNewMessages = false;
 
@@ -413,11 +419,13 @@
         state.latestTimestamp = latestTimestamp;
       }
 
-      scheduleNextPoll(hasNewMessages ? QUICK_RETRY_INTERVAL : state.currentPollInterval);
+      if (!initial) {
+        scheduleFetch(hasNewMessages ? 700 : 2500);
+      }
     } catch (error) {
       console.error(error);
       showToast(error.message || 'تعذر تحديث الرسائل', true);
-      scheduleNextPoll(state.currentPollInterval * 2); // retry later even on failure
+      scheduleFetch(4000); // retry later even on failure
     }
   }
 
@@ -680,18 +688,18 @@
     elements.userList.appendChild(fragment);
   }
 
-  function scheduleNextPoll(delay) {
-    stopPolling();
-    state.pollTimer = window.setTimeout(() => {
-      state.pollTimer = null;
+  function scheduleFetch(delay) {
+    cancelScheduledFetch();
+    state.fetchDelayTimer = window.setTimeout(() => {
+      state.fetchDelayTimer = null;
       fetchMessages();
     }, Math.max(delay, 300));
   }
 
-  function stopPolling() {
-    if (state.pollTimer) {
-      window.clearTimeout(state.pollTimer);
-      state.pollTimer = null;
+  function cancelScheduledFetch() {
+    if (state.fetchDelayTimer) {
+      window.clearTimeout(state.fetchDelayTimer);
+      state.fetchDelayTimer = null;
     }
   }
 
