@@ -2684,6 +2684,17 @@ $rawMaterialsReportGeneratedAt = $rawWarehouseReport['generated_at'] ?? date('Y-
     border-color: #bae6fd;
     color: #0c4a6e;
 }
+
+.scrollable-modal-body {
+    max-height: calc(100vh - 220px);
+    overflow-y: auto;
+}
+
+@media (max-width: 576px) {
+    .scrollable-modal-body {
+        max-height: calc(100vh - 160px);
+    }
+}
 </style>
 
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
@@ -2714,7 +2725,7 @@ $rawMaterialsReportGeneratedAt = $rawWarehouseReport['generated_at'] ?? date('Y-
                 <h5 class="modal-title"><i class="bi bi-clipboard-data me-2"></i>خيارات تقرير مخزن الخامات</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body scrollable-modal-body">
                 <?php if ($rawMaterialsReportViewUrl): ?>
                     <p class="mb-3 text-muted">
                         تم حفظ نسخة من التقرير في مساحة التخزين الآمنة بتاريخ
@@ -3024,7 +3035,7 @@ if ($section === 'honey') {
                 <form method="POST">
                     <input type="hidden" name="action" value="add_honey">
                     <input type="hidden" name="submit_token" value="">
-                    <div class="modal-body" style="max-height: calc(100vh - 220px); overflow-y: auto;">
+                    <div class="modal-body scrollable-modal-body">
                         <div class="mb-3">
                             <label class="form-label">المورد <span class="text-danger">*</span></label>
                             <select class="form-select" name="supplier_id" required>
@@ -3077,7 +3088,7 @@ if ($section === 'honey') {
                     <input type="hidden" name="action" value="filter_honey">
                     <input type="hidden" name="stock_id" id="filter_stock_id">
                     <input type="hidden" name="submit_token" value="">
-                    <div class="modal-body">
+                    <div class="modal-body scrollable-modal-body">
                         <div class="alert alert-info">
                             <i class="bi bi-info-circle me-2"></i>سيتم خصم 0.5% كخسارة في التصفية
                         </div>
@@ -3130,7 +3141,7 @@ if ($section === 'honey') {
                 <input type="hidden" name="stock_id" id="damage_honey_stock_id">
                 <input type="hidden" name="damage_unit" value="كجم">
                 <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
-                <div class="modal-body">
+                <div class="modal-body scrollable-modal-body">
                     <div class="mb-3">
                         <label class="form-label">المورد</label>
                         <input type="text" class="form-control" id="damage_honey_supplier" readonly>
@@ -3349,7 +3360,7 @@ if ($section === 'honey') {
                 <form method="POST">
                     <input type="hidden" name="action" value="add_olive_oil">
                     <input type="hidden" name="submit_token" value="">
-                    <div class="modal-body">
+                    <div class="modal-body scrollable-modal-body">
                         <div class="mb-3">
                             <label class="form-label">المورد <span class="text-danger">*</span></label>
                             <select class="form-select" name="supplier_id" required>
@@ -3388,7 +3399,7 @@ if ($section === 'honey') {
                 <input type="hidden" name="stock_id" id="damage_oil_stock_id">
                 <input type="hidden" name="damage_unit" value="لتر">
                 <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
-                <div class="modal-body">
+                <div class="modal-body scrollable-modal-body">
                     <div class="mb-3">
                         <label class="form-label">المورد</label>
                         <input type="text" class="form-control" id="damage_oil_supplier" readonly>
@@ -3547,7 +3558,7 @@ if ($section === 'honey') {
                 <form method="POST">
                     <input type="hidden" name="action" value="add_beeswax">
                     <input type="hidden" name="submit_token" value="">
-                    <div class="modal-body">
+                    <div class="modal-body scrollable-modal-body">
                         <div class="mb-3">
                             <label class="form-label">المورد <span class="text-danger">*</span></label>
                             <select class="form-select" name="supplier_id" required>
@@ -3586,7 +3597,7 @@ if ($section === 'honey') {
                 <input type="hidden" name="stock_id" id="damage_wax_stock_id">
                 <input type="hidden" name="damage_unit" value="كجم">
                 <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
-                <div class="modal-body">
+                <div class="modal-body scrollable-modal-body">
                     <div class="mb-3">
                         <label class="form-label">المورد</label>
                         <input type="text" class="form-control" id="damage_wax_supplier" readonly>
@@ -3763,7 +3774,7 @@ if ($section === 'honey') {
                 <form method="POST">
                     <input type="hidden" name="action" value="add_derivative">
                     <input type="hidden" name="submit_token" value="">
-                    <div class="modal-body">
+                    <div class="modal-body scrollable-modal-body">
                         <div class="mb-3">
                             <label class="form-label">المورد <span class="text-danger">*</span></label>
                             <select class="form-select" name="supplier_id" required>
@@ -3806,7 +3817,7 @@ if ($section === 'honey') {
                 <input type="hidden" name="stock_id" id="damage_derivative_stock_id">
                 <input type="hidden" name="damage_unit" value="كجم">
                 <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
-                <div class="modal-body">
+                <div class="modal-body scrollable-modal-body">
                     <div class="mb-3">
                         <label class="form-label">المورد</label>
                         <input type="text" class="form-control" id="damage_derivative_supplier" readonly>
