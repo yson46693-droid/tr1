@@ -4600,12 +4600,12 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
 }
 ?>
 
-<!-- Modal إنشاء قالب منتج موحد متقدم -->
+<!-- Modal إنشاء قالب منتج -->
 <div class="modal fade" id="createUnifiedTemplateModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
             <div class="modal-header bg-success text-white">
-                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إنشاء قالب منتج متقدم</h5>
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>انشاء قالب منتج</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST" id="createUnifiedTemplateForm">
