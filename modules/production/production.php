@@ -3889,6 +3889,88 @@ $lang = isset($translations) ? $translations : [];
     </div>
 
     <div class="card production-report-card shadow-sm mb-4">
+        <div class="card-header bg-danger text-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-exclamation-octagon"></i>
+                <span>سجل التوالف في المخازن</span>
+                <span class="badge bg-light text-danger border border-light-subtle">
+                    <?php echo htmlspecialchars($monthRangeLabelStart); ?> - <?php echo htmlspecialchars($monthRangeLabelEnd); ?>
+                </span>
+            </div>
+            <div class="d-flex align-items-center gap-3 small text-white">
+                <span>إجمالي التلفيات: <strong class="text-white"><?php echo number_format($damageMonthTotal, 3); ?></strong></span>
+                <span>عدد السجلات: <strong class="text-white"><?php echo number_format($damageMonthEntries); ?></strong></span>
+                <?php if ($damageMonthLatestLabel !== ''): ?>
+                    <span>آخر تسجيل: <strong class="text-white"><?php echo htmlspecialchars($damageMonthLatestLabel); ?></strong></span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="card-body">
+            <?php if (!empty($damageMonthSummaryRows)): ?>
+                <div class="production-summary-grid">
+                    <?php foreach ($damageMonthSummaryRows as $row): ?>
+                        <div class="summary-card">
+                            <span class="summary-label"><?php echo htmlspecialchars($row['label'] ?? 'قسم'); ?></span>
+                            <span class="summary-value text-danger"><?php echo number_format((float)($row['total'] ?? 0), 3); ?></span>
+                            <small class="text-muted">سجلات: <?php echo number_format((int)($row['entries'] ?? 0)); ?></small>
+                            <?php if (!empty($row['last_recorded_at'])): ?>
+                                <small class="text-muted">
+                                    <?php echo htmlspecialchars(productionPageFormatDateTimeLabel($row['last_recorded_at'])); ?>
+                                    <?php if (!empty($row['last_recorded_by'])): ?>
+                                        — <?php echo htmlspecialchars($row['last_recorded_by']); ?>
+                                    <?php endif; ?>
+                                </small>
+                            <?php elseif (!empty($row['last_recorded_by'])): ?>
+                                <small class="text-muted"><?php echo htmlspecialchars($row['last_recorded_by']); ?></small>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php else: ?>
+                <div class="alert alert-light border border-danger-subtle text-muted mb-0">
+                    <i class="bi bi-check2-circle me-2 text-success"></i>لا توجد سجلات تلفيات خلال الفترة المحددة.
+                </div>
+            <?php endif; ?>
+
+            <ul class="nav nav-pills mt-4" id="damageLogTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="damage-log-month-tab" data-bs-toggle="tab" data-bs-target="#damage-log-month" type="button" role="tab" aria-controls="damage-log-month" aria-selected="true">
+                        تلفيات الشهر
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="damage-log-day-tab" data-bs-toggle="tab" data-bs-target="#damage-log-day" type="button" role="tab" aria-controls="damage-log-day" aria-selected="false">
+                        تلفيات يوم <?php echo htmlspecialchars($selectedDayLabel); ?>
+                    </button>
+                </li>
+            </ul>
+
+            <div class="tab-content mt-3" id="damageLogTabsContent">
+                <div class="tab-pane fade show active" id="damage-log-month" role="tabpanel" aria-labelledby="damage-log-month-tab">
+                    <?php productionPageRenderDamageLogsTable($damageMonthLogs, 'لا توجد سجلات تلفيات ضمن الفترة الشهرية المحددة.'); ?>
+                </div>
+                <div class="tab-pane fade" id="damage-log-day" role="tabpanel" aria-labelledby="damage-log-day-tab">
+                    <?php if (!empty($damageDaySummaryRows)): ?>
+                        <div class="production-summary-grid mb-3">
+                            <?php foreach ($damageDaySummaryRows as $row): ?>
+                                <div class="summary-card">
+                                    <span class="summary-label"><?php echo htmlspecialchars($row['label'] ?? 'قسم'); ?></span>
+                                    <span class="summary-value text-danger"><?php echo number_format((float)($row['total'] ?? 0), 3); ?></span>
+                                    <small class="text-muted">سجلات: <?php echo number_format((int)($row['entries'] ?? 0)); ?></small>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                    <?php
+                        $dayEmptyMessage = 'لا توجد سجلات تلفيات مسجلة في هذا اليوم.';
+                        productionPageRenderDamageLogsTable($damageDayLogs, $dayEmptyMessage);
+                    ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card production-report-card shadow-sm mb-4">
         <div class="card-header bg-warning text-dark d-flex flex-wrap justify-content-between align-items-center gap-2">
             <div>
                 <i class="bi bi-truck me-2"></i>توريدات المواد خلال يوم <?php echo htmlspecialchars($selectedDayLabel); ?>
