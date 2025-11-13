@@ -431,7 +431,7 @@ try {
         }
     }
 
-    $suppliersTableExists = readerTableExists($db, 'suppliers');
+    $suppliersTableExists = $db ? readerTableExists($db, 'suppliers') : false;
     $supplierNameCache = [];
 
     $resolveSupplierName = static function (?int $supplierId) use ($db, $suppliersTableExists, &$supplierNameCache) {
@@ -440,6 +440,12 @@ try {
         }
         if (array_key_exists($supplierId, $supplierNameCache)) {
             return $supplierNameCache[$supplierId];
+        }
+
+        if (!$db) {
+            $fallback = 'مورد #' . $supplierId;
+            $supplierNameCache[$supplierId] = $fallback;
+            return $fallback;
         }
 
         $resolvedName = null;

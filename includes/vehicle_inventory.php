@@ -31,6 +31,18 @@ if (!function_exists('ensureVehicleInventoryProductColumns')) {
             return;
         }
 
+        // Global flag to ensure only once per execution
+        $flagFile = __DIR__ . '/../runtime/vehicle_inventory_upgrade.flag';
+        $alreadyRun = false;
+        if (file_exists($flagFile)) {
+            $alreadyRun = true;
+        }
+
+        if ($alreadyRun) {
+            $ensured = true;
+            return;
+        }
+
         try {
             $exists = $db->queryOne("SHOW TABLES LIKE 'vehicle_inventory'");
             if (empty($exists)) {
@@ -88,10 +100,15 @@ if (!function_exists('ensureVehicleInventoryProductColumns')) {
                 $db->execute("ALTER TABLE vehicle_inventory " . implode(', ', $alterParts));
             } catch (Throwable $alterError) {
                 error_log('VehicleInventory schema update error: ' . $alterError->getMessage());
+                // Don't stop lock file creation
             }
         }
 
         $ensured = true;
+        if (!is_dir(dirname($flagFile))) {
+            @mkdir(dirname($flagFile), 0775, true);
+        }
+        @file_put_contents($flagFile, date('c'));
     }
 }
 

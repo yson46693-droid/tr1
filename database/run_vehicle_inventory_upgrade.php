@@ -90,4 +90,15 @@ if ($alterParts) {
     echo "All columns already exist.\n";
 }
 
-echo "Upgrade finished.";
+echo "Upgrade finished.\n";
+
+// mark a flag in system settings
+try {
+    $db->execute(
+        "INSERT INTO system_settings (`key`, `value`, updated_at) VALUES ('vehicle_inventory_upgraded', '1', NOW())
+         ON DUPLICATE KEY UPDATE `value` = '1', updated_at = NOW()"
+    );
+    echo "Flag value stored in system_settings.\n";
+} catch (Throwable $flagError) {
+    echo "Warning: failed saving flag: " . $flagError->getMessage() . "\n";
+}

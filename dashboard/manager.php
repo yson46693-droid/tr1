@@ -38,6 +38,9 @@ $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts 
 if ($page === 'final_products' && !in_array('assets/css/production-page.css', $pageStylesheets, true)) {
     $pageStylesheets[] = 'assets/css/production-page.css';
 }
+if ($page === 'reports' && !in_array('assets/css/production-page.css', $pageStylesheets, true)) {
+    $pageStylesheets[] = 'assets/css/production-page.css';
+}
 require_once __DIR__ . '/../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = $translations;
 $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : 'لوحة المدير';
