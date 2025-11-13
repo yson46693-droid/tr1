@@ -331,10 +331,11 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
             $batchId = isset($item['batch_id']) ? (int)$item['batch_id'] : null;
             $batchNumber = isset($item['batch_number']) ? trim((string)$item['batch_number']) : null;
             $batchName = $batchNumber ?? 'بدون رقم تشغيلة';
+            $productIdForInsert = isset($item['product_id']) ? (int)$item['product_id'] : 0;
 
             if ($batchId) {
                 $batchRow = $db->queryOne(
-                    "SELECT quantity_produced, product_id, batch_number 
+                    "SELECT quantity_produced, product_id, batch_number, product_name 
                      FROM finished_products WHERE id = ?",
                     [$batchId]
                 );
@@ -360,8 +361,49 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
                     ));
                 }
 
-                if (empty($item['product_id']) && !empty($batchRow['product_id'])) {
-                    $item['product_id'] = (int)$batchRow['product_id'];
+                if ($productIdForInsert <= 0 && !empty($batchRow['product_id'])) {
+                    $productIdForInsert = (int)$batchRow['product_id'];
+                }
+
+                if ($productIdForInsert <= 0) {
+                    $batchProductName = trim((string)($batchRow['product_name'] ?? ''));
+                    if ($batchProductName !== '') {
+                        $existingProduct = $db->queryOne(
+                            "SELECT id FROM products WHERE name = ? LIMIT 1",
+                            [$batchProductName]
+                        );
+                        if ($existingProduct && !empty($existingProduct['id'])) {
+                            $productIdForInsert = (int)$existingProduct['id'];
+                        } else {
+                            static $productTypeColumnExists = null;
+                            if ($productTypeColumnExists === null) {
+                                $productTypeColumnExists = $db->queryOne("SHOW COLUMNS FROM products LIKE 'product_type'");
+                                $productTypeColumnExists = !empty($productTypeColumnExists);
+                            }
+
+                            $columns = ['name', 'category', 'quantity', 'unit', 'description', 'status'];
+                            $placeholders = ['?', "'منتجات نهائية'", '0', "'قطعة'", "'تم إنشاؤه تلقائياً من تشغيلات الإنتاج'", "'active'"];
+                            $values = [$batchProductName];
+
+                            if ($productTypeColumnExists) {
+                                $columns[] = 'product_type';
+                                $placeholders[] = '?';
+                                $values[] = 'internal';
+                            }
+
+                            $insertSql = sprintf(
+                                "INSERT INTO products (%s) VALUES (%s)",
+                                implode(', ', $columns),
+                                implode(', ', $placeholders)
+                            );
+                            $insertResult = $db->execute($insertSql, $values);
+                            $productIdForInsert = (int)($insertResult['insert_id'] ?? 0);
+                        }
+                    }
+                }
+
+                if ($productIdForInsert <= 0) {
+                    throw new Exception('تعذر ربط التشغيلة بمنتج صالح للنقل. يرجى التأكد من بيانات المنتج.');
                 }
 
                 if (!$batchNumber) {
@@ -369,12 +411,16 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
                 }
             }
 
+            if ($productIdForInsert <= 0) {
+                throw new Exception('المنتج المحدد غير صالح للنقل.');
+            }
+
             $db->execute(
                 "INSERT INTO warehouse_transfer_items (transfer_id, product_id, batch_id, batch_number, quantity, notes) 
                  VALUES (?, ?, ?, ?, ?, ?)",
                 [
                     $transferId,
-                    $item['product_id'],
+                    $productIdForInsert,
                     $batchId ?: null,
                     $batchNumber ?: null,
                     $item['quantity'],
