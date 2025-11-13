@@ -27,17 +27,10 @@ $error = '';
 $success = '';
 
 if (!function_exists('productionSafeRedirect')) {
-    function productionSafeRedirect(string $url): void
+    function productionSafeRedirect(string $url, array $redirectParams = [], ?string $role = null): void
     {
-        if (!headers_sent()) {
-            header('Location: ' . $url);
-            exit;
-        }
-
-        $escapedUrl = htmlspecialchars($url, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-        echo '<script>window.location.href = "' . $escapedUrl . '";</script>';
-        echo '<noscript><meta http-equiv="refresh" content="0;url=' . $escapedUrl . '"></noscript>';
-        exit;
+        $redirectUrl = (!empty($redirectParams) || $role !== null) ? null : $url;
+        preventDuplicateSubmission(null, $redirectParams, $redirectUrl, $role);
     }
 }
 
@@ -80,6 +73,22 @@ $baseQueryString = '?page=' . urlencode($currentPageSlug);
 if ($currentSection !== null && $currentSection !== '') {
     $baseQueryString .= '&section=' . urlencode($currentSection);
 }
+
+$productionRedirectParams = [
+    'page' => $currentPageSlug ?: 'inventory',
+];
+if ($currentSection !== null && $currentSection !== '') {
+    $productionRedirectParams['section'] = $currentSection;
+}
+$productionRedirectRole = $currentUser['role'] ?? 'production';
+
+$managerRedirectParams = [
+    'page' => 'final_products',
+];
+if ($currentSection !== null && $currentSection !== '') {
+    $managerRedirectParams['section'] = $currentSection;
+}
+$managerRedirectRole = 'manager';
 
 // التحقق من وجود عمود date أو production_date
 $dateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'date'");
@@ -493,8 +502,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($name === '') {
             $_SESSION[$sessionErrorKey] = 'يرجى إدخال اسم المنتج الخارجي.';
-            header('Location: ' . $managerInventoryUrl);
-            exit;
+            productionSafeRedirect($managerInventoryUrl);
         }
 
         if (!in_array($channel, ['company', 'delegate', 'other'], true)) {
@@ -539,8 +547,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$sessionErrorKey] = 'تعذر إضافة المنتج الخارجي. يرجى المحاولة لاحقاً.';
         }
 
-        header('Location: ' . $managerInventoryUrl);
-        exit;
+        productionSafeRedirect($managerInventoryUrl);
     } elseif ($isManager && $postAction === 'adjust_external_stock') {
         $productId = intval($_POST['product_id'] ?? 0);
         $operation = $_POST['operation'] ?? 'add';
@@ -549,8 +556,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($productId <= 0 || $amount <= 0) {
             $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج وإدخال كمية صالحة.';
-            header('Location: ' . $managerInventoryUrl);
-            exit;
+            productionSafeRedirect($managerInventoryUrl);
         }
 
         try {
@@ -561,8 +567,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$productRow) {
                 $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود أو ليس منتجاً خارجياً.';
-                header('Location: ' . $managerInventoryUrl);
-                exit;
+                productionSafeRedirect($managerInventoryUrl);
             }
 
             $oldQuantity = floatval($productRow['quantity'] ?? 0);
@@ -571,8 +576,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($operation === 'discard') {
                 if ($amount > $oldQuantity) {
                     $_SESSION[$sessionErrorKey] = 'الكمية المراد إتلافها أكبر من الكمية المتاحة.';
-                    header('Location: ' . $managerInventoryUrl);
-                    exit;
+                    productionSafeRedirect($managerInventoryUrl);
                 }
                 $newQuantity = $oldQuantity - $amount;
             } else {
@@ -608,8 +612,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$sessionErrorKey] = 'تعذر تحديث كمية المنتج الخارجي.';
         }
 
-        header('Location: ' . $managerInventoryUrl);
-        exit;
+        productionSafeRedirect($managerInventoryUrl);
     } elseif ($isManager && $postAction === 'update_external_product') {
         $productId = intval($_POST['product_id'] ?? 0);
         $name = trim((string)($_POST['edit_name'] ?? ''));
@@ -620,8 +623,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($productId <= 0 || $name === '') {
             $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج صالح وتحديد الاسم.';
-            header('Location: ' . $managerInventoryUrl);
-            exit;
+            productionSafeRedirect($managerInventoryUrl);
         }
 
         if (!in_array($channel, ['company', 'delegate', 'other'], true)) {
@@ -637,8 +639,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$existing) {
                 $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود أو ليس منتجاً خارجياً.';
-                header('Location: ' . $managerInventoryUrl);
-                exit;
+                productionSafeRedirect($managerInventoryUrl);
             }
 
             $db->execute(
@@ -683,8 +684,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$sessionErrorKey] = 'تعذر تحديث بيانات المنتج الخارجي.';
         }
 
-        header('Location: ' . $managerInventoryUrl);
-        exit;
+        productionSafeRedirect($managerInventoryUrl);
     }
 }
 
