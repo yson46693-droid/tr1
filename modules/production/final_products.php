@@ -1813,10 +1813,6 @@ document.addEventListener('DOMContentLoaded', function () {
             ['الكمية المنتجة', data.quantity_produced ?? data.quantity ?? '—']
         ];
 
-        if (data.status) {
-            const statusLabel = statusLabelsMap[data.status] ?? data.status;
-            summaryRows.push(['الحالة', statusLabel]);
-        }
         if (data.honey_supplier_name) {
             summaryRows.push(['مورد العسل', data.honey_supplier_name]);
         }
