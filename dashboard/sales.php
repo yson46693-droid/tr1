@@ -222,6 +222,16 @@ if ($page === 'sales_collections') {
                     </div>
                 </div>
                 
+            <?php elseif ($page === 'chat'): ?>
+                <?php 
+                $modulePath = __DIR__ . '/../modules/chat/group_chat.php';
+                if (file_exists($modulePath)) {
+                    include $modulePath;
+                } else {
+                    echo '<div class="alert alert-warning">وحدة الدردشة غير متاحة حالياً</div>';
+                }
+                ?>
+                
             <?php elseif ($page === 'customers'): ?>
                 <!-- Page Header -->
                 <div class="page-header">

@@ -27,6 +27,14 @@ $baseUrl = getDashboardUrl();
                     <span><?php echo isset($lang['dashboard']) ? $lang['dashboard'] : 'لوحة التحكم'; ?></span>
                 </a>
             </li>
+
+            <li class="nav-item">
+                <a class="nav-link <?php echo (isset($_GET['page']) && $_GET['page'] === 'chat') ? 'active' : ''; ?>"
+                   href="<?php echo $baseUrl; ?>manager.php?page=chat">
+                    <i class="bi bi-chat-dots"></i>
+                    <span>الدردشة الجماعية</span>
+                </a>
+            </li>
             
             <li class="nav-item">
                 <a class="nav-link" href="<?php echo $baseUrl; ?>manager.php?page=approvals">

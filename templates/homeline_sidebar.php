@@ -30,6 +30,13 @@ switch ($role) {
                 'active' => ($currentPage === 'manager.php' && ($currentPageParam === 'overview' || $currentPageParam === '')),
                 'badge' => null
             ],
+            [
+                'title' => 'الدردشة الجماعية',
+                'icon' => 'bi-chat-dots',
+                'url' => $baseUrl . 'manager.php?page=chat',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'chat'),
+                'badge' => null
+            ],
             ['divider' => true, 'title' => isset($lang['management']) ? $lang['management'] : 'الإدارة'],
             [
                 'title' => isset($lang['menu_approvals']) ? $lang['menu_approvals'] : 'الموافقات',
@@ -149,6 +156,13 @@ switch ($role) {
                 'active' => ($currentPage === 'accountant.php' && $currentPageParam === ''),
                 'badge' => null
             ],
+            [
+                'title' => 'الدردشة الجماعية',
+                'icon' => 'bi-chat-dots',
+                'url' => $baseUrl . 'accountant.php?page=chat',
+                'active' => ($currentPage === 'accountant.php' && $currentPageParam === 'chat'),
+                'badge' => null
+            ],
             ['divider' => true, 'title' => isset($lang['accounting_section']) ? $lang['accounting_section'] : 'المحاسبة'],
             [
                 'title' => isset($lang['menu_financial']) ? $lang['menu_financial'] : 'الخزنة',
@@ -232,6 +246,13 @@ switch ($role) {
                 'active' => ($currentPage === 'sales.php' && $currentPageParam === ''),
                 'badge' => null
             ],
+            [
+                'title' => 'الدردشة الجماعية',
+                'icon' => 'bi-chat-dots',
+                'url' => $baseUrl . 'sales.php?page=chat',
+                'active' => ($currentPage === 'sales.php' && $currentPageParam === 'chat'),
+                'badge' => null
+            ],
             ['divider' => true, 'title' => isset($lang['sales_section']) ? $lang['sales_section'] : 'المبيعات'],
             [
                 'title' => isset($lang['customers']) ? $lang['customers'] : 'العملاء',
@@ -301,6 +322,13 @@ switch ($role) {
                 'active' => ($currentPage === 'production.php' && $currentPageParam === ''),
                 'badge' => null
             ],
+            [
+                'title' => 'الدردشة الجماعية',
+                'icon' => 'bi-chat-dots',
+                'url' => $baseUrl . 'production.php?page=chat',
+                'active' => ($currentPage === 'production.php' && $currentPageParam === 'chat'),
+                'badge' => null
+            ],
             ['divider' => true, 'title' => isset($lang['production_section']) ? $lang['production_section'] : 'الإنتاج'],
             [
                 'title' => isset($lang['menu_production']) ? $lang['menu_production'] : 'الإنتاج',
@@ -363,6 +391,13 @@ if (empty($menuItems)) {
             'icon' => 'bi-speedometer2',
             'url' => $baseUrl . 'accountant.php',
             'active' => true,
+            'badge' => null
+        ],
+        [
+            'title' => 'الدردشة الجماعية',
+            'icon' => 'bi-chat-dots',
+            'url' => $baseUrl . 'accountant.php?page=chat',
+            'active' => false,
             'badge' => null
         ]
     ];
