@@ -3001,12 +3001,6 @@ if ($section === 'honey') {
         ORDER BY s.name ASC, hs.honey_variety ASC
     ");
 
-    $nowTimestamp = time();
-    $legacyThresholdDays = 30;
-    $legacyThresholdTimestamp = $nowTimestamp - ($legacyThresholdDays * 86400);
-    $recentThresholdDays = 7;
-    $recentThresholdTimestamp = $nowTimestamp - ($recentThresholdDays * 86400);
-
     // تنظيم المخزون حسب المورد
     $groupedHoneyStock = [];
     foreach ($honeyStock as $stock) {
@@ -3037,8 +3031,6 @@ if ($section === 'honey') {
             $updatedAtTs = strtotime($stock['updated_at']);
         }
         $lastActivityTs = $updatedAtTs ?? $createdAtTs;
-        $isLegacyEntry = ($lastActivityTs === null) || ($lastActivityTs <= $legacyThresholdTimestamp);
-        $isRecentEntry = ($lastActivityTs !== null) && ($lastActivityTs >= $recentThresholdTimestamp);
         $lastActivityLabel = null;
         if ($lastActivityTs !== null) {
             $lastActivityLabel = date('Y/m/d H:i', $lastActivityTs);
@@ -3050,8 +3042,8 @@ if ($section === 'honey') {
             'variety_display' => $varietyDisplay,
             'raw_quantity' => (float)($stock['raw_honey_quantity'] ?? 0),
             'filtered_quantity' => (float)($stock['filtered_honey_quantity'] ?? 0),
-            'is_legacy' => $isLegacyEntry,
-            'is_recent' => $isRecentEntry,
+            'is_legacy' => false,
+            'last_activity_ts' => $lastActivityTs,
             'last_activity_label' => $lastActivityLabel,
         ];
         $groupedHoneyStock[$groupKey]['total_raw'] += (float)($stock['raw_honey_quantity'] ?? 0);
@@ -3069,6 +3061,26 @@ if ($section === 'honey') {
 
     $groupedHoneyStock = array_values($groupedHoneyStock);
     foreach ($groupedHoneyStock as &$honeyGroup) {
+        $maxActivityTs = null;
+        foreach ($honeyGroup['items'] as $item) {
+            if ($item['last_activity_ts'] !== null) {
+                if ($maxActivityTs === null || $item['last_activity_ts'] > $maxActivityTs) {
+                    $maxActivityTs = $item['last_activity_ts'];
+                }
+            }
+        }
+
+        foreach ($honeyGroup['items'] as &$item) {
+            $item['is_legacy'] = false;
+            if ($maxActivityTs !== null) {
+                if ($item['last_activity_ts'] === null || $item['last_activity_ts'] < $maxActivityTs) {
+                    $item['is_legacy'] = true;
+                }
+            }
+            unset($item['last_activity_ts']);
+        }
+        unset($item);
+
         usort($honeyGroup['items'], static function ($a, $b) use ($normalizeText) {
             return strcmp($normalizeText($a['variety_display']), $normalizeText($b['variety_display']));
         });
@@ -3194,10 +3206,6 @@ if ($section === 'honey') {
                                                     <?php if (!empty($item['is_legacy'])): ?>
                                                         <span class="badge bg-secondary text-light ms-1 legacy-honey-badge" title="<?php echo $item['last_activity_label'] ? 'آخر تحديث: ' . htmlspecialchars($item['last_activity_label']) : 'سجل قديم'; ?>">
                                                             <i class="bi bi-clock-history me-1"></i>قديم
-                                                        </span>
-                                                    <?php elseif (!empty($item['is_recent'])): ?>
-                                                        <span class="badge bg-primary ms-1 new-honey-badge" title="<?php echo $item['last_activity_label'] ? 'آخر تحديث: ' . htmlspecialchars($item['last_activity_label']) : 'تمت الإضافة حديثاً'; ?>">
-                                                            <i class="bi bi-stars me-1"></i>جديد
                                                         </span>
                                                     <?php endif; ?>
                                                 </td>
