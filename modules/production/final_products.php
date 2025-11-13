@@ -381,8 +381,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $transferErrors[] = 'المنتج المحدد غير صالح للنقل.';
                         break;
                     }
-                    $transferErrors[] = 'لا يمكن تحديد المنتج المرتبط بالتشغيلة المختارة. يرجى مراجعة البيانات.';
-                    break;
+
+                    // إبقاء المنتج بدون معرف، وسيتم ربطه لاحقاً أثناء إنشاء طلب النقل
+                    $transferItem['product_id'] = null;
                 }
                 unset($transferItem);
 
@@ -441,6 +442,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     array_map(static function ($item) {
                         return [
                             'product_id' => $item['product_id'],
+                            'batch_id' => $item['batch_id'] ?? null,
+                            'batch_number' => $item['batch_number'] ?? null,
                             'quantity' => $item['quantity'],
                             'notes' => $item['notes'] ?? null
                         ];
