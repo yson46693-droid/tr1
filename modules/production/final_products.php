@@ -2060,6 +2060,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
         fetch(batchDetailsEndpoint, {
             method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
@@ -2067,17 +2069,22 @@ document.addEventListener('DOMContentLoaded', function () {
             body: JSON.stringify({ batch_number: batchNumber })
         })
         .then(async (response) => {
+            const { status } = response;
             const contentType = response.headers.get('content-type') || '';
             const isJson = contentType.includes('application/json');
             const payload = isJson ? await response.json() : null;
 
             if (!response.ok || !payload) {
                 const message = payload?.message ?? 'تعذر تحميل تفاصيل التشغيلة.';
-                throw new Error(message);
+                const error = new Error(message);
+                error.status = status;
+                throw error;
             }
 
             if (!payload.success || !payload.batch) {
-                throw new Error(payload.message ?? 'تعذر تحميل تفاصيل التشغيلة.');
+                const error = new Error(payload.message ?? 'تعذر تحميل تفاصيل التشغيلة.');
+                error.status = status;
+                throw error;
             }
 
             return payload;
@@ -2113,10 +2120,20 @@ document.addEventListener('DOMContentLoaded', function () {
             batchDetailsRetryTimeoutId = null;
         })
         .catch((error) => {
-            if (attempt < batchDetailsMaxRetries) {
+            const status = typeof error === 'object' && error !== null ? error.status : undefined;
+            const isAuthError = status === 401 || status === 403 || status === 419;
+            let displayMessage = (error && error.message) ? error.message : 'تعذر تحميل تفاصيل التشغيلة.';
+
+            if (isAuthError) {
+                displayMessage = 'انتهت جلسة تسجيل الدخول. يرجى تحديث الصفحة وتسجيل الدخول مرة أخرى.';
+            } else if (displayMessage && /failed to fetch/i.test(displayMessage)) {
+                displayMessage = 'تعذر الاتصال بالخادم. تحقق من الاتصال ثم أعد المحاولة.';
+            }
+
+            if (attempt < batchDetailsMaxRetries && !isAuthError) {
                 loader.classList.add('d-none');
                 contentWrapper.classList.add('d-none');
-                errorAlert.textContent = `${error.message || 'تعذر تحميل تفاصيل التشغيلة.'} سيتم إعادة المحاولة خلال ثانيتين.`;
+                errorAlert.textContent = `${displayMessage} سيتم إعادة المحاولة خلال ثانيتين.`;
                 errorAlert.classList.remove('d-none');
 
                 batchDetailsRetryTimeoutId = window.setTimeout(() => {
@@ -2131,7 +2148,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
             loader.classList.add('d-none');
             contentWrapper.classList.add('d-none');
-            errorAlert.textContent = error.message || 'تعذر تحميل تفاصيل التشغيلة.';
+            errorAlert.textContent = displayMessage;
             errorAlert.classList.remove('d-none');
             batchDetailsIsLoading = false;
             batchDetailsRetryTimeoutId = null;

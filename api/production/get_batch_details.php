@@ -9,12 +9,19 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 
+$closeSession = static function (): void {
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+};
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode([
         'success' => false,
         'message' => 'طريقة الطلب غير مدعومة.'
     ], JSON_UNESCAPED_UNICODE);
+    $closeSession();
     exit;
 }
 
@@ -52,6 +59,7 @@ if ($batchNumber === '') {
         'success' => false,
         'message' => 'رقم التشغيلة مطلوب.'
     ], JSON_UNESCAPED_UNICODE);
+    $closeSession();
     exit;
 }
 
@@ -68,6 +76,7 @@ try {
         'success' => false,
         'message' => 'تعذر تهيئة الاتصال بقاعدة البيانات.'
     ], JSON_UNESCAPED_UNICODE);
+    $closeSession();
     exit;
 }
 
@@ -256,6 +265,7 @@ if (!$allowPublicReader && !isLoggedIn()) {
         'success' => false,
         'message' => 'غير مصرح بالوصول.'
     ], JSON_UNESCAPED_UNICODE);
+    $closeSession();
     exit;
 }
 
@@ -341,6 +351,7 @@ if ($isReaderRequest && $db) {
                         'success' => false,
                         'message' => 'تم تجاوز الحد المسموح به للطلبات من هذا العنوان. يرجى المحاولة لاحقًا.',
                     ], JSON_UNESCAPED_UNICODE);
+                    $closeSession();
                     exit;
                 }
             }
@@ -357,6 +368,7 @@ if ($isReaderRequest && $db) {
                         'success' => false,
                         'message' => 'تم تجاوز الحد المسموح به للطلبات لهذه الجلسة. يرجى المحاولة لاحقًا.',
                     ], JSON_UNESCAPED_UNICODE);
+                    $closeSession();
                     exit;
                 }
             }
@@ -391,6 +403,7 @@ try {
             'success' => false,
             'message' => $notFoundMessage
         ], JSON_UNESCAPED_UNICODE);
+        $closeSession();
         exit;
     }
 
@@ -740,6 +753,7 @@ try {
         $logReaderEvent('success', 'نجاح الاستعلام.', $batchNumberValue);
     }
 
+    $closeSession();
     echo json_encode([
         'success' => true,
         'batch' => [
@@ -816,6 +830,7 @@ try {
         );
     }
     http_response_code(500);
+    $closeSession();
     echo json_encode([
         'success' => false,
         'message' => 'حدث خطأ أثناء معالجة الطلب.'
