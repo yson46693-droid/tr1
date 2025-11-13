@@ -808,70 +808,13 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             const quantityLabel = formatQuantity(data.quantity_produced ?? data.quantity);
             const summaryRows = [
                 ['اسم المنتج', data.product_name ?? '—'],
-                ['رقم التشغيلة', data.batch_number ?? '—'],
                 ['تاريخ الإنتاج', data.production_date ?? '—'],
                 ['الكمية المنتجة', quantityLabel ?? data.quantity_produced ?? data.quantity ?? '—'],
             ];
 
-            const statusLabel = data.status_label
-                ?? (data.status ? (statusLabels[data.status] || data.status) : null);
-            if (statusLabel) {
-                summaryRows.push(['حالة التشغيلة', statusLabel]);
-            }
-
-            const primarySupplierNames = new Set();
-            if (data.honey_supplier_name) {
-                const honeyName = String(data.honey_supplier_name).trim();
-                summaryRows.push(['مورد العسل', honeyName || '—']);
-                if (honeyName) {
-                    primarySupplierNames.add(honeyName);
-                }
-            }
-            if (data.packaging_supplier_name) {
-                const packagingName = String(data.packaging_supplier_name).trim();
-                summaryRows.push(['مورد مواد التعبئة', packagingName || '—']);
-                if (packagingName) {
-                    primarySupplierNames.add(packagingName);
-                }
-            }
-
             const suppliers = Array.isArray(data.suppliers) ? data.suppliers : [];
-            const seenSupplierNames = new Set(primarySupplierNames);
-            const suppliersText = suppliers
-                .map(supplier => {
-                    const rawName = supplier?.name;
-                    const name = rawName ? String(rawName).trim() : '';
-                    if (!name || seenSupplierNames.has(name)) {
-                        return '';
-                    }
-                    seenSupplierNames.add(name);
-                    const rolesLabel = formatSupplierRoles(supplier);
-                    return rolesLabel ? `${name} (${rolesLabel})` : name;
-                })
-                .filter(Boolean)
-                .join('، ');
-
-            if (suppliersText) {
-                summaryRows.push(['الموردون المرتبطون', suppliersText]);
-            }
 
             const workers = Array.isArray(data.workers) ? data.workers : [];
-            const workersText = workers
-                .map(worker => worker?.full_name || worker?.username || 'عامل إنتاج')
-                .filter(Boolean)
-                .join('، ');
-
-            if (workersText) {
-                summaryRows.push(['طاقم الإنتاج', workersText]);
-            }
-
-            if (data.notes) {
-                summaryRows.push(['ملاحظات', data.notes]);
-            }
-
-            if (data.created_by_name) {
-                summaryRows.push(['مسؤول الإدخال', data.created_by_name]);
-            }
 
             batchSummary.hidden = false;
             batchSummary.innerHTML = `
@@ -887,50 +830,40 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             `;
 
             const packagingItems = Array.isArray(data.materials) && data.materials.length
-                ? data.materials.map(item => formatMaterialEntry(item, 'مادة تعبئة'))
+                ? data.materials.map(item => ({ ...formatMaterialEntry(item, 'مادة تعبئة'), category: 'مادة تعبئة' }))
                 : Array.isArray(data.packaging_materials)
-                    ? data.packaging_materials.map(item => formatMaterialEntry(item, 'مادة تعبئة'))
+                    ? data.packaging_materials.map(item => ({ ...formatMaterialEntry(item, 'مادة تعبئة'), category: 'مادة تعبئة' }))
                     : [];
-
             const rawItems = Array.isArray(data.raw_materials) && data.raw_materials.length
-                ? data.raw_materials.map(item => formatMaterialEntry(item, 'مادة خام'))
+                ? data.raw_materials.map(item => ({ ...formatMaterialEntry(item, 'مادة خام'), category: 'مادة خام' }))
                 : Array.isArray(data.raw_materials_source)
-                    ? data.raw_materials_source.map(item => formatMaterialEntry(item, 'مادة خام'))
+                    ? data.raw_materials_source.map(item => ({ ...formatMaterialEntry(item, 'مادة خام'), category: 'مادة خام' }))
                     : [];
 
-            const materialSections = [];
-            if (packagingItems.length) {
-                materialSections.push(`
-                    <h3>مواد التعبئة</h3>
-                    <table>
-                        ${packagingItems.map(item => `
-                            <tr>
-                                <th>${item.name ?? '—'}</th>
-                                <td>${item.details ?? ''}</td>
-                            </tr>
-                        `).join('')}
-                    </table>
-                `);
-            }
-            if (rawItems.length) {
-                materialSections.push(`
-                    <h3>المواد الخام</h3>
-                    <table>
-                        ${rawItems.map(item => `
-                            <tr>
-                                <th>${item.name ?? '—'}</th>
-                                <td>${item.details ?? ''}</td>
-                            </tr>
-                        `).join('')}
-                    </table>
-                `);
-            }
+            const allMaterials = [...packagingItems, ...rawItems];
 
-            if (materialSections.length) {
+            if (allMaterials.length) {
                 materialsCard.hidden = false;
                 materialsCard.innerHTML = `
                     <h2>تفاصيل المواد</h2>
-                    ${materialSections.join('<hr>')}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>النوع</th>
+                                <th>المادة</th>
+                                <th>التفاصيل</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        ${allMaterials.map(item => `
+                            <tr>
+                                <td>${item.category}</td>
+                                <td>${item.name ?? '—'}</td>
+                                <td>${item.details ?? '—'}</td>
+                            </tr>
+                        `).join('')}
+                        </tbody>
+                    </table>
                 `;
             } else {
                 materialsCard.hidden = true;
@@ -938,21 +871,37 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             }
 
             if (Array.isArray(data.suppliers) && data.suppliers.length) {
-                suppliersCard.hidden = false;
-                suppliersCard.innerHTML = `
-                    <h2>الموردون المرتبطون</h2>
-                    <table>
-                        ${data.suppliers.map(supplier => {
-                            const roles = formatSupplierRoles(supplier);
-                            return `
-                                <tr>
-                                    <th>${supplier.name ?? '—'}</th>
-                                    <td>${roles || '—'}</td>
-                                </tr>
-                            `;
-                        }).join('')}
-                    </table>
-                `;
+                const uniqueNames = [];
+                const seenNames = new Set();
+                data.suppliers.forEach(supplier => {
+                    const rawName = supplier?.name;
+                    const name = rawName ? String(rawName).trim() : '';
+                    if (!name || seenNames.has(name)) {
+                        return;
+                    }
+                    seenNames.add(name);
+                    uniqueNames.push({
+                        name,
+                        details: formatSupplierRoles(supplier)
+                    });
+                });
+                if (uniqueNames.length) {
+                    suppliersCard.hidden = false;
+                    suppliersCard.innerHTML = `
+                        <h2>الموردون المرتبطون</h2>
+                        <table>
+                            ${uniqueNames.map(entry => `
+                                    <tr>
+                                        <th>${entry.name}</th>
+                                        <td>${entry.details || '—'}</td>
+                                    </tr>
+                            `).join('')}
+                        </table>
+                    `;
+                } else {
+                    suppliersCard.hidden = true;
+                    suppliersCard.innerHTML = '';
+                }
             } else {
                 suppliersCard.hidden = true;
                 suppliersCard.innerHTML = '';
