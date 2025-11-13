@@ -363,6 +363,10 @@ if ($isPackagingPost) {
 $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
 $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts : [];
 
+if (!in_array('assets/css/production-page.css', $pageStylesheets, true)) {
+    $pageStylesheets[] = 'assets/css/production-page.css';
+}
+
 $isAjaxRequest = (
     (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') ||
     (!empty($_POST['is_ajax'])) ||
