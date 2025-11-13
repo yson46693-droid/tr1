@@ -681,46 +681,82 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
             [$transferId]
         );
         
+        // معلومات المخازن
+        $fromWarehouse = $db->queryOne(
+            "SELECT id, warehouse_type, vehicle_id FROM warehouses WHERE id = ?",
+            [$transfer['from_warehouse_id']]
+        );
+
+        if (!$fromWarehouse) {
+            throw new Exception('المخزن المصدر غير موجود');
+        }
+
+        $toWarehouse = $db->queryOne(
+            "SELECT id, warehouse_type, vehicle_id FROM warehouses WHERE id = ?",
+            [$transfer['to_warehouse_id']]
+        );
+
+        if (!$toWarehouse) {
+            throw new Exception('المخزن الوجهة غير موجود');
+        }
+
         // تنفيذ النقل
         foreach ($items as $item) {
             $batchId = isset($item['batch_id']) ? (int)$item['batch_id'] : null;
             $batchNumber = $item['batch_number'] ?? null;
             $batchNote = $batchNumber ? " - تشغيلة {$batchNumber}" : '';
 
-            // خروج من المخزن المصدر
-            $fromWarehouse = $db->queryOne(
-                "SELECT id FROM warehouses WHERE id = ?",
-                [$transfer['from_warehouse_id']]
-            );
-            
             // التحقق من توفر الكمية في المخزن المصدر
-            $availableStock = $db->queryOne(
-                "SELECT quantity FROM products WHERE id = ?",
-                [$item['product_id']]
-            );
-            
-            if (($availableStock['quantity'] ?? 0) < $item['quantity']) {
+            $requestedQuantity = (float) $item['quantity'];
+            $availableQuantity = 0.0;
+            $fromVehicleStockRow = null;
+
+            if (($fromWarehouse['warehouse_type'] ?? '') === 'vehicle' && !empty($fromWarehouse['vehicle_id'])) {
+                $fromVehicleStockRow = $db->queryOne(
+                    "SELECT quantity FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ?",
+                    [$fromWarehouse['vehicle_id'], $item['product_id']]
+                );
+                $availableQuantity = (float) ($fromVehicleStockRow['quantity'] ?? 0);
+            } else {
+                $availableStock = $db->queryOne(
+                    "SELECT quantity FROM products WHERE id = ?",
+                    [$item['product_id']]
+                );
+                $availableQuantity = (float) ($availableStock['quantity'] ?? 0);
+            }
+
+            if ($availableQuantity < $requestedQuantity) {
                 throw new Exception("الكمية غير متوفرة في المخزن المصدر");
             }
             
             // تسجيل حركة خروج
-            recordInventoryMovement(
+            $movementOut = recordInventoryMovement(
                 $item['product_id'],
                 $transfer['from_warehouse_id'],
                 'out',
-                $item['quantity'],
+                $requestedQuantity,
                 'warehouse_transfer',
                 $transferId,
                 "نقل إلى مخزن آخر{$batchNote}",
                 $approvedBy
             );
+
+            if (empty($movementOut['success'])) {
+                $message = $movementOut['message'] ?? 'تعذر تسجيل حركة الخروج من المخزن المصدر.';
+                throw new Exception($message);
+            }
+
+            // تحديث مخزون السيارة المصدر إن وجد
+            if (($fromWarehouse['warehouse_type'] ?? '') === 'vehicle' && !empty($fromWarehouse['vehicle_id'])) {
+                $remainingQuantity = max(0.0, $availableQuantity - $requestedQuantity);
+                $updateVehicleResult = updateVehicleInventory($fromWarehouse['vehicle_id'], $item['product_id'], $remainingQuantity, $approvedBy);
+                if (empty($updateVehicleResult['success'])) {
+                    $message = $updateVehicleResult['message'] ?? 'تعذر تحديث مخزون السيارة المصدر.';
+                    throw new Exception($message);
+                }
+            }
             
             // دخول إلى المخزن الوجهة
-            $toWarehouse = $db->queryOne(
-                "SELECT id, vehicle_id FROM warehouses WHERE id = ?",
-                [$transfer['to_warehouse_id']]
-            );
-            
             // إذا كان المخزن الوجهة سيارة، تحديث مخزون السيارة
             if ($toWarehouse && $toWarehouse['vehicle_id']) {
                 $currentInventory = $db->queryOne(
@@ -730,20 +766,29 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
                 );
                 
                 $newQuantity = ($currentInventory['quantity'] ?? 0) + $item['quantity'];
-                updateVehicleInventory($toWarehouse['vehicle_id'], $item['product_id'], $newQuantity, $approvedBy);
+                $updateVehicleResult = updateVehicleInventory($toWarehouse['vehicle_id'], $item['product_id'], $newQuantity, $approvedBy);
+                if (empty($updateVehicleResult['success'])) {
+                    $message = $updateVehicleResult['message'] ?? 'تعذر تحديث مخزون السيارة الوجهة.';
+                    throw new Exception($message);
+                }
             }
             
             // تسجيل حركة دخول
-            recordInventoryMovement(
+            $movementIn = recordInventoryMovement(
                 $item['product_id'],
                 $transfer['to_warehouse_id'],
                 'in',
-                $item['quantity'],
+                $requestedQuantity,
                 'warehouse_transfer',
                 $transferId,
                 "نقل من مخزن آخر{$batchNote}",
                 $approvedBy
             );
+
+            if (empty($movementIn['success'])) {
+                $message = $movementIn['message'] ?? 'تعذر تسجيل حركة الدخول إلى المخزن الوجهة.';
+                throw new Exception($message);
+            }
         }
         
         // تحديث حالة الطلب إلى مكتمل
