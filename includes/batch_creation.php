@@ -920,13 +920,21 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
                 } elseif (isset($materialRow['supplier_id'])) {
                     $supplierId = (int) $materialRow['supplier_id'];
                 }
-                if ($supplierId) {
-                    $collectSupplier($supplierId, 'raw_material');
-                }
 
                 $usageMatch = $rawUsageByTemplateId[(int)($materialRow['id'] ?? 0)] ?? $rawUsageByName[$normalizeName($materialName)] ?? null;
                 if ($usageMatch && $supplierId === null && !empty($usageMatch['supplier_id'])) {
                     $supplierId = (int)$usageMatch['supplier_id'];
+                }
+
+                if ($supplierId) {
+                    $usageName = '';
+                    if (is_array($usageMatch)) {
+                        $usageName = (string)($usageMatch['material_name'] ?? $usageMatch['display_name'] ?? '');
+                    }
+                    $supplierMaterialName = $usageName !== ''
+                        ? $usageName
+                        : ($materialName !== '' ? $materialName : ($detailEntry['name'] ?? $detailEntry['material_name'] ?? 'مادة خام'));
+                    $collectSupplier($supplierId, 'raw_material', $supplierMaterialName);
                 }
 
                 $materialsForStockDeduction[] = [
