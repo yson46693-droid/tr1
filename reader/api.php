@@ -74,6 +74,133 @@ try {
 }
 
 try {
+    if (!function_exists('readerTableExists')) {
+        function readerTableExists($dbInstance, string $table): bool
+        {
+            static $cache = [];
+            $table = trim($table);
+            if ($table === '') {
+                return false;
+            }
+            if (array_key_exists($table, $cache)) {
+                return $cache[$table];
+            }
+
+            try {
+                $result = $dbInstance->queryOne("SHOW TABLES LIKE ?", [$table]);
+                $cache[$table] = !empty($result);
+            } catch (Throwable $e) {
+                error_log('Reader table exists check error for ' . $table . ': ' . $e->getMessage());
+                $cache[$table] = false;
+            }
+
+            return $cache[$table];
+        }
+    }
+
+    if (!function_exists('readerColumnExists')) {
+        function readerColumnExists($dbInstance, string $table, string $column): bool
+        {
+            static $cache = [];
+            $table = trim($table);
+            $column = trim($column);
+            if ($table === '' || $column === '') {
+                return false;
+            }
+
+            $cacheKey = strtolower($table . ':' . $column);
+            if (array_key_exists($cacheKey, $cache)) {
+                return $cache[$cacheKey];
+            }
+
+            try {
+                $result = $dbInstance->queryOne("SHOW COLUMNS FROM `{$table}` LIKE ?", [$column]);
+                $cache[$cacheKey] = !empty($result);
+            } catch (Throwable $e) {
+                error_log('Reader column exists check error for ' . $table . '.' . $column . ': ' . $e->getMessage());
+                $cache[$cacheKey] = false;
+            }
+
+            return $cache[$cacheKey];
+        }
+    }
+
+    if (!function_exists('getReaderAccessLogMaxRows')) {
+        function getReaderAccessLogMaxRows(): int {
+            if (defined('READER_ACCESS_LOG_MAX_ROWS')) {
+                $value = (int) READER_ACCESS_LOG_MAX_ROWS;
+                if ($value > 0) {
+                    return $value;
+                }
+            }
+            return 50;
+        }
+    }
+
+    if (!function_exists('enforceReaderAccessLogLimit')) {
+        function enforceReaderAccessLogLimit($dbInstance = null, int $maxRows = 50) {
+            $maxRows = (int) $maxRows;
+            if ($maxRows < 1) {
+                $maxRows = 50;
+            }
+
+            try {
+                if ($dbInstance === null) {
+                    $dbInstance = db();
+                }
+
+                if (!$dbInstance) {
+                    return false;
+                }
+
+                $totalRow = $dbInstance->queryOne("SELECT COUNT(*) AS total FROM reader_access_log");
+                $total = isset($totalRow['total']) ? (int) $totalRow['total'] : 0;
+
+                if ($total <= $maxRows) {
+                    return true;
+                }
+
+                $toDelete = $total - $maxRows;
+                $batchSize = 50;
+
+                while ($toDelete > 0) {
+                    $currentBatch = min($batchSize, $toDelete);
+
+                    $oldest = $dbInstance->query(
+                        "SELECT id FROM reader_access_log ORDER BY created_at ASC, id ASC LIMIT ?",
+                        [$currentBatch]
+                    );
+
+                    if (empty($oldest)) {
+                        break;
+                    }
+
+                    $ids = array_map('intval', array_column($oldest, 'id'));
+                    $ids = array_filter($ids, static function ($id) {
+                        return $id > 0;
+                    });
+
+                    if (empty($ids)) {
+                        break;
+                    }
+
+                    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                    $dbInstance->execute(
+                        "DELETE FROM reader_access_log WHERE id IN ($placeholders)",
+                        $ids
+                    );
+
+                    $toDelete -= $currentBatch;
+                }
+
+                return true;
+            } catch (Throwable $e) {
+                error_log('Reader enforce log limit error: ' . $e->getMessage());
+                return false;
+            }
+        }
+    }
+
     $db = db();
 
     $tableCheck = $db->queryOne("SHOW TABLES LIKE 'reader_access_log'");
@@ -540,136 +667,4 @@ try {
         'message' => 'حدث خطأ أثناء معالجة الطلب.',
         'debug' => $errorMessage
     ], JSON_UNESCAPED_UNICODE);
-}
-
-if (!function_exists('readerTableExists')) {
-    function readerTableExists($dbInstance, string $table): bool
-    {
-        static $cache = [];
-        $table = trim($table);
-        if ($table === '') {
-            return false;
-        }
-        if (array_key_exists($table, $cache)) {
-            return $cache[$table];
-        }
-
-        try {
-            $result = $dbInstance->queryOne("SHOW TABLES LIKE ?", [$table]);
-            $cache[$table] = !empty($result);
-        } catch (Throwable $e) {
-            error_log('Reader table exists check error for ' . $table . ': ' . $e->getMessage());
-            $cache[$table] = false;
-        }
-
-        return $cache[$table];
-    }
-}
-
-if (!function_exists('readerColumnExists')) {
-    function readerColumnExists($dbInstance, string $table, string $column): bool
-    {
-        static $cache = [];
-        $table = trim($table);
-        $column = trim($column);
-        if ($table === '' || $column === '') {
-            return false;
-        }
-
-        $cacheKey = strtolower($table . ':' . $column);
-        if (array_key_exists($cacheKey, $cache)) {
-            return $cache[$cacheKey];
-        }
-
-        try {
-            $result = $dbInstance->queryOne("SHOW COLUMNS FROM `{$table}` LIKE ?", [$column]);
-            $cache[$cacheKey] = !empty($result);
-        } catch (Throwable $e) {
-            error_log('Reader column exists check error for ' . $table . '.' . $column . ': ' . $e->getMessage());
-            $cache[$cacheKey] = false;
-        }
-
-        return $cache[$cacheKey];
-    }
-}
-
-if (!function_exists('getReaderAccessLogMaxRows')) {
-    function getReaderAccessLogMaxRows(): int {
-        if (defined('READER_ACCESS_LOG_MAX_ROWS')) {
-            $value = (int) READER_ACCESS_LOG_MAX_ROWS;
-            if ($value > 0) {
-                return $value;
-            }
-        }
-        return 50;
-    }
-}
-
-if (!function_exists('enforceReaderAccessLogLimit')) {
-    function enforceReaderAccessLogLimit($dbInstance = null, int $maxRows = 50) {
-        $maxRows = (int) $maxRows;
-        if ($maxRows < 1) {
-            $maxRows = 50;
-        }
-
-        try {
-            if ($dbInstance === null) {
-                $dbInstance = db();
-            }
-
-            if (!$dbInstance) {
-                return false;
-            }
-
-            $totalRow = $dbInstance->queryOne("SELECT COUNT(*) AS total FROM reader_access_log");
-            $total = isset($totalRow['total']) ? (int) $totalRow['total'] : 0;
-
-            if ($total <= $maxRows) {
-                return true;
-            }
-
-            $toDelete = $total - $maxRows;
-            $batchSize = 50;
-
-            while ($toDelete > 0) {
-                $currentBatch = min($batchSize, $toDelete);
-
-                $oldest = $dbInstance->query(
-                    "SELECT id FROM reader_access_log ORDER BY created_at ASC, id ASC LIMIT ?",
-                    [$currentBatch]
-                );
-
-                if (empty($oldest)) {
-                    break;
-                }
-
-                $ids = array_map('intval', array_column($oldest, 'id'));
-                $ids = array_filter($ids, static function ($id) {
-                    return $id > 0;
-                });
-
-                if (empty($ids)) {
-                    break;
-                }
-
-                $placeholders = implode(',', array_fill(0, count($ids), '?'));
-                $dbInstance->execute(
-                    "DELETE FROM reader_access_log WHERE id IN ($placeholders)",
-                    $ids
-                );
-
-                $deleted = count($ids);
-                $toDelete -= $deleted;
-
-                if ($deleted < $currentBatch) {
-                    break;
-                }
-            }
-
-            return true;
-        } catch (Throwable $e) {
-            error_log('Reader access log enforce limit error: ' . $e->getMessage());
-            return false;
-        }
-    }
 }

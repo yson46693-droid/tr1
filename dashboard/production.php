@@ -686,7 +686,7 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                     $dateExpression = $dateColumn === 'created_at' ? 'created_at' : $dateColumn;
                     if ($userIdColumn) {
                         $todayProduction = $db->query(
-                            "SELECT p.*, pr.name as product_name, u.full_name as worker_name 
+                            "SELECT p.*, COALESCE(p.product_name, pr.name) as product_name, u.full_name as worker_name 
                              FROM production p 
                              LEFT JOIN products pr ON p.product_id = pr.id 
                              LEFT JOIN users u ON p.{$userIdColumn} = u.id 
@@ -696,7 +696,7 @@ $pageTitle = isset($lang['production_dashboard']) ? $lang['production_dashboard'
                         );
                     } else {
                         $todayProduction = $db->query(
-                            "SELECT p.*, pr.name as product_name, 'غير محدد' as worker_name 
+                            "SELECT p.*, COALESCE(p.product_name, pr.name) as product_name, 'غير محدد' as worker_name 
                              FROM production p 
                              LEFT JOIN products pr ON p.product_id = pr.id 
                              WHERE DATE(p.{$dateExpression}) = CURDATE() 

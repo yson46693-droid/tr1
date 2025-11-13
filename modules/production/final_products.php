@@ -482,7 +482,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
                         $result['transfer_number'] ?? '#'
                     );
-                    productionSafeRedirect($productionInventoryUrl);
+                    productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                 }
 
                 $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
@@ -502,7 +502,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($name === '') {
             $_SESSION[$sessionErrorKey] = 'يرجى إدخال اسم المنتج الخارجي.';
-            productionSafeRedirect($managerInventoryUrl);
+            productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
         }
 
         if (!in_array($channel, ['company', 'delegate', 'other'], true)) {
@@ -547,7 +547,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$sessionErrorKey] = 'تعذر إضافة المنتج الخارجي. يرجى المحاولة لاحقاً.';
         }
 
-        productionSafeRedirect($managerInventoryUrl);
+        productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
     } elseif ($isManager && $postAction === 'adjust_external_stock') {
         $productId = intval($_POST['product_id'] ?? 0);
         $operation = $_POST['operation'] ?? 'add';
@@ -556,7 +556,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($productId <= 0 || $amount <= 0) {
             $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج وإدخال كمية صالحة.';
-            productionSafeRedirect($managerInventoryUrl);
+            productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
         }
 
         try {
@@ -567,7 +567,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$productRow) {
                 $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود أو ليس منتجاً خارجياً.';
-                productionSafeRedirect($managerInventoryUrl);
+                productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
             }
 
             $oldQuantity = floatval($productRow['quantity'] ?? 0);
@@ -576,7 +576,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($operation === 'discard') {
                 if ($amount > $oldQuantity) {
                     $_SESSION[$sessionErrorKey] = 'الكمية المراد إتلافها أكبر من الكمية المتاحة.';
-                    productionSafeRedirect($managerInventoryUrl);
+                    productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
                 }
                 $newQuantity = $oldQuantity - $amount;
             } else {
@@ -612,7 +612,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$sessionErrorKey] = 'تعذر تحديث كمية المنتج الخارجي.';
         }
 
-        productionSafeRedirect($managerInventoryUrl);
+        productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
     } elseif ($isManager && $postAction === 'update_external_product') {
         $productId = intval($_POST['product_id'] ?? 0);
         $name = trim((string)($_POST['edit_name'] ?? ''));
@@ -623,7 +623,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($productId <= 0 || $name === '') {
             $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج صالح وتحديد الاسم.';
-            productionSafeRedirect($managerInventoryUrl);
+            productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
         }
 
         if (!in_array($channel, ['company', 'delegate', 'other'], true)) {
@@ -639,7 +639,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (!$existing) {
                 $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود أو ليس منتجاً خارجياً.';
-                productionSafeRedirect($managerInventoryUrl);
+                productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
             }
 
             $db->execute(
@@ -684,7 +684,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION[$sessionErrorKey] = 'تعذر تحديث بيانات المنتج الخارجي.';
         }
 
-        productionSafeRedirect($managerInventoryUrl);
+        productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
     }
 }
 
@@ -2005,6 +2005,27 @@ document.addEventListener('DOMContentLoaded', function () {
             errorAlert.classList.add('d-none');
             errorAlert.textContent = '';
             contentWrapper.classList.remove('d-none');
+
+            const batchNumberValue = payload?.batch?.batch_number || batchNumber;
+            const metadata = (payload && typeof payload.metadata === 'object' && payload.metadata !== null)
+                ? payload.metadata
+                : {};
+
+            if (metadata) {
+                metadata.batch_number = metadata.batch_number || batchNumberValue;
+                if (payload?.context_token) {
+                    metadata.context_token = payload.context_token;
+                }
+                if (payload?.telegram_enabled !== undefined) {
+                    metadata.telegram_enabled = payload.telegram_enabled;
+                }
+                window.batchPrintInfo = metadata;
+            }
+
+            if (!Array.isArray(window.batchNumbersToPrint) || window.batchNumbersToPrint.length === 0) {
+                window.batchNumbersToPrint = batchNumberValue ? [batchNumberValue] : [];
+            }
+
             renderBatchDetails(payload.batch);
             batchDetailsIsLoading = false;
             batchDetailsRetryTimeoutId = null;

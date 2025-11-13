@@ -41,6 +41,7 @@ try {
     require_once __DIR__ . '/../../includes/db.php';
     require_once __DIR__ . '/../../includes/auth.php';
     require_once __DIR__ . '/../../includes/batch_numbers.php';
+    require_once __DIR__ . '/../../includes/simple_telegram.php';
 } catch (Throwable $bootstrapError) {
     error_log('get_batch_details bootstrap error: ' . $bootstrapError->getMessage());
     http_response_code(500);
@@ -370,16 +371,113 @@ try {
         }, $workersRows ?? []);
     }
 
+    $batchNumberValue = $batch['batch_number'] ?? $batchNumber;
+    $quantityResolved = $quantityValue ?? ($batch['quantity'] ?? null);
+    if ($quantityResolved !== null && is_numeric($quantityResolved)) {
+        $quantityResolved = (int) $quantityResolved;
+    }
+
+    $unitLabel = $batch['unit'] ?? ($batchNumberRecord['unit'] ?? 'قطعة');
+
+    $workersNames = array_values(array_filter(array_map(static function ($worker) {
+        return isset($worker['full_name']) ? trim((string) $worker['full_name']) : '';
+    }, $workersFormatted)));
+
+    $workerIds = array_values(array_filter(array_map(static function ($worker) {
+        return isset($worker['worker_id']) ? (int) $worker['worker_id'] : 0;
+    }, $workersFormatted), static function ($value) {
+        return $value > 0;
+    }));
+
+    $extraSuppliersNames = [];
+    $extraSupplierIds = [];
+    foreach ($suppliersFormatted as $supplierEntry) {
+        $roles = $supplierEntry['roles'] ?? [];
+        $roles = is_array($roles) ? $roles : [];
+        $hasExtraRole = false;
+        foreach ($roles as $roleValue) {
+            if (stripos((string) $roleValue, 'extra') !== false) {
+                $hasExtraRole = true;
+                break;
+            }
+        }
+        if ($hasExtraRole) {
+            if (!empty($supplierEntry['name'])) {
+                $extraSuppliersNames[] = $supplierEntry['name'];
+            }
+            if (!empty($supplierEntry['supplier_id'])) {
+                $extraSupplierIds[] = (int) $supplierEntry['supplier_id'];
+            }
+        }
+    }
+    $extraSuppliersNames = array_values(array_unique(array_filter($extraSuppliersNames)));
+    $extraSupplierIds = array_values(array_unique(array_filter($extraSupplierIds)));
+
+    $metadata = [
+        'batch_number' => $batchNumberValue,
+        'batch_id' => $batch['id'] ?? null,
+        'production_id' => $batch['production_id'] ?? null,
+        'product_id' => $batch['product_id'] ?? ($batchNumberRecord['product_id'] ?? null),
+        'product_name' => $productName,
+        'production_date' => $productionDate,
+        'quantity' => $quantityResolved,
+        'unit' => $unitLabel,
+        'quantity_unit_label' => $unitLabel,
+        'created_by' => $createdByName,
+        'created_by_id' => $batchNumberRecord['created_by'] ?? null,
+        'workers' => $workersNames,
+        'workers_ids' => $workerIds,
+        'honey_supplier_name' => $honeySupplierName,
+        'honey_supplier_id' => $honeySupplierId,
+        'packaging_supplier_name' => $packagingSupplierName,
+        'packaging_supplier_id' => $packagingSupplierId,
+        'extra_suppliers' => $extraSuppliersNames,
+        'extra_suppliers_ids' => $extraSupplierIds,
+        'notes' => $notes,
+        'raw_materials' => $rawMaterialsFormatted,
+        'packaging_materials' => $packagingFormatted,
+        'template_id' => $batchNumberRecord['template_id'] ?? null,
+        'timestamp' => date('c'),
+    ];
+
+    $contextToken = null;
+    if (function_exists('random_bytes')) {
+        try {
+            $contextToken = bin2hex(random_bytes(16));
+        } catch (Throwable $tokenError) {
+            $contextToken = null;
+        }
+    }
+    if (!$contextToken && function_exists('openssl_random_pseudo_bytes')) {
+        $opensslBytes = @openssl_random_pseudo_bytes(16);
+        if ($opensslBytes !== false) {
+            $contextToken = bin2hex($opensslBytes);
+        }
+    }
+    if (!$contextToken) {
+        $contextToken = sha1(uniqid((string) mt_rand(), true));
+    }
+
+    $metadata['context_token'] = $contextToken;
+
+    $_SESSION['created_batch_context_token'] = $contextToken;
+    $_SESSION['created_batch_metadata'] = $metadata;
+    $_SESSION['created_batch_numbers'] = [$batchNumberValue];
+    $_SESSION['created_batch_product_name'] = $productName ?? '';
+    $_SESSION['created_batch_quantity'] = $quantityResolved ?? 0;
+
+    $telegramEnabled = isTelegramConfigured();
+
     echo json_encode([
         'success' => true,
         'batch' => [
             'id' => $batch['id'] ?? null,
-            'batch_number' => $batch['batch_number'] ?? $batchNumber,
+            'batch_number' => $batchNumberValue,
             'product_name' => $productName,
             'product_category' => $productCategory,
             'production_date' => $productionDate,
-            'quantity' => $quantityValue ?? ($batch['quantity'] ?? null),
-            'quantity_produced' => $batch['quantity_produced'] ?? ($quantityValue ?? null),
+            'quantity' => $quantityResolved,
+            'quantity_produced' => $batch['quantity_produced'] ?? $quantityResolved,
             'status' => $statusKey,
             'status_label' => $statusLabel,
             'honey_supplier_name' => $honeySupplierName,
@@ -389,7 +487,7 @@ try {
             'materials' => array_map(static function (array $item) {
                 $details = [];
                 if (isset($item['quantity_used']) && $item['quantity_used'] !== null) {
-                    $qty = (float)$item['quantity_used'];
+                    $qty = (float) $item['quantity_used'];
                     $details[] = rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.');
                 }
                 if (!empty($item['supplier_name'])) {
@@ -403,7 +501,7 @@ try {
             'raw_materials' => array_map(static function (array $item) {
                 $details = [];
                 if (isset($item['quantity_used']) && $item['quantity_used'] !== null) {
-                    $qty = (float)$item['quantity_used'];
+                    $qty = (float) $item['quantity_used'];
                     $unit = $item['unit'] ?? '';
                     $quantityLabel = rtrim(rtrim(number_format($qty, 3, '.', ''), '0'), '.');
                     $details[] = trim($quantityLabel . ($unit ? ' ' . $unit : ''));
@@ -423,7 +521,14 @@ try {
             'suppliers' => $suppliersFormatted,
             'packaging_materials' => $packagingFormatted,
             'raw_materials_source' => $rawMaterialsFormatted,
-        ]
+            'telegram_enabled' => $telegramEnabled,
+            'context_token' => $contextToken,
+        ],
+        'metadata' => $metadata,
+        'context_token' => $contextToken,
+        'telegram_enabled' => $telegramEnabled,
+        'quantity' => $quantityResolved,
+        'product_name' => $productName,
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $apiError) {
     error_log('get_batch_details error: ' . $apiError->getMessage());
