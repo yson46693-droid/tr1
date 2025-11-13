@@ -35,11 +35,6 @@ if ($page === 'packaging_warehouse' && isset($_GET['ajax']) && isset($_GET['mate
 
 $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
 $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts : [];
-if ($page === 'chat') {
-    $pageStylesheets[] = 'assets/css/chat.css';
-    $chatScriptPath = getRelativeUrl('assets/js/chat.js');
-    $extraScripts[] = $chatScriptPath . '?v=' . urlencode(APP_VERSION);
-}
 require_once __DIR__ . '/../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = $translations;
 $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : 'لوحة المدير';

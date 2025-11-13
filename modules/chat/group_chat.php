@@ -23,6 +23,23 @@ $currentUserRole = $currentUser['role'] ?? 'member';
 $apiBase = getRelativeUrl('api/chat');
 $roomName = 'غرفة فريق الشركة';
 
+$chatCssRelative = 'assets/css/chat.css';
+$chatJsRelative = 'assets/js/chat.js';
+$chatCssUrl = getRelativeUrl($chatCssRelative);
+$chatJsUrl = getRelativeUrl($chatJsRelative);
+
+$chatCssContent = '';
+$chatCssFile = __DIR__ . '/../../' . $chatCssRelative;
+if (file_exists($chatCssFile) && is_readable($chatCssFile)) {
+    $chatCssContent = trim((string) file_get_contents($chatCssFile));
+}
+
+$chatJsContent = '';
+$chatJsFile = __DIR__ . '/../../' . $chatJsRelative;
+if (file_exists($chatJsFile) && is_readable($chatJsFile)) {
+    $chatJsContent = trim((string) file_get_contents($chatJsFile));
+}
+
 $onlineUsers = getActiveUsers();
 $onlineCount = 0;
 foreach ($onlineUsers as $onlineUser) {
@@ -32,6 +49,12 @@ foreach ($onlineUsers as $onlineUser) {
 }
 $membersCount = count($onlineUsers);
 ?>
+
+<?php if ($chatCssContent !== ''): ?>
+<style><?php echo $chatCssContent; ?></style>
+<?php else: ?>
+<link rel="stylesheet" href="<?php echo htmlspecialchars($chatCssUrl, ENT_QUOTES, 'UTF-8'); ?>">
+<?php endif; ?>
 
 <div class="chat-app" data-chat-app
      data-current-user-id="<?php echo $currentUserId; ?>"
@@ -93,4 +116,9 @@ $membersCount = count($onlineUsers);
 <script>
     window.CHAT_API_BASE = '<?php echo htmlspecialchars($apiBase, ENT_QUOTES, 'UTF-8'); ?>';
 </script>
+<?php if ($chatJsContent !== ''): ?>
+<script><?php echo $chatJsContent; ?></script>
+<?php else: ?>
+<script src="<?php echo htmlspecialchars($chatJsUrl, ENT_QUOTES, 'UTF-8'); ?>" defer></script>
+<?php endif; ?>
 
