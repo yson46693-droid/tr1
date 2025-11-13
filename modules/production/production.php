@@ -3259,9 +3259,11 @@ $lang = isset($translations) ? $translations : [];
                  <?php echo $cardAttributes; ?>
                  onclick="openCreateFromTemplateModal(this)">
 
-                <div class="template-card-icon">
-                    <i class="bi bi-jar-fill"></i>
+                <div class="template-card-icon" aria-hidden="true">
+                    <i class="bi <?php echo htmlspecialchars($typeIcon, ENT_QUOTES, 'UTF-8'); ?>"></i>
                 </div>
+
+                <span class="visually-hidden"><?php echo htmlspecialchars($typeLabel, ENT_QUOTES, 'UTF-8'); ?></span>
 
                 <h6 class="template-title mb-0 text-center"<?php echo $templateNotes !== '' ? ' title="' . htmlspecialchars($templateNotes, ENT_QUOTES, 'UTF-8') . '"' : ''; ?>>
                     <?php echo htmlspecialchars($templateName, ENT_QUOTES, 'UTF-8'); ?>
