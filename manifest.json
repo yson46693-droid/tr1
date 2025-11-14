@@ -2,7 +2,7 @@
   "name": "المصطفى - AL MOUSTAFA",
   "short_name": "المصطفى",
   "description": "نظام إدارة متكامل للمصطفى - AL MOUSTAFA",
-  "start_url": "/",
+  "start_url": "/v1",
   "display": "standalone",
   "background_color": "#f4d03f",
   "theme_color": "#f1c40f",
