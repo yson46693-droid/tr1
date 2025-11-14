@@ -973,7 +973,10 @@ $lang = isset($translations) ? $translations : [];
                         <?php if ($currentUser['role'] === 'manager'): ?>
                             <div class="d-flex gap-2">
                                 <button class="btn btn-sm btn-outline-primary"
-                                        onclick="editTemplate(<?php echo $template['id']; ?>, '<?php echo $templateDetailsJsonBase64; ?>', true)"
+                                        data-template-id="<?php echo $template['id']; ?>"
+                                        data-template-data="<?php echo $templateDetailsJsonBase64; ?>"
+                                        data-template-encoded="base64"
+                                        onclick="editTemplateFromButton(this)"
                                         title="تعديل القالب">
                                     <i class="bi bi-pencil"></i>
                                 </button>
@@ -1841,6 +1844,32 @@ function createBatch(templateId, templateName, triggerButton) {
         });
 }
 
+// دالة مساعدة لقراءة البيانات من button element
+function editTemplateFromButton(buttonElement) {
+    if (!buttonElement || !(buttonElement instanceof HTMLElement)) {
+        console.error('Invalid button element');
+        return;
+    }
+    
+    const templateId = parseInt(buttonElement.getAttribute('data-template-id') || '0', 10);
+    const templateDataJson = buttonElement.getAttribute('data-template-data') || '';
+    const isBase64 = buttonElement.getAttribute('data-template-encoded') === 'base64';
+    
+    if (templateId <= 0) {
+        console.error('Invalid template ID:', templateId);
+        alert('معرف القالب غير صالح');
+        return;
+    }
+    
+    if (!templateDataJson || templateDataJson.trim() === '') {
+        console.error('Template data is empty');
+        alert('لا توجد بيانات للقالب');
+        return;
+    }
+    
+    editTemplate(templateId, templateDataJson, isBase64);
+}
+
 function editTemplate(templateId, templateDataJson, isBase64 = false) {
     let templateData;
     
@@ -1861,7 +1890,17 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
                 if (!jsonString || jsonString.trim() === '') {
                     throw new Error('Base64 string is empty');
                 }
-                jsonString = atob(jsonString);
+                
+                // فك التشفير من base64 مع دعم UTF-8
+                // استخدام decodeURIComponent مع escape للتعامل مع UTF-8 بشكل صحيح
+                const binaryString = atob(jsonString);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                
+                // تحويل bytes إلى UTF-8 string
+                jsonString = new TextDecoder('utf-8').decode(bytes);
                 
                 // التحقق من أن النتيجة بعد فك التشفير ليست فارغة
                 if (!jsonString || jsonString.trim() === '') {
@@ -1871,8 +1910,20 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
                 console.error('Error decoding base64:', base64Error);
                 console.error('Base64 data:', templateDataJson);
                 console.error('Template ID:', templateId);
-                alert('خطأ في فك تشفير بيانات القالب. يرجى تحديث الصفحة والمحاولة مرة أخرى.');
-                return;
+                
+                // محاولة طريقة بديلة - استخدام decodeURIComponent
+                try {
+                    const binaryString = atob(jsonString);
+                    let decoded = '';
+                    for (let i = 0; i < binaryString.length; i++) {
+                        decoded += '%' + ('00' + binaryString.charCodeAt(i).toString(16)).slice(-2);
+                    }
+                    jsonString = decodeURIComponent(decoded);
+                } catch (altError) {
+                    console.error('Alternative decoding also failed:', altError);
+                    alert('خطأ في فك تشفير بيانات القالب. يرجى تحديث الصفحة والمحاولة مرة أخرى.');
+                    return;
+                }
             }
         }
         
