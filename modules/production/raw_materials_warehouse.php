@@ -2886,9 +2886,6 @@ $rawMaterialsReportGeneratedAt = $rawWarehouseReport['generated_at'] ?? date('Y-
             <i class="bi bi-file-bar-graph me-1"></i>
             انشاء تقرير المخزن
         </button>
-        <button type="button" class="btn text-white" style="background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);" data-bs-toggle="modal" data-bs-target="#createUnifiedTemplateModal">
-            <i class="bi bi-plus-circle me-2"></i>إنشاء قالب منتج
-        </button>
     </div>
 </div>
 
@@ -4640,101 +4637,6 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
     <?php
 }
 ?>
-
-<!-- Modal إنشاء قالب منتج -->
-<div class="modal fade" id="createUnifiedTemplateModal" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header bg-success text-white">
-                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>انشاء قالب منتج</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="POST" id="createUnifiedTemplateForm">
-                <input type="hidden" name="action" value="create_unified_template">
-                <input type="hidden" name="submit_token" value="">
-                
-                <div class="modal-body scrollable-modal-body">
-                    <!-- اسم المنتج -->
-                    <div class="mb-4">
-                        <label class="form-label fw-bold">اسم المنتج <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control form-control-lg" name="product_name" required 
-                               placeholder="مثال: مكسرات بالعسل 500 كجم">
-                    </div>
-                    
-                    <!-- المواد الخام -->
-                    <div class="mb-4">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="text-success mb-0"><i class="bi bi-droplet-fill me-2"></i>المواد الخام</h6>
-                            <button type="button" class="btn btn-success btn-sm" onclick="addMaterialRow()">
-                                <i class="bi bi-plus-circle me-1"></i>إضافة مادة
-                            </button>
-                        </div>
-                        
-                        <div id="materialsContainer">
-                            <!-- سيتم إضافة الصفوف هنا ديناميكياً -->
-                        </div>
-                    </div>
-                    
-                    <!-- أدوات التعبئة -->
-                    <div class="mb-4">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="text-primary mb-0"><i class="bi bi-box-seam me-2"></i>أدوات التعبئة</h6>
-                        </div>
-                        
-                        <?php if (empty($packagingMaterials)): ?>
-                            <div class="alert alert-warning">
-                                <i class="bi bi-exclamation-triangle me-2"></i>
-                                لا توجد أدوات تعبئة متاحة. يرجى إضافة أدوات التعبئة أولاً من صفحة المحاسب.
-                            </div>
-                        <?php else: ?>
-                            <div class="border rounded p-3" style="max-height: 250px; overflow-y: auto;">
-                                <?php foreach ($packagingMaterials as $pkg): ?>
-                                    <div class="d-flex align-items-center mb-3 p-2 bg-light rounded">
-                                        <div class="form-check flex-grow-1">
-                                            <input class="form-check-input" type="checkbox" 
-                                                   name="packaging[<?php echo $pkg['id']; ?>][id]" 
-                                                   value="<?php echo $pkg['id']; ?>" 
-                                                   id="pkg_<?php echo $pkg['id']; ?>">
-                                            <label class="form-check-label" for="pkg_<?php echo $pkg['id']; ?>">
-                                                <strong><?php echo htmlspecialchars($pkg['name']); ?></strong>
-                                                <span class="badge bg-secondary ms-2">
-                                                    <?php echo number_format($pkg['quantity'], 2); ?> كجم
-                                                </span>
-                                            </label>
-                                        </div>
-                                        <div class="ms-3" style="width: 150px;">
-                                            <input type="number" 
-                                                   class="form-control form-control-sm" 
-                                                   name="packaging[<?php echo $pkg['id']; ?>][quantity]" 
-                                                   step="0.001" 
-                                                   min="0.001" 
-                                                   value="1" 
-                                                   placeholder="الكمية">
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                            <small class="text-muted d-block mt-2">
-                                <i class="bi bi-info-circle me-1"></i>
-                                حدد الكمية المطلوبة لكل أداة تعبئة لكل وحدة إنتاج
-                            </small>
-                        <?php endif; ?>
-                    </div>
-                </div>
-                
-                <div class="modal-footer bg-light">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                        <i class="bi bi-x-circle me-2"></i>إلغاء
-                    </button>
-                    <button type="submit" class="btn btn-success">
-                        <i class="bi bi-check-circle me-2"></i>إنشاء القالب
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
 <?php
 $honeyVarietyOptionsMarkup = '';
 foreach ($honeyVarietiesCatalog as $catalogVariety => $meta) {
@@ -4812,7 +4714,9 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 
 <script>
-// دالة لإضافة صف مادة خام جديدة
+// تم نقل زر إنشاء قالب منتج والـ modal والدوال المرتبطة به إلى صفحة قوالب المنتجات
+// الكود التالي لم يعد مستخدماً وتم الاحتفاظ به فقط للتوافق (يمكن حذفه لاحقاً)
+/*
 let materialRowCount = 0;
 const honeyVarietyOptionsMarkup = <?php echo json_encode($honeyVarietyOptionsMarkup, JSON_UNESCAPED_UNICODE); ?>;
 const materialOptions = <?php echo json_encode([
@@ -4972,14 +4876,7 @@ function updateSuppliersForMaterial(rowId, materialType) {
 
     populateMaterialNameOptions(rowId, normalizedType);
 }
-
-// إضافة صف واحد عند فتح Modal
-document.getElementById('createUnifiedTemplateModal').addEventListener('shown.bs.modal', function () {
-    const container = document.getElementById('materialsContainer');
-    if (container.children.length === 0) {
-        addMaterialRow();
-    }
-});
+*/
 
 // إضافة توكن فريد لجميع النماذج لمنع تكرار الإرسال
 document.addEventListener('DOMContentLoaded', function() {
