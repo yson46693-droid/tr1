@@ -4285,6 +4285,49 @@ $lang = isset($translations) ? $translations : [];
 
 <?php
 $honeyStockDataForJs = [];
+$honeyVarietyTracker = [];
+
+$ensureHoneySupplierBucket = static function (int $supplierId) use (&$honeyStockDataForJs, &$honeyVarietyTracker): void {
+    if (!isset($honeyStockDataForJs[$supplierId])) {
+        $honeyStockDataForJs[$supplierId] = [
+            'all' => [],
+            'honey_raw' => [],
+            'honey_filtered' => [],
+        ];
+    }
+    if (!isset($honeyVarietyTracker[$supplierId])) {
+        $honeyVarietyTracker[$supplierId] = [];
+    }
+};
+
+$registerHoneyVariety = static function (int $supplierId, string $variety, float $rawQty = 0.0, float $filteredQty = 0.0) use (&$ensureHoneySupplierBucket, &$honeyVarietyTracker): void {
+    if ($supplierId <= 0) {
+        return;
+    }
+
+    $ensureHoneySupplierBucket($supplierId);
+
+    $normalizedVariety = trim($variety);
+    if ($normalizedVariety === '') {
+        $normalizedVariety = 'غير محدد';
+    }
+
+    $trackerKey = function_exists('mb_strtolower')
+        ? mb_strtolower($normalizedVariety, 'UTF-8')
+        : strtolower($normalizedVariety);
+
+    if (!isset($honeyVarietyTracker[$supplierId][$trackerKey])) {
+        $honeyVarietyTracker[$supplierId][$trackerKey] = [
+            'variety' => $normalizedVariety,
+            'raw_quantity' => 0.0,
+            'filtered_quantity' => 0.0,
+        ];
+    }
+
+    $honeyVarietyTracker[$supplierId][$trackerKey]['raw_quantity'] += $rawQty;
+    $honeyVarietyTracker[$supplierId][$trackerKey]['filtered_quantity'] += $filteredQty;
+};
+
 try {
     $honeyStockTableCheck = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
     if (!empty($honeyStockTableCheck)) {
@@ -4301,27 +4344,55 @@ try {
             if ($supplierId <= 0) {
                 continue;
             }
-            if (!isset($honeyStockDataForJs[$supplierId])) {
-                $honeyStockDataForJs[$supplierId] = [
-                    'all' => [],
-                    'honey_raw' => [],
-                    'honey_filtered' => []
-                ];
-            }
-            $varietyName = trim((string)($row['honey_variety'] ?? ''));
-            $entry = [
-                'variety' => $varietyName,
-                'raw_quantity' => (float)($row['raw_quantity'] ?? 0),
-                'filtered_quantity' => (float)($row['filtered_quantity'] ?? 0)
-            ];
-            $honeyStockDataForJs[$supplierId]['all'][] = $entry;
-            if ($entry['raw_quantity'] > 0) {
-                $honeyStockDataForJs[$supplierId]['honey_raw'][] = $entry;
-            }
-            if ($entry['filtered_quantity'] > 0) {
-                $honeyStockDataForJs[$supplierId]['honey_filtered'][] = $entry;
-            }
+            $varietyName = (string)($row['honey_variety'] ?? '');
+            $rawQuantity = (float)($row['raw_quantity'] ?? 0);
+            $filteredQuantity = (float)($row['filtered_quantity'] ?? 0);
+            $registerHoneyVariety($supplierId, $varietyName, $rawQuantity, $filteredQuantity);
         }
+    }
+
+    $batchNumbersTableCheck = $db->queryOne("SHOW TABLES LIKE 'batch_numbers'");
+    if (!empty($batchNumbersTableCheck)) {
+        $batchHoneyRows = $db->query("
+            SELECT DISTINCT
+                honey_supplier_id AS supplier_id,
+                honey_variety
+            FROM batch_numbers
+            WHERE honey_supplier_id IS NOT NULL
+              AND honey_supplier_id > 0
+              AND honey_variety IS NOT NULL
+              AND honey_variety <> ''
+        ");
+
+        foreach ($batchHoneyRows as $row) {
+            $supplierId = (int)($row['supplier_id'] ?? 0);
+            if ($supplierId <= 0) {
+                continue;
+            }
+            $varietyName = (string)$row['honey_variety'];
+            $registerHoneyVariety($supplierId, $varietyName, 0.0, 0.0);
+        }
+    }
+
+    foreach ($honeyVarietyTracker as $supplierId => $varieties) {
+        $allEntries = array_values($varieties);
+        $rawEntries = array_values(array_filter($allEntries, static function ($entry) {
+            return ($entry['raw_quantity'] ?? 0) > 0;
+        }));
+        $filteredEntries = array_values(array_filter($allEntries, static function ($entry) {
+            return ($entry['filtered_quantity'] ?? 0) > 0;
+        }));
+
+        if (empty($rawEntries)) {
+            $rawEntries = $allEntries;
+        }
+        if (empty($filteredEntries)) {
+            $filteredEntries = $allEntries;
+        }
+
+        $honeyStockDataForJs[$supplierId]['all'] = $allEntries;
+        $honeyStockDataForJs[$supplierId]['honey_raw'] = $rawEntries;
+        $honeyStockDataForJs[$supplierId]['honey_filtered'] = $filteredEntries;
     }
 } catch (Exception $honeyDataException) {
     error_log('Production honey stock fetch error: ' . $honeyDataException->getMessage());
