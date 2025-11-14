@@ -362,6 +362,207 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 error_log("Error creating template: " . $e->getMessage());
             }
         }
+    } elseif ($action === 'update_template') {
+        $templateId = intval($_POST['template_id'] ?? 0);
+        $productName = trim($_POST['product_name'] ?? '');
+        
+        // أدوات التعبئة
+        $packagingIds = [];
+        if (isset($_POST['packaging_ids']) && is_array($_POST['packaging_ids'])) {
+            $packagingIds = array_filter(array_map('intval', $_POST['packaging_ids']));
+        }
+
+        $packagingSelections = [];
+        if (!empty($packagingIds)) {
+            $packagingTableExists = false;
+            try {
+                $packagingTableExists = !empty($db->queryOne("SHOW TABLES LIKE 'packaging_materials'"));
+            } catch (Exception $e) {
+                $packagingTableExists = false;
+                error_log('Packaging table detection failed: ' . $e->getMessage());
+            }
+
+            $packagingMetadata = [];
+            if ($packagingTableExists) {
+                $placeholders = implode(', ', array_fill(0, count($packagingIds), '?'));
+                try {
+                    $packagingRows = $db->query(
+                        "SELECT id, name, unit FROM packaging_materials WHERE id IN ($placeholders)",
+                        $packagingIds
+                    );
+                    foreach ($packagingRows as $row) {
+                        $rowId = isset($row['id']) ? (int)$row['id'] : null;
+                        if ($rowId) {
+                            $packagingMetadata[$rowId] = [
+                                'name' => $row['name'] ?? '',
+                                'unit' => $row['unit'] ?? ''
+                            ];
+                        }
+                    }
+                } catch (Exception $e) {
+                    error_log('Packaging metadata lookup failed: ' . $e->getMessage());
+                    $packagingMetadata = [];
+                }
+            }
+
+            foreach ($packagingIds as $packagingId) {
+                $metadata = $packagingMetadata[$packagingId] ?? ['name' => '', 'unit' => ''];
+                $packagingName = trim((string)$metadata['name']) !== ''
+                    ? trim((string)$metadata['name'])
+                    : ('أداة تعبئة #' . $packagingId);
+                $packagingUnit = trim((string)$metadata['unit']) !== ''
+                    ? trim((string)$metadata['unit'])
+                    : 'وحدة';
+
+                $packagingSelections[] = [
+                    'id' => $packagingId,
+                    'name' => $packagingName,
+                    'unit' => $packagingUnit,
+                    'quantity_per_unit' => 1.0
+                ];
+            }
+        }
+        
+        // المواد الخام الأخرى
+        $rawMaterials = [];
+        if (isset($_POST['raw_materials']) && is_array($_POST['raw_materials'])) {
+            foreach ($_POST['raw_materials'] as $material) {
+                if (!empty($material['name']) && isset($material['quantity']) && $material['quantity'] > 0) {
+                    $rawMaterials[] = [
+                        'name' => trim($material['name']),
+                        'quantity' => floatval($material['quantity']),
+                        'unit' => trim($material['unit'] ?? 'جرام')
+                    ];
+                }
+            }
+        }
+        
+        $normalizedProductName = function_exists('mb_strtolower')
+            ? mb_strtolower($productName, 'UTF-8')
+            : strtolower($productName);
+        $existingTemplate = null;
+        if ($normalizedProductName !== '' && $templateId > 0) {
+            try {
+                $existingTemplate = $db->queryOne(
+                    "SELECT id FROM product_templates WHERE LOWER(product_name) = ? AND id != ? LIMIT 1",
+                    [$normalizedProductName, $templateId]
+                );
+            } catch (Exception $e) {
+                error_log('Duplicate template check failed: ' . $e->getMessage());
+            }
+        }
+
+        if ($templateId <= 0) {
+            $error = 'معرّف القالب غير صحيح';
+        } elseif (empty($productName)) {
+            $error = 'يجب إدخال اسم المنتج';
+        } elseif ($existingTemplate) {
+            $error = 'اسم المنتج مستخدم بالفعل. يرجى اختيار اسم مختلف.';
+        } elseif (empty($packagingIds)) {
+            $error = 'يجب اختيار أداة تعبئة واحدة على الأقل';
+        } else {
+            try {
+                $db->beginTransaction();
+                
+                // التحقق من وجود القالب
+                $templateExists = $db->queryOne(
+                    "SELECT id FROM product_templates WHERE id = ?",
+                    [$templateId]
+                );
+                
+                if (!$templateExists) {
+                    throw new Exception('القالب غير موجود');
+                }
+                
+                $rawMaterialsPayload = [];
+
+                foreach ($rawMaterials as $materialEntry) {
+                    $rawMaterialsPayload[] = [
+                        'type' => 'ingredient',
+                        'name' => $materialEntry['name'],
+                        'material_name' => $materialEntry['name'],
+                        'quantity' => $materialEntry['quantity'],
+                        'quantity_per_unit' => $materialEntry['quantity'],
+                        'unit' => $materialEntry['unit']
+                    ];
+                }
+
+                $packagingPayload = array_map(static function (array $packaging) {
+                    return [
+                        'id' => $packaging['id'],
+                        'packaging_material_id' => $packaging['id'],
+                        'name' => $packaging['name'],
+                        'packaging_name' => $packaging['name'],
+                        'quantity_per_unit' => $packaging['quantity_per_unit'],
+                        'unit' => $packaging['unit']
+                    ];
+                }, $packagingSelections);
+
+                $templateDetailsPayload = [
+                    'product_name' => $productName,
+                    'status' => 'active',
+                    'template_type' => 'legacy',
+                    'raw_materials' => $rawMaterialsPayload,
+                    'packaging' => $packagingPayload,
+                    'submitted_at' => date('c'),
+                    'submitted_by' => $currentUser['id']
+                ];
+
+                $templateDetailsJson = json_encode(
+                    $templateDetailsPayload,
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+                );
+                if ($templateDetailsJson === false) {
+                    $templateDetailsJson = null;
+                }
+
+                // تحديث القالب
+                $db->execute(
+                    "UPDATE product_templates 
+                     SET product_name = ?, details_json = ?, updated_at = NOW()
+                     WHERE id = ?",
+                    [$productName, $templateDetailsJson, $templateId]
+                );
+                
+                // حذف أدوات التعبئة القديمة
+                $db->execute("DELETE FROM product_template_packaging WHERE template_id = ?", [$templateId]);
+                
+                // إضافة أدوات التعبئة الجديدة
+                foreach ($packagingSelections as $packaging) {
+                    $db->execute(
+                        "INSERT INTO product_template_packaging (template_id, packaging_material_id, packaging_name, quantity_per_unit) 
+                         VALUES (?, ?, ?, 1.000)",
+                        [$templateId, $packaging['id'], $packaging['name']]
+                    );
+                }
+                
+                // حذف المواد الخام القديمة
+                $db->execute("DELETE FROM product_template_raw_materials WHERE template_id = ?", [$templateId]);
+                
+                // إضافة المواد الخام الجديدة
+                foreach ($rawMaterials as $material) {
+                    $db->execute(
+                        "INSERT INTO product_template_raw_materials (template_id, material_name, quantity_per_unit, unit) 
+                         VALUES (?, ?, ?, ?)",
+                        [$templateId, $material['name'], $material['quantity'], $material['unit']]
+                    );
+                }
+                
+                $db->commit();
+                
+                logAudit($currentUser['id'], 'update', 'product_template', $templateId, null, ['product_name' => $productName]);
+                
+                // منع التكرار باستخدام redirect
+                $successMessage = 'تم تحديث قالب المنتج بنجاح';
+                $redirectParams = ['page' => 'product_templates'];
+                preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+                
+            } catch (Exception $e) {
+                $db->rollBack();
+                $error = 'حدث خطأ في تحديث القالب: ' . $e->getMessage();
+                error_log("Error updating template: " . $e->getMessage());
+            }
+        }
     } elseif ($action === 'delete_template') {
         $templateId = intval($_POST['template_id'] ?? 0);
         
@@ -731,11 +932,18 @@ $lang = isset($translations) ? $translations : [];
                             <?php echo $createdAtLabel; ?>
                         </div>
                         <?php if ($currentUser['role'] === 'manager'): ?>
-                            <button class="btn btn-sm btn-outline-danger"
-                                    onclick="deleteTemplate(<?php echo $template['id']; ?>, '<?php echo htmlspecialchars($template['product_name']); ?>')"
-                                    title="حذف القالب">
-                                <i class="bi bi-trash"></i>
-                            </button>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-outline-primary"
+                                        onclick="editTemplate(<?php echo $template['id']; ?>, '<?php echo htmlspecialchars($templateDetailsJson, ENT_QUOTES, 'UTF-8'); ?>')"
+                                        title="تعديل القالب">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        onclick="deleteTemplate(<?php echo $template['id']; ?>, '<?php echo htmlspecialchars($template['product_name']); ?>')"
+                                        title="حذف القالب">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -1077,6 +1285,73 @@ $lang = isset($translations) ? $translations : [];
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-check-circle me-2"></i>إنشاء القالب
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal تعديل قالب -->
+<div class="modal fade" id="editTemplateModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>تعديل قالب منتج</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editTemplateForm">
+                <input type="hidden" name="action" value="update_template">
+                <input type="hidden" name="template_id" id="editTemplateId">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">اسم المنتج <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control" name="product_name" id="editProductName" required 
+                               placeholder="مثل: عسل بالجوز 720 جرام">
+                        <small class="text-muted">أدخل اسم المنتج الذي سيتم إنتاجه</small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">أدوات التعبئة المستخدمة <span class="text-danger">*</span></label>
+                        <?php if (empty($packagingMaterials)): ?>
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-2"></i>
+                                لا توجد أدوات تعبئة متاحة. يرجى إضافة أدوات التعبئة أولاً من صفحة مخزن أدوات التعبئة.
+                            </div>
+                        <?php else: ?>
+                            <select class="form-select" name="packaging_ids[]" multiple required size="5" id="editPackagingSelect">
+                                <?php foreach ($packagingMaterials as $pkg): ?>
+                                    <option value="<?php echo $pkg['id']; ?>">
+                                        <?php echo htmlspecialchars($pkg['name']); ?>
+                                        <?php if (!empty($pkg['quantity'])): ?>
+                                            (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
+                                        <?php endif; ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="text-muted">يمكنك اختيار أكثر من أداة تعبئة (اضغط Ctrl/Cmd للاختيار المتعدد)</small>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <!-- المواد الخام الأخرى -->
+                    <div class="mb-3">
+                        <label class="form-label">المواد الخام الأساسية</label>
+                        <p class="text-muted small mb-2">
+                            أضف جميع المكوّنات المستخدمة في المنتج (مثل العسل، المكسرات، الإضافات...).<br>
+                            <strong>ملاحظة:</strong> نوع العسل يتم تحديده لاحقاً أثناء إنشاء تشغيلة الإنتاج.
+                        </p>
+                        <div id="editRawMaterialsContainer">
+                            <!-- سيتم إضافة المواد هنا ديناميكياً -->
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addEditRawMaterial()">
+                            <i class="bi bi-plus"></i> إضافة مادة خام
+                        </button>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle me-2"></i>حفظ التعديلات
                     </button>
                 </div>
             </form>
@@ -1510,6 +1785,133 @@ function createBatch(templateId, templateName, triggerButton) {
         });
 }
 
+function editTemplate(templateId, templateDataJson) {
+    let templateData;
+    try {
+        if (typeof templateDataJson === 'string') {
+            templateData = JSON.parse(templateDataJson);
+        } else {
+            templateData = templateDataJson;
+        }
+    } catch (e) {
+        console.error('Error parsing template data:', e);
+        alert('خطأ في قراءة بيانات القالب');
+        return;
+    }
+
+    // ملء البيانات في النموذج
+    document.getElementById('editTemplateId').value = templateId;
+    document.getElementById('editProductName').value = templateData.product_name || '';
+
+    // تحديد أدوات التعبئة
+    const packagingSelect = document.getElementById('editPackagingSelect');
+    if (packagingSelect && templateData.packaging && Array.isArray(templateData.packaging)) {
+        // إلغاء تحديد جميع الخيارات أولاً
+        Array.from(packagingSelect.options).forEach(option => {
+            option.selected = false;
+        });
+        
+        // تحديد أدوات التعبئة الموجودة في القالب
+        templateData.packaging.forEach(pkg => {
+            const packagingId = pkg.packaging_material_id || pkg.id;
+            if (packagingId) {
+                const option = packagingSelect.querySelector(`option[value="${packagingId}"]`);
+                if (option) {
+                    option.selected = true;
+                }
+            }
+        });
+    }
+
+    // ملء المواد الخام
+    const editContainer = document.getElementById('editRawMaterialsContainer');
+    if (editContainer) {
+        editContainer.innerHTML = '';
+        editMaterialIndex = 0;
+        
+        if (templateData.raw_materials && Array.isArray(templateData.raw_materials) && templateData.raw_materials.length > 0) {
+            templateData.raw_materials.forEach(material => {
+                addEditRawMaterial({
+                    name: material.material_name || material.name || '',
+                    quantity: material.quantity_per_unit || material.quantity || '',
+                    unit: material.unit || 'جرام'
+                });
+            });
+        } else {
+            addEditRawMaterial({ name: 'عسل', unit: 'جرام' });
+        }
+    }
+
+    // فتح النموذج
+    const modal = new bootstrap.Modal(document.getElementById('editTemplateModal'));
+    modal.show();
+}
+
+let editMaterialIndex = 0;
+
+function addEditRawMaterial(defaults = {}) {
+    const container = document.getElementById('editRawMaterialsContainer');
+    if (!container) {
+        return;
+    }
+    const defaultName = typeof defaults.name === 'string' ? defaults.name : '';
+    const defaultQuantity = typeof defaults.quantity === 'number' ? defaults.quantity : '';
+    const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'جرام';
+    const materialHtml = `
+        <div class="raw-material-item mb-2 border p-2 rounded">
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label class="form-label small">اسم المادة <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][name]" 
+                           placeholder="مثل: مكسرات، لوز" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small">الكمية <span class="text-danger">*</span></label>
+                    <input type="number" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][quantity]" 
+                           step="0.001" min="0.001" placeholder="0.000" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small">الوحدة</label>
+                    <input type="text" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][unit]" 
+                           value="جرام" placeholder="جرام">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">&nbsp;</label>
+                    <button type="button" class="btn btn-sm btn-danger w-100" onclick="removeRawMaterial(this)">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', materialHtml);
+    const newItem = container.lastElementChild;
+    if (newItem) {
+        const nameInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][name]"]`);
+        const quantityInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][quantity]"]`);
+        const unitInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][unit]"]`);
+        if (nameInput && defaultName) {
+            nameInput.value = defaultName;
+        }
+        if (quantityInput && defaultQuantity) {
+            quantityInput.value = Number(defaultQuantity).toFixed(3);
+        }
+        if (unitInput && defaultUnit) {
+            unitInput.value = defaultUnit;
+        }
+    }
+    editMaterialIndex++;
+}
+
+// إعادة تعيين الفهرس عند إغلاق modal التعديل
+document.getElementById('editTemplateModal')?.addEventListener('hidden.bs.modal', function () {
+    const container = document.getElementById('editRawMaterialsContainer');
+    if (container) {
+        container.innerHTML = '';
+    }
+    editMaterialIndex = 0;
+});
+
 function deleteTemplate(templateId, templateName) {
     if (confirm('هل أنت متأكد من حذف قالب "' + templateName + '"؟')) {
         const form = document.createElement('form');
@@ -1526,6 +1928,16 @@ function deleteTemplate(templateId, templateName) {
 // منع إرسال النموذج إذا لم يتم اختيار أدوات تعبئة
 document.getElementById('createTemplateForm')?.addEventListener('submit', function(e) {
     const packagingSelect = document.getElementById('packagingSelect');
+    if (packagingSelect && packagingSelect.selectedOptions.length === 0) {
+        e.preventDefault();
+        alert('يرجى اختيار أداة تعبئة واحدة على الأقل');
+        return false;
+    }
+});
+
+// منع إرسال النموذج إذا لم يتم اختيار أدوات تعبئة (للتعديل)
+document.getElementById('editTemplateForm')?.addEventListener('submit', function(e) {
+    const packagingSelect = document.getElementById('editPackagingSelect');
     if (packagingSelect && packagingSelect.selectedOptions.length === 0) {
         e.preventDefault();
         alert('يرجى اختيار أداة تعبئة واحدة على الأقل');
