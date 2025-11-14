@@ -1240,15 +1240,6 @@ $lang = isset($translations) ? $translations : [];
                     </span>
             <?php endif; ?>
                 </div>
-                <button
-                    type="button"
-                    id="printSalaryReportButton"
-                    class="btn btn-outline-primary btn-sm d-print-none ms-auto"
-                    aria-label="طباعة تفاصيل الراتب"
-                >
-                    <i class="bi bi-printer me-1"></i>
-                    طباعة التقرير
-                </button>
             </div>
         </div>
 
@@ -1799,13 +1790,6 @@ document.addEventListener('DOMContentLoaded', function() {
     var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
         return new bootstrap.Tooltip(tooltipTriggerEl);
     });
-
-    const printButton = document.getElementById('printSalaryReportButton');
-    if (printButton) {
-        printButton.addEventListener('click', function () {
-            window.print();
-        });
-    }
     
     // Form validation
     const forms = document.querySelectorAll('.needs-validation');
