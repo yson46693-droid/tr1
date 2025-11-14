@@ -11,7 +11,6 @@ require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
-require_once __DIR__ . '/../../includes/table_styles.php';
 
 requireRole('manager');
 
@@ -116,6 +115,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Location: ' . $redirectUrl);
     exit;
 }
+
+require_once __DIR__ . '/../../includes/table_styles.php';
 
 $productSpecifications = [];
 try {
