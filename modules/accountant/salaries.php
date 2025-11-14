@@ -91,6 +91,34 @@ if (empty($view)) {
 // التحقق من طلب عرض التقرير الشهري
 $showReport = isset($_GET['report']) && $_GET['report'] == '1';
 
+// تعريف دالة بناء الروابط (يجب تعريفها مبكراً لاستخدامها في معالجة POST)
+require_once __DIR__ . '/../../includes/path_helper.php';
+$rawScript = $_SERVER['PHP_SELF'] ?? '/dashboard/accountant.php';
+$rawScript = ltrim($rawScript, '/');
+if ($rawScript === '') {
+    $currentScript = 'dashboard/accountant.php';
+} else {
+    $dashboardPos = strpos($rawScript, 'dashboard/');
+    if ($dashboardPos !== false) {
+        $currentScript = substr($rawScript, $dashboardPos);
+    } else {
+        $currentScript = $rawScript;
+    }
+    if (strpos($currentScript, 'dashboard/') !== 0) {
+        $currentScript = 'dashboard/accountant.php';
+    }
+}
+$currentUrl = getRelativeUrl($currentScript);
+$viewBaseQuery = [
+    'page' => 'salaries',
+    'month' => $selectedMonth,
+    'year' => $selectedYear,
+];
+$buildViewUrl = function (string $targetView, array $extra = []) use ($currentUrl, $viewBaseQuery) {
+    $query = array_merge($viewBaseQuery, ['view' => $targetView], $extra);
+    return $currentUrl . '?' . http_build_query($query);
+};
+
 // قراءة الرسائل من session (Post-Redirect-Get pattern)
 if (isset($_SESSION['salaries_success'])) {
     $success = $_SESSION['salaries_success'];
@@ -611,33 +639,6 @@ if ($currentUser['role'] === 'manager') {
         $pendingModifications = [];
     }
 }
-
-require_once __DIR__ . '/../../includes/path_helper.php';
-$rawScript = $_SERVER['PHP_SELF'] ?? '/dashboard/accountant.php';
-$rawScript = ltrim($rawScript, '/');
-if ($rawScript === '') {
-    $currentScript = 'dashboard/accountant.php';
-} else {
-    $dashboardPos = strpos($rawScript, 'dashboard/');
-    if ($dashboardPos !== false) {
-        $currentScript = substr($rawScript, $dashboardPos);
-    } else {
-        $currentScript = $rawScript;
-    }
-    if (strpos($currentScript, 'dashboard/') !== 0) {
-        $currentScript = 'dashboard/accountant.php';
-    }
-}
-$currentUrl = getRelativeUrl($currentScript);
-$viewBaseQuery = [
-    'page' => 'salaries',
-    'month' => $selectedMonth,
-    'year' => $selectedYear,
-];
-$buildViewUrl = function (string $targetView, array $extra = []) use ($currentUrl, $viewBaseQuery) {
-    $query = array_merge($viewBaseQuery, ['view' => $targetView], $extra);
-    return $currentUrl . '?' . http_build_query($query);
-};
 
 // جلب طلبات السلف
 $advances = [];
