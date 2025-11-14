@@ -359,7 +359,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'material_name' => $materialName,
                         'material_type' => $materialType,
                         'quantity' => floatval($material['quantity']),
-                        'unit' => trim($material['unit'] ?? 'جرام')
+                        'unit' => trim($material['unit'] ?? 'كيلوجرام')
                     ];
                 }
             }
@@ -564,7 +564,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'material_name' => $materialName,
                         'material_type' => $materialType,
                         'quantity' => floatval($material['quantity']),
-                        'unit' => trim($material['unit'] ?? 'جرام')
+                        'unit' => trim($material['unit'] ?? 'كيلوجرام')
                     ];
                 }
             }
@@ -1871,7 +1871,7 @@ document.getElementById('createTemplateModal')?.addEventListener('show.bs.modal'
     if (container) {
         container.innerHTML = '';
         rawMaterialIndex = 0;
-        addRawMaterial({ name: 'عسل', unit: 'جرام' });
+        addRawMaterial({ name: 'عسل', unit: 'كيلوجرام' });
     }
 });
 
@@ -1894,7 +1894,7 @@ function addRawMaterial(defaults = {}) {
     }
     const defaultName = typeof defaults.name === 'string' ? defaults.name : '';
     const defaultQuantity = typeof defaults.quantity === 'number' ? defaults.quantity : '';
-    const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'جرام';
+    const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'كيلوجرام';
     
     // بناء خيارات القائمة المنسدلة
     const materialOptions = commonMaterials.map(material => {
@@ -1952,13 +1952,8 @@ function addRawMaterial(defaults = {}) {
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">الوحدة</label>
-                    <select class="form-select form-select-sm" name="raw_materials[${rawMaterialIndex}][unit]">
-                        <option value="جرام" ${defaultUnit === 'جرام' ? 'selected' : ''}>جرام</option>
-                        <option value="كيلوجرام" ${defaultUnit === 'كيلوجرام' ? 'selected' : ''}>كيلوجرام</option>
-                        <option value="مل" ${defaultUnit === 'مل' ? 'selected' : ''}>مل</option>
-                        <option value="لتر" ${defaultUnit === 'لتر' ? 'selected' : ''}>لتر</option>
-                        <option value="قطعة" ${defaultUnit === 'قطعة' ? 'selected' : ''}>قطعة</option>
-                    </select>
+                    <input type="text" class="form-control form-control-sm" name="raw_materials[${rawMaterialIndex}][unit]" 
+                           value="كيلوجرام" readonly style="background-color: #e9ecef;">
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">&nbsp;</label>
@@ -2567,11 +2562,11 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
                 addEditRawMaterial({
                     name: fullName,
                     quantity: material.quantity_per_unit || material.quantity || '',
-                    unit: material.unit || 'جرام'
+                    unit: material.unit || 'كيلوجرام'
                 });
             });
         } else {
-            addEditRawMaterial({ name: 'عسل', unit: 'جرام' });
+            addEditRawMaterial({ name: 'عسل', unit: 'كيلوجرام' });
         }
     }
 
@@ -2589,7 +2584,7 @@ function addEditRawMaterial(defaults = {}) {
     }
     const defaultName = typeof defaults.name === 'string' ? defaults.name : '';
     const defaultQuantity = typeof defaults.quantity === 'number' ? defaults.quantity : '';
-    const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'جرام';
+    const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'كيلوجرام';
     
     // بناء خيارات القائمة المنسدلة
     const materialOptions = commonMaterials.map(material => {
@@ -2653,13 +2648,8 @@ function addEditRawMaterial(defaults = {}) {
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">الوحدة</label>
-                    <select class="form-select form-select-sm" name="raw_materials[${editMaterialIndex}][unit]">
-                        <option value="جرام" ${defaultUnit === 'جرام' ? 'selected' : ''}>جرام</option>
-                        <option value="كيلوجرام" ${defaultUnit === 'كيلوجرام' ? 'selected' : ''}>كيلوجرام</option>
-                        <option value="مل" ${defaultUnit === 'مل' ? 'selected' : ''}>مل</option>
-                        <option value="لتر" ${defaultUnit === 'لتر' ? 'selected' : ''}>لتر</option>
-                        <option value="قطعة" ${defaultUnit === 'قطعة' ? 'selected' : ''}>قطعة</option>
-                    </select>
+                    <input type="text" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][unit]" 
+                           value="كيلوجرام" readonly style="background-color: #e9ecef;">
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">&nbsp;</label>
