@@ -5208,9 +5208,12 @@ function renderTemplateSuppliers(details) {
 
         const controlLabel = document.createElement('label');
         controlLabel.className = 'form-label fw-semibold small text-muted mb-1';
-        controlLabel.textContent = isHoneyType
-            ? 'المورد'
-            : 'اختر المورد المناسب';
+        if (isHoneyType) {
+            controlLabel.textContent = 'مورد العسل';
+        } else {
+            const typeLabel = typeLabelsMap[effectiveType] || 'المادة';
+            controlLabel.textContent = 'مورد ' + typeLabel;
+        }
         card.appendChild(controlLabel);
 
         const select = document.createElement('select');
@@ -5259,7 +5262,7 @@ function renderTemplateSuppliers(details) {
 
             const honeyLabel = document.createElement('label');
             honeyLabel.className = 'form-label fw-bold mb-1';
-            honeyLabel.textContent = 'نوع العسل';
+            honeyLabel.textContent = 'نوع العسل من المورد المختار';
 
             const honeySelect = document.createElement('select');
             honeySelect.className = 'form-select form-select-sm';
@@ -5271,7 +5274,7 @@ function renderTemplateSuppliers(details) {
 
             const honeyPlaceholder = document.createElement('option');
             honeyPlaceholder.value = '';
-            honeyPlaceholder.textContent = 'اختر المورد أولاً';
+            honeyPlaceholder.textContent = 'اختر مورد العسل أولاً';
             honeyPlaceholder.disabled = true;
             honeyPlaceholder.selected = true;
             honeySelect.appendChild(honeyPlaceholder);
@@ -5279,8 +5282,8 @@ function renderTemplateSuppliers(details) {
             const honeyHelper = document.createElement('small');
             honeyHelper.className = 'text-muted d-block mt-1';
             honeyHelper.textContent = isAggregatedHoneyCard
-                ? 'سيتم تطبيق الاختيار على جميع مواد العسل.'
-                : 'حدد نوع العسل المتاح لدى المورد.';
+                ? 'بعد اختيار مورد العسل، سيتم تطبيق نوع العسل على جميع مواد العسل.'
+                : 'بعد اختيار مورد العسل، اختر نوع العسل المتوفر لديه.';
 
             honeyWrapper.appendChild(honeyLabel);
             honeyWrapper.appendChild(honeySelect);
@@ -5323,9 +5326,13 @@ function renderTemplateSuppliers(details) {
             const updateHoneyHelperMessage = () => {
                 const selectedOption = honeySelect.options[honeySelect.selectedIndex];
                 if (!selectedOption || !selectedOption.value) {
-                    honeyHelper.textContent = isAggregatedHoneyCard
-                        ? 'سيتم تطبيق الاختيار على جميع مواد العسل.'
-                        : 'حدد نوع العسل المتاح لدى المورد.';
+                    if (!select.value || select.value === '') {
+                        honeyHelper.textContent = 'يرجى اختيار مورد العسل أولاً';
+                    } else {
+                        honeyHelper.textContent = isAggregatedHoneyCard
+                            ? 'اختر نوع العسل من القائمة أعلاه'
+                            : 'اختر نوع العسل المتاح لدى المورد المختار.';
+                    }
                     return;
                 }
                 const rawQty = parseFloat(selectedOption.dataset.raw || '0');
