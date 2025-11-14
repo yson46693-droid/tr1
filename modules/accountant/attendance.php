@@ -67,10 +67,13 @@ if (!empty($dateTo)) {
 
 $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
+// استبعاد المديرين من الاستعلامات
+$excludeManagersClause = "AND u.role != 'manager'";
+
 // Get total count
 $totalCountQuery = "SELECT COUNT(*) as total FROM attendance a 
                     LEFT JOIN users u ON a.user_id = u.id 
-                    $whereClause";
+                    " . (!empty($whereConditions) ? $whereClause . " " . $excludeManagersClause : "WHERE " . $excludeManagersClause);
 $totalCount = $db->queryOne($totalCountQuery, $params)['total'] ?? 0;
 $totalPages = ceil($totalCount / $perPage);
 
@@ -78,14 +81,14 @@ $totalPages = ceil($totalCount / $perPage);
 $attendanceQuery = "SELECT a.*, u.username, u.full_name, u.role 
                     FROM attendance a 
                     LEFT JOIN users u ON a.user_id = u.id 
-                    $whereClause 
+                    " . (!empty($whereConditions) ? $whereClause . " " . $excludeManagersClause : "WHERE " . $excludeManagersClause) . " 
                     ORDER BY a.date DESC, a.check_in DESC 
                     LIMIT ? OFFSET ?";
 $queryParams = array_merge($params, [$perPage, $offset]);
 $attendanceRecords = $db->query($attendanceQuery, $queryParams);
 
-// Get all users for filter
-$allUsers = $db->query("SELECT id, username, full_name FROM users WHERE status = 'active' ORDER BY username");
+// Get all users for filter (استبعاد المديرين)
+$allUsers = $db->query("SELECT id, username, full_name FROM users WHERE status = 'active' AND role != 'manager' ORDER BY username");
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';

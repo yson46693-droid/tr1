@@ -67,6 +67,7 @@ if (!defined('ACCESS_ALLOWED')) {
     <script src="<?php echo ASSETS_URL; ?>js/dark-mode.js?v=<?php echo $cacheVersion; ?>"></script>
     <script src="<?php echo ASSETS_URL; ?>js/pwa-install.js?v=<?php echo $cacheVersion; ?>"></script>
     <script src="<?php echo ASSETS_URL; ?>js/modal-link-interceptor.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/keyboard-shortcuts-global.js?v=<?php echo $cacheVersion; ?>"></script>
     
     <?php if (isset($extraScripts)): ?>
         <?php foreach ($extraScripts as $script): ?>

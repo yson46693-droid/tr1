@@ -24,9 +24,9 @@ $selectedMonth = $_GET['month'] ?? date('Y-m');
 $selectedUserId = $_GET['user_id'] ?? 0;
 $selectedDate = $_GET['date'] ?? '';
 
-// الحصول على قائمة المستخدمين
+// الحصول على قائمة المستخدمين (استبعاد المديرين)
 $users = $db->query(
-    "SELECT id, username, full_name, role FROM users WHERE status = 'active' ORDER BY full_name ASC"
+    "SELECT id, username, full_name, role FROM users WHERE status = 'active' AND role != 'manager' ORDER BY full_name ASC"
 );
 
 // التأكد من وجود الأعمدة الجديدة
@@ -58,7 +58,7 @@ foreach ($users as $user) {
 $selectedUserStats = null;
 $selectedUserRecords = [];
 if ($selectedUserId > 0) {
-    $selectedUser = $db->queryOne("SELECT * FROM users WHERE id = ?", [$selectedUserId]);
+    $selectedUser = $db->queryOne("SELECT * FROM users WHERE id = ? AND role != 'manager'", [$selectedUserId]);
     if ($selectedUser) {
         $selectedUserStats = getAttendanceStatistics($selectedUserId, $selectedMonth);
         $selectedUserDelay = calculateMonthlyDelaySummary($selectedUserId, $selectedMonth);
@@ -89,9 +89,17 @@ if ($selectedUserId > 0) {
         }
     }
 }
+
+// الحصول على رابط الصفحة الحالية للرجوع (بدون user_id للعودة للقائمة العامة)
+$backUrl = '?page=attendance_management&month=' . urlencode($selectedMonth);
 ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-calendar-check me-2"></i>متابعة الحضور والانصراف</h2>
+    <?php if ($selectedUserId > 0 && $selectedUserStats): ?>
+        <a href="<?php echo htmlspecialchars($backUrl); ?>" class="btn btn-back">
+            <i class="bi bi-arrow-right me-2"></i><span>رجوع</span>
+        </a>
+    <?php endif; ?>
 </div>
 
 <!-- فلترة -->
