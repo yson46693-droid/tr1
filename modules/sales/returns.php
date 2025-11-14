@@ -986,6 +986,7 @@ document.getElementById('addReturnItemBtn')?.addEventListener('click', function(
 });
 </script>
 <?php endif; ?>
+<?php endif; ?>
 <?php if ($section === 'exchanges'): ?>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h3 class="mb-0"><i class="bi bi-arrow-repeat me-2"></i>إدارة الاستبدال</h3>

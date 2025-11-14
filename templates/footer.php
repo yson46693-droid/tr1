@@ -42,6 +42,13 @@ if (!defined('ACCESS_ALLOWED')) {
         </div>
         <button type="button" class="btn-close btn-close-white position-absolute top-0 end-0 m-2" id="dismissInstallBanner" aria-label="إغلاق"></button>
     </div>
+
+    <div id="pwa-modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+        <div id="pwa-modal">
+            <button type="button" data-modal-close>إغلاق</button>
+            <iframe src="about:blank" title="Embedded content"></iframe>
+        </div>
+    </div>
     
     <?php
     // استخدام timestamp لـ cache busting (نفس المستخدم في header.php)
@@ -59,6 +66,7 @@ if (!defined('ACCESS_ALLOWED')) {
     <script src="<?php echo ASSETS_URL; ?>js/notifications.js?v=<?php echo $cacheVersion; ?>"></script>
     <script src="<?php echo ASSETS_URL; ?>js/dark-mode.js?v=<?php echo $cacheVersion; ?>"></script>
     <script src="<?php echo ASSETS_URL; ?>js/pwa-install.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo ASSETS_URL; ?>js/modal-link-interceptor.js?v=<?php echo $cacheVersion; ?>"></script>
     
     <?php if (isset($extraScripts)): ?>
         <?php foreach ($extraScripts as $script): ?>
