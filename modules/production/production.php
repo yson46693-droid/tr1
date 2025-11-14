@@ -5129,7 +5129,7 @@ function renderTemplateSuppliers(details) {
         entries: honeyComponentEntries,
         baseEntry: honeyComponentEntries[0] || null,
         extraEntries: honeyComponentEntries.slice(1),
-        renderAggregated: honeyComponentEntries.length > 1
+        renderAggregated: honeyComponentEntries.length > 0
     };
 
     components.forEach(function(component) {
@@ -5146,7 +5146,8 @@ function renderTemplateSuppliers(details) {
             || canonicalType === 'honey_main'
             || canonicalType === 'honey_general';
 
-        if (isHoneyType && honeyGroup.renderAggregated && honeyGroup.baseEntry && componentKey !== honeyGroup.baseEntry.key) {
+        // تجميع جميع مكوّنات العسل في بطاقة واحدة
+        if (isHoneyType && honeyGroup.baseEntry && componentKey !== honeyGroup.baseEntry.key) {
             return;
         }
 
@@ -5204,12 +5205,39 @@ function renderTemplateSuppliers(details) {
             }
         } else {
             card.classList.add('component-card-compact');
+            // إضافة عنوان للمكوّنات المجمعة
+            if (isAggregatedHoneyCard && aggregatedEntries.length > 0) {
+                const header = document.createElement('div');
+                header.className = 'component-card-header mb-2';
+                const title = document.createElement('span');
+                title.className = 'component-card-title';
+                if (aggregatedEntries.length === 1) {
+                    title.textContent = aggregatedEntries[0].component.name || aggregatedEntries[0].component.label || 'مكوّن عسل';
+                } else {
+                    title.textContent = 'مواد العسل (' + aggregatedEntries.length + ' مكوّن)';
+                }
+                header.appendChild(title);
+                card.appendChild(header);
+                
+                // إضافة معلومات المكوّنات
+                const meta = document.createElement('div');
+                meta.className = 'component-card-meta mb-2';
+                const metaList = aggregatedEntries.map(entry => {
+                    const name = entry.component.name || entry.component.label || 'مكوّن';
+                    const qty = entry.component.quantity || entry.component.amount || '';
+                    return name + (qty ? ' (' + qty + ')' : '');
+                }).join('، ');
+                meta.innerHTML = '<i class="bi bi-stars me-2"></i><span>' + metaList + '</span>';
+                card.appendChild(meta);
+            }
         }
 
         const controlLabel = document.createElement('label');
         controlLabel.className = 'form-label fw-semibold small text-muted mb-1';
         if (isHoneyType) {
-            controlLabel.textContent = 'مورد العسل';
+            controlLabel.textContent = aggregatedEntries.length > 1 
+                ? 'مورد العسل (سيتم تطبيقه على جميع مكوّنات العسل)'
+                : 'مورد العسل';
         } else {
             const typeLabel = typeLabelsMap[effectiveType] || 'المادة';
             controlLabel.textContent = 'مورد ' + typeLabel;
