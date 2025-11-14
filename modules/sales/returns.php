@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
 require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/returns.php';
+require_once __DIR__ . '/../../includes/exchanges.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/notifications.php';
 
@@ -20,8 +21,14 @@ requireRole(['sales', 'accountant', 'manager']);
 
 $currentUser = getCurrentUser();
 $db = db();
+$section = $_POST['section'] ?? ($_GET['section'] ?? 'returns');
+$section = in_array($section, ['returns', 'exchanges'], true) ? $section : 'returns';
 $error = '';
 $success = '';
+$exchangeError = '';
+$exchangeSuccess = '';
+
+ensureExchangeSchema();
 
 // التحقق من وجود جدول returns وإنشاؤه إذا لم يكن موجوداً
 $tableCheck = $db->queryOne("SHOW TABLES LIKE 'returns'");
@@ -153,6 +160,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
     
     if ($action === 'create_return') {
+        $section = 'returns';
         $saleId = intval($_POST['sale_id'] ?? 0);
         $customerId = intval($_POST['customer_id'] ?? 0);
         $salesRepId = !empty($_POST['sales_rep_id']) ? intval($_POST['sales_rep_id']) : $currentUser['id'];
@@ -199,6 +207,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $success = $result['message'];
             } else {
                 $error = $result['message'];
+            }
+        }
+    } elseif ($action === 'create_exchange') {
+        $section = 'exchanges';
+        $originalSaleId = intval($_POST['original_sale_id'] ?? 0);
+        $returnId = !empty($_POST['return_id']) ? intval($_POST['return_id']) : null;
+        $customerId = intval($_POST['customer_id'] ?? 0);
+        $salesRepId = !empty($_POST['sales_rep_id']) ? intval($_POST['sales_rep_id']) : $currentUser['id'];
+        $exchangeDate = $_POST['exchange_date'] ?? date('Y-m-d');
+        $exchangeType = $_POST['exchange_type'] ?? 'same_product';
+        $reason = trim($_POST['reason'] ?? '');
+
+        $returnItems = [];
+        if (!empty($_POST['return_items']) && is_array($_POST['return_items'])) {
+            foreach ($_POST['return_items'] as $item) {
+                if (!empty($item['product_id']) && $item['quantity'] > 0 && $item['unit_price'] > 0) {
+                    $returnItems[] = [
+                        'product_id' => intval($item['product_id']),
+                        'quantity' => floatval($item['quantity']),
+                        'unit_price' => floatval($item['unit_price'])
+                    ];
+                }
+            }
+        }
+
+        $newItems = [];
+        if (!empty($_POST['new_items']) && is_array($_POST['new_items'])) {
+            foreach ($_POST['new_items'] as $item) {
+                if (!empty($item['product_id']) && $item['quantity'] > 0 && $item['unit_price'] > 0) {
+                    $newItems[] = [
+                        'product_id' => intval($item['product_id']),
+                        'quantity' => floatval($item['quantity']),
+                        'unit_price' => floatval($item['unit_price'])
+                    ];
+                }
+            }
+        }
+
+        if ($originalSaleId <= 0 || $customerId <= 0 || empty($returnItems) || empty($newItems)) {
+            $exchangeError = 'يجب إدخال جميع البيانات المطلوبة';
+        } else {
+            $result = createExchange($originalSaleId, $returnId, $customerId, $salesRepId, $exchangeDate, $exchangeType, $reason, $returnItems, $newItems);
+            if ($result['success']) {
+                $exchangeSuccess = 'تم إنشاء الاستبدال بنجاح: ' . $result['exchange_number'];
+            } else {
+                $exchangeError = $result['message'] ?? 'حدث خطأ في إنشاء الاستبدال';
+            }
+        }
+    } elseif ($action === 'approve_exchange') {
+        $section = 'exchanges';
+        $exchangeId = intval($_POST['exchange_id'] ?? 0);
+
+        if ($exchangeId > 0) {
+            $result = approveExchange($exchangeId);
+            if ($result['success']) {
+                $exchangeSuccess = $result['message'];
+            } else {
+                $exchangeError = $result['message'];
             }
         }
     }
@@ -270,6 +336,134 @@ if ($hasSaleNumberColumn) {
 
 $products = $db->query("SELECT id, name, unit_price FROM products WHERE status = 'active' ORDER BY name");
 
+// إعداد فلاتر الاستبدال
+$exchangeFiltersRaw = [
+    'customer_id' => $_GET['exchange_customer_id'] ?? '',
+    'sales_rep_id' => $_GET['exchange_sales_rep_id'] ?? '',
+    'status' => $_GET['exchange_status'] ?? '',
+    'date_from' => $_GET['exchange_date_from'] ?? '',
+    'date_to' => $_GET['exchange_date_to'] ?? ''
+];
+
+if ($currentUser['role'] === 'sales') {
+    $exchangeFiltersRaw['sales_rep_id'] = $currentUser['id'];
+}
+
+$exchangeFilters = array_filter($exchangeFiltersRaw, static function ($value) {
+    return $value !== '';
+});
+
+$exchangeQueryParams = array_filter([
+    'exchange_customer_id' => $_GET['exchange_customer_id'] ?? '',
+    'exchange_sales_rep_id' => $_GET['exchange_sales_rep_id'] ?? '',
+    'exchange_status' => $_GET['exchange_status'] ?? '',
+    'exchange_date_from' => $_GET['exchange_date_from'] ?? '',
+    'exchange_date_to' => $_GET['exchange_date_to'] ?? ''
+], static function ($value) {
+    return $value !== '';
+});
+
+$exchangePageNum = isset($_GET['exch_p']) ? max(1, intval($_GET['exch_p'])) : 1;
+$exchangePerPage = 20;
+$exchangeOffset = ($exchangePageNum - 1) * $exchangePerPage;
+
+$exchangeTableExists = $db->queryOne("SHOW TABLES LIKE 'exchanges'");
+if (!empty($exchangeTableExists)) {
+    $exchangeCountSql = "SELECT COUNT(*) as total FROM exchanges e WHERE 1=1";
+    $exchangeCountParams = [];
+
+    if ($currentUser['role'] === 'sales') {
+        $exchangeCountSql .= " AND e.sales_rep_id = ?";
+        $exchangeCountParams[] = $currentUser['id'];
+    }
+
+    if (!empty($exchangeFilters['customer_id'])) {
+        $exchangeCountSql .= " AND e.customer_id = ?";
+        $exchangeCountParams[] = $exchangeFilters['customer_id'];
+    }
+
+    if (!empty($exchangeFilters['sales_rep_id'])) {
+        $exchangeCountSql .= " AND e.sales_rep_id = ?";
+        $exchangeCountParams[] = $exchangeFilters['sales_rep_id'];
+    }
+
+    if (!empty($exchangeFilters['status'])) {
+        $exchangeCountSql .= " AND e.status = ?";
+        $exchangeCountParams[] = $exchangeFilters['status'];
+    }
+
+    if (!empty($exchangeFilters['date_from'])) {
+        $exchangeCountSql .= " AND DATE(e.exchange_date) >= ?";
+        $exchangeCountParams[] = $exchangeFilters['date_from'];
+    }
+
+    if (!empty($exchangeFilters['date_to'])) {
+        $exchangeCountSql .= " AND DATE(e.exchange_date) <= ?";
+        $exchangeCountParams[] = $exchangeFilters['date_to'];
+    }
+
+    $exchangeTotalResult = $db->queryOne($exchangeCountSql, $exchangeCountParams);
+    $exchangeTotal = $exchangeTotalResult['total'] ?? 0;
+    $exchangeTotalPages = $exchangeTotal > 0 ? (int)ceil($exchangeTotal / $exchangePerPage) : 0;
+    $exchangeList = getExchanges($exchangeFilters, $exchangePerPage, $exchangeOffset);
+} else {
+    $exchangeTotal = 0;
+    $exchangeTotalPages = 0;
+    $exchangeList = [];
+    if ($exchangeError === '') {
+        $exchangeError = 'جدول الاستبدالات غير موجود. يرجى التحقق من قاعدة البيانات.';
+    }
+}
+
+$exchangeApprovedReturns = $db->query(
+    "SELECT r.id, r.return_number, c.name as customer_name 
+     FROM returns r
+     LEFT JOIN customers c ON r.customer_id = c.id
+     WHERE r.status = 'approved'
+     ORDER BY r.created_at DESC LIMIT 50"
+);
+
+// استبدال محدد للعرض
+$selectedExchange = null;
+if (isset($_GET['exchange_id'])) {
+    $selectedExchangeId = intval($_GET['exchange_id']);
+    if ($selectedExchangeId > 0) {
+        $selectedExchange = $db->queryOne(
+            "SELECT e.*, " . ($hasSaleNumberColumn ? "s.sale_number" : "s.id as sale_number") . ",
+                    c.name as customer_name,
+                    u.full_name as sales_rep_name,
+                    u2.full_name as approved_by_name
+             FROM exchanges e
+             LEFT JOIN sales s ON e.original_sale_id = s.id
+             LEFT JOIN customers c ON e.customer_id = c.id
+             LEFT JOIN users u ON e.sales_rep_id = u.id
+             LEFT JOIN users u2 ON e.approved_by = u2.id
+             WHERE e.id = ?",
+            [$selectedExchangeId]
+        );
+
+        if ($selectedExchange) {
+            $selectedExchange['return_items'] = $db->query(
+                "SELECT eri.*, p.name as product_name
+                 FROM exchange_return_items eri
+                 LEFT JOIN products p ON eri.product_id = p.id
+                 WHERE eri.exchange_id = ?
+                 ORDER BY eri.id",
+                [$selectedExchangeId]
+            );
+
+            $selectedExchange['new_items'] = $db->query(
+                "SELECT eni.*, p.name as product_name
+                 FROM exchange_new_items eni
+                 LEFT JOIN products p ON eni.product_id = p.id
+                 WHERE eni.exchange_id = ?
+                 ORDER BY eni.id",
+                [$selectedExchangeId]
+            );
+        }
+    }
+}
+
 // مرتجع محدد للعرض
 $selectedReturn = null;
 if (isset($_GET['id'])) {
@@ -310,14 +504,26 @@ if (isset($_GET['id'])) {
     }
 }
 ?>
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2><i class="bi bi-arrow-return-left me-2"></i>إدارة المرتجعات</h2>
-    <?php if (hasRole(['sales', 'accountant'])): ?>
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <h2 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>إدارة المرتجعات والاستبدال</h2>
+    <div class="btn-group" role="group" aria-label="Returns and exchanges sections">
+        <a href="?page=returns&section=returns" class="btn btn-sm <?php echo $section === 'returns' ? 'btn-primary' : 'btn-outline-primary'; ?>">
+            <i class="bi bi-arrow-return-left me-1"></i>المرتجعات
+        </a>
+        <a href="?page=returns&section=exchanges" class="btn btn-sm <?php echo $section === 'exchanges' ? 'btn-primary' : 'btn-outline-primary'; ?>">
+            <i class="bi bi-arrow-repeat me-1"></i>الاستبدال
+        </a>
+    </div>
+</div>
+
+<?php if ($section === 'returns'): ?>
+<?php if (hasRole(['sales', 'accountant'])): ?>
+<div class="mb-3">
     <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addReturnModal">
         <i class="bi bi-plus-circle me-2"></i>إنشاء مرتجع جديد
     </button>
-    <?php endif; ?>
 </div>
+<?php endif; ?>
 
 <?php if ($error): ?>
     <div class="alert alert-danger alert-dismissible fade show">
@@ -784,5 +990,7 @@ document.getElementById('addReturnItemBtn')?.addEventListener('click', function(
     // إضافة عنصر جديد
 });
 </script>
+<?php endif; ?>
+
 <?php endif; ?>
 
