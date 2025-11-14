@@ -795,14 +795,21 @@ if (!empty($packagingTableCheck)) {
     );
 }
 
-// جلب المواد الخام من مخزن الخامات
+// جلب المواد الخام من مخزن الخامات فقط
 $rawMaterialsFromWarehouse = [];
 
-// جلب أنواع العسل
+// جلب أنواع العسل من مخزن العسل
 try {
     $honeyStockExists = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
     if (!empty($honeyStockExists)) {
-        $honeyVarieties = $db->query("SELECT DISTINCT honey_variety FROM honey_stock WHERE honey_variety IS NOT NULL AND honey_variety != ''");
+        // جلب أنواع العسل الموجودة فعلياً
+        $honeyVarieties = $db->query("
+            SELECT DISTINCT honey_variety 
+            FROM honey_stock 
+            WHERE honey_variety IS NOT NULL 
+            AND honey_variety != '' 
+            AND (raw_honey_quantity > 0 OR filtered_honey_quantity > 0)
+        ");
         foreach ($honeyVarieties as $variety) {
             $varietyName = trim($variety['honey_variety']);
             if ($varietyName !== '') {
@@ -812,22 +819,36 @@ try {
                 ];
             }
         }
-        // إضافة العسل العام
-        if (empty($rawMaterialsFromWarehouse) || !in_array('عسل', array_column($rawMaterialsFromWarehouse, 'name'))) {
-            $rawMaterialsFromWarehouse[] = ['name' => 'عسل', 'type' => 'honey'];
+        // إضافة عسل خام ومصفى إذا كان هناك مخزون
+        $hasRawHoney = $db->queryOne("SELECT COUNT(*) as count FROM honey_stock WHERE raw_honey_quantity > 0");
+        $hasFilteredHoney = $db->queryOne("SELECT COUNT(*) as count FROM honey_stock WHERE filtered_honey_quantity > 0");
+        
+        if ($hasRawHoney && $hasRawHoney['count'] > 0) {
             $rawMaterialsFromWarehouse[] = ['name' => 'عسل خام', 'type' => 'honey'];
+        }
+        if ($hasFilteredHoney && $hasFilteredHoney['count'] > 0) {
             $rawMaterialsFromWarehouse[] = ['name' => 'عسل مصفى', 'type' => 'honey'];
+        }
+        // إضافة عسل عام إذا كان هناك أي مخزون
+        if (($hasRawHoney && $hasRawHoney['count'] > 0) || ($hasFilteredHoney && $hasFilteredHoney['count'] > 0)) {
+            $rawMaterialsFromWarehouse[] = ['name' => 'عسل', 'type' => 'honey'];
         }
     }
 } catch (Exception $e) {
     error_log('Failed to load honey varieties: ' . $e->getMessage());
 }
 
-// جلب المكسرات
+// جلب المكسرات من مخزن المكسرات
 try {
     $nutsStockExists = $db->queryOne("SHOW TABLES LIKE 'nuts_stock'");
     if (!empty($nutsStockExists)) {
-        $nutsTypes = $db->query("SELECT DISTINCT nut_type FROM nuts_stock WHERE nut_type IS NOT NULL AND nut_type != '' AND quantity > 0");
+        $nutsTypes = $db->query("
+            SELECT DISTINCT nut_type 
+            FROM nuts_stock 
+            WHERE nut_type IS NOT NULL 
+            AND nut_type != '' 
+            AND quantity > 0
+        ");
         foreach ($nutsTypes as $nut) {
             $nutName = trim($nut['nut_type']);
             if ($nutName !== '') {
@@ -837,21 +858,12 @@ try {
                 ];
             }
         }
-        // إضافة مكسرات عامة
-        if (empty(array_filter($rawMaterialsFromWarehouse, fn($m) => $m['type'] === 'nuts'))) {
-            $rawMaterialsFromWarehouse[] = ['name' => 'مكسرات', 'type' => 'nuts'];
-            $rawMaterialsFromWarehouse[] = ['name' => 'لوز', 'type' => 'nuts'];
-            $rawMaterialsFromWarehouse[] = ['name' => 'جوز', 'type' => 'nuts'];
-            $rawMaterialsFromWarehouse[] = ['name' => 'فستق', 'type' => 'nuts'];
-            $rawMaterialsFromWarehouse[] = ['name' => 'بندق', 'type' => 'nuts'];
-            $rawMaterialsFromWarehouse[] = ['name' => 'كاجو', 'type' => 'nuts'];
-        }
     }
 } catch (Exception $e) {
     error_log('Failed to load nuts: ' . $e->getMessage());
 }
 
-// جلب زيت الزيتون
+// جلب زيت الزيتون من مخزن زيت الزيتون
 try {
     $oliveOilExists = $db->queryOne("SHOW TABLES LIKE 'olive_oil_stock'");
     if (!empty($oliveOilExists)) {
@@ -864,7 +876,7 @@ try {
     error_log('Failed to load olive oil: ' . $e->getMessage());
 }
 
-// جلب شمع العسل
+// جلب شمع العسل من مخزن شمع العسل
 try {
     $beeswaxExists = $db->queryOne("SHOW TABLES LIKE 'beeswax_stock'");
     if (!empty($beeswaxExists)) {
@@ -878,11 +890,17 @@ try {
     error_log('Failed to load beeswax: ' . $e->getMessage());
 }
 
-// جلب المشتقات
+// جلب المشتقات من مخزن المشتقات
 try {
     $derivativesExists = $db->queryOne("SHOW TABLES LIKE 'derivatives_stock'");
     if (!empty($derivativesExists)) {
-        $derivativesTypes = $db->query("SELECT DISTINCT derivative_type FROM derivatives_stock WHERE derivative_type IS NOT NULL AND derivative_type != '' AND quantity > 0");
+        $derivativesTypes = $db->query("
+            SELECT DISTINCT derivative_type 
+            FROM derivatives_stock 
+            WHERE derivative_type IS NOT NULL 
+            AND derivative_type != '' 
+            AND quantity > 0
+        ");
         foreach ($derivativesTypes as $derivative) {
             $derivativeName = trim($derivative['derivative_type']);
             if ($derivativeName !== '') {
@@ -905,20 +923,6 @@ foreach ($rawMaterialsFromWarehouse as $material) {
     if ($name !== '' && !in_array($name, $seenNames)) {
         $uniqueMaterials[] = $material;
         $seenNames[] = $name;
-    }
-}
-
-// إضافة مواد إضافية شائعة إذا لم تكن موجودة
-$commonMaterials = [
-    'فانيليا', 'قرفة', 'زنجبيل', 'ليمون', 'عسل الملكة', 
-    'حبة البركة', 'طحينة', 'سكر', 'ملح', 'ماء', 'خل', 
-    'عصير ليمون', 'زعتر', 'زعتر بري'
-];
-
-foreach ($commonMaterials as $common) {
-    if (!in_array($common, $seenNames)) {
-        $uniqueMaterials[] = ['name' => $common, 'type' => 'other'];
-        $seenNames[] = $common;
     }
 }
 
