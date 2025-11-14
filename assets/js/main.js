@@ -424,3 +424,130 @@ document.addEventListener('DOMContentLoaded', function() {
     
 });
 
+(function() {
+    if (window.__sessionOverlayInstalled) {
+        return;
+    }
+    window.__sessionOverlayInstalled = true;
+
+    const SESSION_END_STATUS = new Set([401, 419, 440]);
+    let overlayActivated = false;
+
+    function getOverlayElement() {
+        return document.getElementById('sessionEndOverlay');
+    }
+
+    function getLoginUrl(overlay) {
+        if (!overlay) {
+            return '/index.php';
+        }
+        const loginUrlAttr = overlay.getAttribute('data-login-url') || overlay.dataset.loginUrl;
+        if (loginUrlAttr && loginUrlAttr.trim() !== '') {
+            return loginUrlAttr;
+        }
+        return '/index.php';
+    }
+
+    function redirectToLogin(loginUrl) {
+        window.location.href = loginUrl || '/index.php';
+    }
+
+    function showSessionOverlay(loginUrl) {
+        if (overlayActivated) {
+            return;
+        }
+        const overlay = getOverlayElement();
+        overlayActivated = true;
+
+        if (!overlay) {
+            redirectToLogin(loginUrl);
+            return;
+        }
+
+        overlay.removeAttribute('hidden');
+        overlay.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('session-ended');
+
+        const actionButton = overlay.querySelector('[data-action="return-login"]');
+        if (actionButton) {
+            setTimeout(function() {
+                try {
+                    actionButton.focus();
+                } catch (focusError) {
+                    // ignore focus errors
+                }
+            }, 50);
+        }
+
+        overlay.dispatchEvent(new CustomEvent('sessionEndOverlayShown', {
+            bubbles: true,
+            detail: { redirected: false }
+        }));
+    }
+
+    function handleSessionStatus(status) {
+        const numericStatus = Number(status);
+        if (!Number.isFinite(numericStatus)) {
+            return;
+        }
+        if (SESSION_END_STATUS.has(numericStatus)) {
+            const overlay = getOverlayElement();
+            const loginUrl = getLoginUrl(overlay);
+            showSessionOverlay(loginUrl);
+        }
+    }
+
+    const originalFetch = window.fetch;
+    if (typeof originalFetch === 'function') {
+        window.fetch = async function() {
+            const response = await originalFetch.apply(this, arguments);
+            try {
+                handleSessionStatus(response && response.status);
+            } catch (statusError) {
+                console.warn('Session overlay handler (fetch) error:', statusError);
+            }
+            return response;
+        };
+    }
+
+    const originalXhrOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+        this.addEventListener('load', function() {
+            handleSessionStatus(this.status);
+        });
+        this.addEventListener('error', function() {
+            handleSessionStatus(this.status);
+        });
+        return originalXhrOpen.apply(this, arguments);
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+        const overlay = getOverlayElement();
+        if (!overlay) {
+            return;
+        }
+
+        const loginUrl = getLoginUrl(overlay);
+        const actionButton = overlay.querySelector('[data-action="return-login"]');
+
+        if (actionButton) {
+            actionButton.addEventListener('click', function(event) {
+                event.preventDefault();
+                redirectToLogin(loginUrl);
+            });
+        }
+
+        overlay.addEventListener('click', function(event) {
+            if (event.target === overlay) {
+                redirectToLogin(loginUrl);
+            }
+        });
+    });
+
+    window.addEventListener('forceSessionEndNotice', function() {
+        const overlay = getOverlayElement();
+        const loginUrl = getLoginUrl(overlay);
+        showSessionOverlay(loginUrl);
+    });
+})();
+

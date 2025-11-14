@@ -572,6 +572,25 @@ if ($currentUser) {
     </div>
     <?php endif; ?>
     
+    <div id="sessionEndOverlay"
+         class="session-end-overlay"
+         hidden
+         aria-hidden="true"
+         data-login-url="<?php echo htmlspecialchars(getRelativeUrl('index.php'), ENT_QUOTES, 'UTF-8'); ?>">
+        <div class="session-end-overlay__backdrop" aria-hidden="true"></div>
+        <div class="session-end-overlay__dialog" role="dialog" aria-modal="true" aria-labelledby="sessionEndTitle" aria-describedby="sessionEndDescription" tabindex="-1">
+            <div class="session-end-overlay__icon" aria-hidden="true">
+                <i class="bi bi-exclamation-octagon-fill"></i>
+            </div>
+            <h2 id="sessionEndTitle">انتهت الجلسة</h2>
+            <p id="sessionEndDescription">لأسباب أمنية، تم إنهاء جلستك. يرجى تسجيل الدخول مرة أخرى للمتابعة.</p>
+            <button type="button" class="btn session-end-overlay__action" data-action="return-login">
+                <i class="bi bi-box-arrow-in-right me-2"></i>
+                العودة إلى تسجيل الدخول
+            </button>
+        </div>
+    </div>
+
     <div class="dashboard-wrapper">
         <!-- Homeline Style Sidebar -->
         <?php if (isLoggedIn()): ?>

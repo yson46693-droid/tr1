@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/table_styles.php';
+require_once __DIR__ . '/../../includes/production_helper.php';
 
 requireRole(['accountant', 'manager']);
 
@@ -200,6 +201,74 @@ $totalPages = ceil($totalCount / $perPage);
 $suppliersQuery = "SELECT * FROM suppliers $whereClause ORDER BY created_at DESC LIMIT ? OFFSET ?";
 $queryParams = array_merge($params, [$perPage, $offset]);
 $suppliers = $db->query($suppliersQuery, $queryParams);
+
+$supplierSupplyLogs = [];
+$supplierSupplyTotals = [];
+$supplyTodayDate = date('Y-m-d');
+$supplyMonthStart = date('Y-m-01');
+$supplyMonthEnd = date('Y-m-t');
+if (strtotime($supplyMonthEnd) > strtotime($supplyTodayDate)) {
+    $supplyMonthEnd = $supplyTodayDate;
+}
+$supplierSupplyRangeStartLabel = function_exists('formatDate') ? formatDate($supplyMonthStart) : $supplyMonthStart;
+$supplierSupplyRangeEndLabel = function_exists('formatDate') ? formatDate($supplyMonthEnd) : $supplyMonthEnd;
+
+if (!empty($suppliers)) {
+    $supplierIds = array_values(array_filter(array_map(static function ($supplierItem) {
+        return isset($supplierItem['id']) ? (int)$supplierItem['id'] : 0;
+    }, $suppliers), static function ($id) {
+        return $id > 0;
+    }));
+
+    if (!empty($supplierIds) && ensureProductionSupplyLogsTable()) {
+        $placeholders = implode(',', array_fill(0, count($supplierIds), '?'));
+        $supplyParams = $supplierIds;
+        $supplyParams[] = $supplyMonthStart . ' 00:00:00';
+        $supplyParams[] = $supplyMonthEnd . ' 23:59:59';
+
+        try {
+            $supplyLogs = $db->query(
+                "
+                SELECT id, supplier_id, supplier_name, material_category, material_label, quantity, unit, details, recorded_at
+                FROM production_supply_logs
+                WHERE supplier_id IN ($placeholders)
+                  AND recorded_at BETWEEN ? AND ?
+                ORDER BY recorded_at DESC, id DESC
+                ",
+                $supplyParams
+            );
+        } catch (Exception $e) {
+            error_log('Suppliers page: failed to load supply logs -> ' . $e->getMessage());
+            $supplyLogs = [];
+        }
+
+        foreach ($supplyLogs as $log) {
+            $logSupplierId = isset($log['supplier_id']) ? (int)$log['supplier_id'] : 0;
+            if ($logSupplierId <= 0) {
+                continue;
+            }
+
+            if (!isset($supplierSupplyLogs[$logSupplierId])) {
+                $supplierSupplyLogs[$logSupplierId] = [];
+                $supplierSupplyTotals[$logSupplierId] = 0.0;
+            }
+
+            $supplierSupplyLogs[$logSupplierId][] = $log;
+            $supplierSupplyTotals[$logSupplierId] += isset($log['quantity']) ? (float)$log['quantity'] : 0.0;
+        }
+    }
+}
+
+$supplierSupplyCategoryLabels = [
+    'honey' => 'العسل',
+    'olive_oil' => 'زيت الزيتون',
+    'beeswax' => 'شمع العسل',
+    'derivatives' => 'المشتقات',
+    'nuts' => 'المكسرات',
+    'packaging' => 'أدوات التعبئة',
+    'raw' => 'المواد الخام',
+    'other' => 'مواد أخرى',
+];
 
 $historyPage = isset($_GET['history_page']) ? max(1, intval($_GET['history_page'])) : 1;
 $historyLimit = 10;
@@ -534,7 +603,12 @@ if (isset($_GET['edit'])) {
                             'derivatives' => 'مشتقات',
                             'beeswax' => 'شمع عسل'
                         ];
-                        foreach ($suppliers as $index => $supplier): ?>
+                        foreach ($suppliers as $index => $supplier):
+                            $supplierId = isset($supplier['id']) ? (int)$supplier['id'] : 0;
+                            $supplierSupplyEntries = $supplierSupplyLogs[$supplierId] ?? [];
+                            $supplierSupplyTotal = $supplierSupplyTotals[$supplierId] ?? 0.0;
+                            $supplierSupplyCount = count($supplierSupplyEntries);
+                        ?>
                             <tr>
                                 <td data-label="#"><?php echo $offset + $index + 1; ?></td>
                                 <td data-label="كود المورد">
@@ -567,7 +641,7 @@ if (isset($_GET['edit'])) {
                                                 class="btn btn-success mb-1"
                                                 data-bs-toggle="modal"
                                                 data-bs-target="#addSupplierBalanceModal"
-                                                data-supplier-id="<?php echo $supplier['id']; ?>"
+                                                data-supplier-id="<?php echo $supplierId; ?>"
                                                 data-supplier-name="<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                                 data-supplier-balance="<?php echo $balance; ?>">
                                             <i class="bi bi-plus-circle"></i>
@@ -577,20 +651,124 @@ if (isset($_GET['edit'])) {
                                                 class="btn btn-warning mb-1"
                                                 data-bs-toggle="modal"
                                                 data-bs-target="#supplierPaymentModal"
-                                                data-supplier-id="<?php echo $supplier['id']; ?>"
+                                                data-supplier-id="<?php echo $supplierId; ?>"
                                                 data-supplier-name="<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES, 'UTF-8'); ?>"
                                                 data-supplier-balance="<?php echo $balance; ?>">
                                             <i class="bi bi-cash-coin"></i>
                                             <span class="d-none d-lg-inline">تسجيل سداد</span>
                                         </button>
-                                        <a href="?page=suppliers&edit=<?php echo $supplier['id']; ?>" class="btn btn-outline mb-1" data-bs-toggle="tooltip" title="<?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?>">
+                                        <button type="button"
+                                                class="btn btn-info text-white mb-1"
+                                                data-bs-toggle="collapse"
+                                                data-bs-target="#supplierSupply-<?php echo $supplierId; ?>"
+                                                aria-expanded="false"
+                                                aria-controls="supplierSupply-<?php echo $supplierId; ?>">
+                                            <i class="bi bi-truck"></i>
+                                            <span class="d-none d-lg-inline">توريدات الشهر</span>
+                                        </button>
+                                        <a href="?page=suppliers&edit=<?php echo $supplierId; ?>" class="btn btn-outline mb-1" data-bs-toggle="tooltip" title="<?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?>">
                                             <i class="bi bi-pencil"></i>
                                             <span class="d-none d-md-inline"><?php echo isset($lang['edit']) ? $lang['edit'] : 'تعديل'; ?></span>
                                         </a>
-                                        <button type="button" class="btn btn-outline-danger mb-1" onclick="deleteSupplier(<?php echo $supplier['id']; ?>, '<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES); ?>')" data-bs-toggle="tooltip" title="<?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?>">
+                                        <button type="button" class="btn btn-outline-danger mb-1" onclick="deleteSupplier(<?php echo $supplierId; ?>, '<?php echo htmlspecialchars($supplier['name'], ENT_QUOTES); ?>')" data-bs-toggle="tooltip" title="<?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?>">
                                             <i class="bi bi-trash"></i>
                                             <span class="d-none d-md-inline"><?php echo isset($lang['delete']) ? $lang['delete'] : 'حذف'; ?></span>
                                         </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr class="supplier-supply-row">
+                                <td colspan="10" class="p-0 border-top-0">
+                                    <div class="collapse" id="supplierSupply-<?php echo $supplierId; ?>">
+                                        <div class="bg-light border-top px-3 py-3">
+                                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
+                                                <div>
+                                                    <span class="fw-semibold"><i class="bi bi-truck me-2"></i>توريدات المورد خلال الشهر الحالي</span>
+                                                    <div class="text-muted small">
+                                                        الفترة: <?php echo htmlspecialchars($supplierSupplyRangeStartLabel); ?> - <?php echo htmlspecialchars($supplierSupplyRangeEndLabel); ?>
+                                                    </div>
+                                                </div>
+                                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                                    <span class="badge bg-primary text-white">
+                                                        إجمالي الكمية: <?php echo number_format($supplierSupplyTotal, 3); ?>
+                                                    </span>
+                                                    <?php if ($supplierSupplyCount > 0): ?>
+                                                        <span class="badge bg-secondary text-white">
+                                                            عدد السجلات: <?php echo $supplierSupplyCount; ?>
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+                                            <?php if ($supplierSupplyCount === 0): ?>
+                                                <div class="alert alert-light border text-muted mb-0">
+                                                    <i class="bi bi-inbox me-2"></i>لا توجد توريدات مسجلة لهذا المورد خلال الشهر الحالي.
+                                                </div>
+                                            <?php else: ?>
+                                                <div class="table-responsive">
+                                                    <table class="table table-sm table-hover mb-0">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>التاريخ</th>
+                                                                <th>القسم</th>
+                                                                <th>المادة</th>
+                                                                <th>الكمية</th>
+                                                                <th>الوصف</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <?php foreach ($supplierSupplyEntries as $supplyEntry): ?>
+                                                                <?php
+                                                                    $recordedAt = $supplyEntry['recorded_at'] ?? null;
+                                                                    $entryDate = '—';
+                                                                    $entryTime = '';
+                                                                    if ($recordedAt) {
+                                                                        $timestamp = strtotime($recordedAt);
+                                                                        if ($timestamp) {
+                                                                            $entryDate = function_exists('formatDate')
+                                                                                ? formatDate($recordedAt)
+                                                                                : date('Y-m-d', $timestamp);
+                                                                            $entryTime = function_exists('formatTime')
+                                                                                ? formatTime($recordedAt)
+                                                                                : date('H:i', $timestamp);
+                                                                        }
+                                                                    }
+                                                                    $categoryKey = $supplyEntry['material_category'] ?? '';
+                                                                    $categoryLabel = $supplierSupplyCategoryLabels[$categoryKey] ?? ($categoryKey !== '' ? $categoryKey : '—');
+                                                                    $materialLabel = trim((string)($supplyEntry['material_label'] ?? ''));
+                                                                    $details = trim((string)($supplyEntry['details'] ?? ''));
+                                                                    $quantityValue = isset($supplyEntry['quantity']) ? (float)$supplyEntry['quantity'] : 0.0;
+                                                                    $unitLabel = isset($supplyEntry['unit']) && $supplyEntry['unit'] !== '' ? $supplyEntry['unit'] : 'كجم';
+                                                                ?>
+                                                                <tr>
+                                                                    <td>
+                                                                        <div class="fw-semibold"><?php echo htmlspecialchars($entryDate); ?></div>
+                                                                        <?php if ($entryTime !== ''): ?>
+                                                                            <div class="text-muted small"><?php echo htmlspecialchars($entryTime); ?></div>
+                                                                        <?php endif; ?>
+                                                                    </td>
+                                                                    <td><?php echo htmlspecialchars($categoryLabel); ?></td>
+                                                                    <td><?php echo htmlspecialchars($materialLabel !== '' ? $materialLabel : '-'); ?></td>
+                                                                    <td>
+                                                                        <span class="fw-semibold text-primary"><?php echo number_format($quantityValue, 3); ?></span>
+                                                                        <span class="text-muted small"><?php echo htmlspecialchars($unitLabel); ?></span>
+                                                                    </td>
+                                                                    <td>
+                                                                        <?php if ($details !== ''): ?>
+                                                                            <?php echo htmlspecialchars($details); ?>
+                                                                        <?php else: ?>
+                                                                            <span class="text-muted">-</span>
+                                                                        <?php endif; ?>
+                                                                    </td>
+                                                                </tr>
+                                                            <?php endforeach; ?>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            <?php endif; ?>
+                                            <div class="mt-3 small text-muted">
+                                                لعرض جميع التوريدات أو تنزيل التقارير التفصيلية، تفضل بزيارة صفحة تقارير الإنتاج.
+                                            </div>
+                                        </div>
                                     </div>
                                 </td>
                             </tr>
