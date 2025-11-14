@@ -658,14 +658,22 @@ function calculateAllSalaries($month, $year) {
 function generateMonthlySalaryReport($month, $year) {
     $db = db();
     
-    // استبعاد المديرين
+    // استبعاد المديرين فقط - عرض جميع الأدوار الأخرى (production, accountant, sales)
+    // حتى لو لم يكن لديهم hourly_rate (سيظهر لهم 0)
     $users = $db->query(
-        "SELECT u.id, u.username, u.full_name, u.role, u.hourly_rate
+        "SELECT u.id, u.username, u.full_name, u.role, COALESCE(u.hourly_rate, 0) as hourly_rate
          FROM users u
          WHERE u.status = 'active' 
          AND u.role != 'manager'
-         AND u.hourly_rate > 0
-         ORDER BY u.full_name ASC"
+         AND u.role IN ('production', 'accountant', 'sales')
+         ORDER BY 
+            CASE u.role 
+                WHEN 'production' THEN 1
+                WHEN 'accountant' THEN 2
+                WHEN 'sales' THEN 3
+                ELSE 4
+            END,
+            u.full_name ASC"
     );
     
     $report = [
@@ -681,7 +689,6 @@ function generateMonthlySalaryReport($month, $year) {
     
     foreach ($users as $user) {
         // حساب أو الحصول على الراتب
-        $salaryData = getSalarySummary($user['id'], $month, $year);
         $delaySummary = [
             'total_minutes' => 0.0,
             'average_minutes' => 0.0,
@@ -692,6 +699,23 @@ function generateMonthlySalaryReport($month, $year) {
         if (function_exists('calculateMonthlyDelaySummary')) {
             $delaySummary = calculateMonthlyDelaySummary($user['id'], $month, $year);
         }
+        
+        // إضافة جميع المستخدمين الذين لديهم حضور (حتى لو لم يكن لديهم راتب)
+        // إذا لم يكن لديهم حضور في الشهر، لا نضيفهم
+        if ($delaySummary['attendance_days'] === 0 && !function_exists('hasAttendanceRecords')) {
+            // التحقق من وجود أي سجل حضور
+            $hasRecords = $db->queryOne(
+                "SELECT COUNT(*) as cnt FROM attendance_records 
+                 WHERE user_id = ? AND MONTH(date) = ? AND YEAR(date) = ?",
+                [$user['id'], $month, $year]
+            );
+            if (empty($hasRecords) || ($hasRecords['cnt'] ?? 0) === 0) {
+                // لا يوجد حضور، تخطي
+                continue;
+            }
+        }
+        
+        $salaryData = getSalarySummary($user['id'], $month, $year);
         
         if ($salaryData['exists']) {
             $salary = $salaryData['salary'];
@@ -750,6 +774,44 @@ function generateMonthlySalaryReport($month, $year) {
             
             $report['total_hours'] += $calc['total_hours'];
             $report['total_amount'] += $calc['total_amount'];
+            $report['total_delay_minutes'] += $delaySummary['total_minutes'];
+        } else {
+            // حتى لو لم يكن لديهم راتب محسوب، نضيفهم للتقرير مع بيانات الحضور
+            $monthHours = calculateMonthlyHours($user['id'], $month, $year);
+            $hourlyRate = (float)($user['hourly_rate'] ?? 0);
+            
+            // حساب نسبة التحصيلات إذا كان مندوب
+            $collectionsAmount = 0;
+            $collectionsBonus = 0;
+            if ($user['role'] === 'sales') {
+                $collectionsAmount = calculateSalesCollections($user['id'], $month, $year);
+                $collectionsBonus = $collectionsAmount * 0.02;
+            }
+            
+            $baseAmount = round($monthHours * $hourlyRate, 2);
+            $totalAmount = round($baseAmount + $collectionsBonus, 2);
+            
+            $report['salaries'][] = [
+                'user_id' => $user['id'],
+                'user_name' => $user['full_name'] ?? $user['username'],
+                'role' => $user['role'],
+                'hourly_rate' => $hourlyRate,
+                'total_hours' => $monthHours,
+                'base_amount' => $baseAmount,
+                'collections_amount' => $collectionsAmount,
+                'collections_bonus' => round($collectionsBonus, 2),
+                'bonus' => 0,
+                'deductions' => 0,
+                'total_amount' => $totalAmount,
+                'status' => 'not_calculated',
+                'total_delay_minutes' => $delaySummary['total_minutes'],
+                'average_delay_minutes' => $delaySummary['average_minutes'],
+                'delay_days' => $delaySummary['delay_days'],
+                'attendance_days' => $delaySummary['attendance_days'],
+            ];
+            
+            $report['total_hours'] += $monthHours;
+            $report['total_amount'] += $totalAmount;
             $report['total_delay_minutes'] += $delaySummary['total_minutes'];
         }
     }

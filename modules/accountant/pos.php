@@ -356,18 +356,40 @@ $totalStockValue = $productStats['total_value'];
 $uniqueCategories = $productStats['categories'];
 $totalCategories = count($uniqueCategories);
 ?>
-<div class="pos-page-header mb-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-    <div>
-        <h2 class="mb-1"><i class="bi bi-cash-register me-2"></i>نقطة البيع المحلية</h2>
-        <p class="text-muted mb-0">بيع مباشر من مخزن الشركة الرئيسي وإدارة الفواتير الفورية.</p>
-    </div>
-    <div class="d-flex flex-wrap align-items-center gap-2">
-        <span class="badge rounded-pill bg-info text-dark px-3 py-2">
-            <i class="bi bi-building-check me-1"></i>المخزن: <?php echo htmlspecialchars($mainWarehouse['name']); ?>
-        </span>
-        <button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#addCustomerModal">
-            <i class="bi bi-person-plus me-2"></i>إضافة عميل جديد
-        </button>
+<!-- Local POS Header Section -->
+<div class="local-pos-header mb-4">
+    <div class="card border-0 shadow-sm">
+        <div class="card-body p-4">
+            <div class="row align-items-center">
+                <div class="col-lg-6 mb-3 mb-lg-0">
+                    <h2 class="mb-2 fw-bold text-primary">
+                        <i class="bi bi-cash-register me-2"></i>نقطة البيع المحلية
+                    </h2>
+                    <p class="text-muted mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        بيع مباشر من مخزن الشركة الرئيسي وإدارة الفواتير الفورية
+                    </p>
+                </div>
+                <div class="col-lg-6">
+                    <div class="d-flex flex-column flex-sm-row gap-3 justify-content-lg-end">
+                        <div class="card bg-light border-0 flex-grow-1 flex-sm-grow-0" style="min-width: 250px;">
+                            <div class="card-body p-3 d-flex align-items-center">
+                                <div class="flex-grow-1">
+                                    <small class="text-muted d-block mb-1">
+                                        <i class="bi bi-building me-1"></i>المخزن الحالي
+                                    </small>
+                                    <strong class="text-dark"><?php echo htmlspecialchars($mainWarehouse['name']); ?></strong>
+                                </div>
+                                <i class="bi bi-building-check text-primary fs-4"></i>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-lg shadow-sm" type="button" data-bs-toggle="modal" data-bs-target="#addCustomerModal">
+                            <i class="bi bi-person-plus me-2"></i>إضافة عميل جديد
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

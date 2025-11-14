@@ -1224,16 +1224,20 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 <div class="card shadow-sm">
     <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-cash-coin me-2"></i>طلبات السلف</h5>
+        <?php if ($currentUser['role'] !== 'manager'): ?>
         <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#requestAdvanceModal">
             <i class="bi bi-plus-circle me-1"></i>طلب سلفة جديدة
         </button>
+        <?php endif; ?>
     </div>
     <div class="card-body">
         <?php if (empty($advances)): ?>
             <div class="text-center text-muted py-5">
                 <i class="bi bi-inbox fs-1 d-block mb-3"></i>
                 <h5>لا توجد طلبات سلف</h5>
+                <?php if ($currentUser['role'] !== 'manager'): ?>
                 <p>يمكنك طلب سلفة جديدة باستخدام الزر أعلاه</p>
+                <?php endif; ?>
             </div>
         <?php else: ?>
             <div class="table-responsive dashboard-table-wrapper">
