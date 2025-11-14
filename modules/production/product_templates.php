@@ -1388,17 +1388,26 @@ $lang = isset($translations) ? $translations : [];
                                 لا توجد أدوات تعبئة متاحة. يرجى إضافة أدوات التعبئة أولاً من صفحة مخزن أدوات التعبئة.
                             </div>
                         <?php else: ?>
-                            <select class="form-select" name="packaging_ids[]" multiple required size="5" id="packagingSelect">
+                            <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;" id="packagingCheckboxContainer">
                                 <?php foreach ($packagingMaterials as $pkg): ?>
-                                    <option value="<?php echo $pkg['id']; ?>">
-                                        <?php echo htmlspecialchars($pkg['name']); ?>
-                                        <?php if (!empty($pkg['quantity'])): ?>
-                                            (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
-                                        <?php endif; ?>
-                                    </option>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="packaging_ids[]" 
+                                               value="<?php echo $pkg['id']; ?>" 
+                                               id="packaging_<?php echo $pkg['id']; ?>">
+                                        <label class="form-check-label w-100" for="packaging_<?php echo $pkg['id']; ?>">
+                                            <span class="fw-semibold"><?php echo htmlspecialchars($pkg['name']); ?></span>
+                                            <?php if (!empty($pkg['quantity'])): ?>
+                                                <span class="text-muted small ms-2">
+                                                    (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
+                                                </span>
+                                            <?php endif; ?>
+                                        </label>
+                                    </div>
                                 <?php endforeach; ?>
-                            </select>
-                            <small class="text-muted">يمكنك اختيار أكثر من أداة تعبئة (اضغط Ctrl/Cmd للاختيار المتعدد)</small>
+                            </div>
+                            <small class="text-muted d-block mt-2">
+                                <i class="bi bi-info-circle me-1"></i>يمكنك اختيار أكثر من أداة تعبئة
+                            </small>
                         <?php endif; ?>
                     </div>
                     
@@ -1455,17 +1464,26 @@ $lang = isset($translations) ? $translations : [];
                                 لا توجد أدوات تعبئة متاحة. يرجى إضافة أدوات التعبئة أولاً من صفحة مخزن أدوات التعبئة.
                             </div>
                         <?php else: ?>
-                            <select class="form-select" name="packaging_ids[]" multiple required size="5" id="editPackagingSelect">
+                            <div class="border rounded p-3" style="max-height: 200px; overflow-y: auto;" id="editPackagingCheckboxContainer">
                                 <?php foreach ($packagingMaterials as $pkg): ?>
-                                    <option value="<?php echo $pkg['id']; ?>">
-                                        <?php echo htmlspecialchars($pkg['name']); ?>
-                                        <?php if (!empty($pkg['quantity'])): ?>
-                                            (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
-                                        <?php endif; ?>
-                                    </option>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="packaging_ids[]" 
+                                               value="<?php echo $pkg['id']; ?>" 
+                                               id="edit_packaging_<?php echo $pkg['id']; ?>">
+                                        <label class="form-check-label w-100" for="edit_packaging_<?php echo $pkg['id']; ?>">
+                                            <span class="fw-semibold"><?php echo htmlspecialchars($pkg['name']); ?></span>
+                                            <?php if (!empty($pkg['quantity'])): ?>
+                                                <span class="text-muted small ms-2">
+                                                    (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
+                                                </span>
+                                            <?php endif; ?>
+                                        </label>
+                                    </div>
                                 <?php endforeach; ?>
-                            </select>
-                            <small class="text-muted">يمكنك اختيار أكثر من أداة تعبئة (اضغط Ctrl/Cmd للاختيار المتعدد)</small>
+                            </div>
+                            <small class="text-muted d-block mt-2">
+                                <i class="bi bi-info-circle me-1"></i>يمكنك اختيار أكثر من أداة تعبئة
+                            </small>
                         <?php endif; ?>
                     </div>
                     
@@ -1638,6 +1656,36 @@ document.getElementById('createTemplateModal')?.addEventListener('hidden.bs.moda
     rawMaterialIndex = 0;
 });
 
+// قائمة بالمواد الخام الشائعة
+const commonMaterials = [
+    'عسل',
+    'عسل خام',
+    'عسل مصفى',
+    'مكسرات',
+    'لوز',
+    'جوز',
+    'فستق',
+    'بندق',
+    'كاجو',
+    'زيت زيتون',
+    'شمع عسل',
+    'شمع',
+    'فانيليا',
+    'قرفة',
+    'زنجبيل',
+    'ليمون',
+    'عسل الملكة',
+    'حبة البركة',
+    'طحينة',
+    'سكر',
+    'ملح',
+    'ماء',
+    'خل',
+    'عصير ليمون',
+    'زعتر',
+    'زعتر بري'
+];
+
 function addRawMaterial(defaults = {}) {
     const container = document.getElementById('rawMaterialsContainer');
     if (!container) {
@@ -1646,28 +1694,48 @@ function addRawMaterial(defaults = {}) {
     const defaultName = typeof defaults.name === 'string' ? defaults.name : '';
     const defaultQuantity = typeof defaults.quantity === 'number' ? defaults.quantity : '';
     const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'جرام';
+    
+    // بناء خيارات القائمة المنسدلة
+    const materialOptions = commonMaterials.map(material => {
+        const selected = material === defaultName ? 'selected' : '';
+        return `<option value="${material}" ${selected}>${material}</option>`;
+    }).join('');
+    
     const materialHtml = `
-        <div class="raw-material-item mb-2 border p-2 rounded">
-            <div class="row g-2">
-                <div class="col-md-4">
+        <div class="raw-material-item mb-2 border p-2 rounded bg-light">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-5">
                     <label class="form-label small">اسم المادة <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control form-control-sm" name="raw_materials[${rawMaterialIndex}][name]" 
-                           placeholder="مثل: مكسرات، لوز" required>
+                    <select class="form-select form-select-sm" name="raw_materials[${rawMaterialIndex}][name]" 
+                            data-material-index="${rawMaterialIndex}" required>
+                        <option value="">-- اختر المادة --</option>
+                        ${materialOptions}
+                        <option value="__custom__">-- إضافة مادة جديدة --</option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm mt-1 d-none" 
+                           name="raw_materials[${rawMaterialIndex}][name_custom]" 
+                           id="custom_material_${rawMaterialIndex}" 
+                           placeholder="أدخل اسم المادة الجديدة">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small">الكمية <span class="text-danger">*</span></label>
                     <input type="number" class="form-control form-control-sm" name="raw_materials[${rawMaterialIndex}][quantity]" 
                            step="0.001" min="0.001" placeholder="0.000" required>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label small">الوحدة</label>
-                    <input type="text" class="form-control form-control-sm" name="raw_materials[${rawMaterialIndex}][unit]" 
-                           value="جرام" placeholder="جرام">
+                    <select class="form-select form-select-sm" name="raw_materials[${rawMaterialIndex}][unit]">
+                        <option value="جرام" ${defaultUnit === 'جرام' ? 'selected' : ''}>جرام</option>
+                        <option value="كيلوجرام" ${defaultUnit === 'كيلوجرام' ? 'selected' : ''}>كيلوجرام</option>
+                        <option value="مل" ${defaultUnit === 'مل' ? 'selected' : ''}>مل</option>
+                        <option value="لتر" ${defaultUnit === 'لتر' ? 'selected' : ''}>لتر</option>
+                        <option value="قطعة" ${defaultUnit === 'قطعة' ? 'selected' : ''}>قطعة</option>
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">&nbsp;</label>
                     <button type="button" class="btn btn-sm btn-danger w-100" onclick="removeRawMaterial(this)">
-                        <i class="bi bi-trash"></i>
+                        <i class="bi bi-trash"></i> حذف
                     </button>
                 </div>
             </div>
@@ -1676,17 +1744,41 @@ function addRawMaterial(defaults = {}) {
     container.insertAdjacentHTML('beforeend', materialHtml);
     const newItem = container.lastElementChild;
     if (newItem) {
-        const nameInput = newItem.querySelector(`input[name="raw_materials[${rawMaterialIndex}][name]"]`);
+        const materialSelect = newItem.querySelector(`select[name="raw_materials[${rawMaterialIndex}][name]"]`);
+        const customMaterialInput = newItem.querySelector(`#custom_material_${rawMaterialIndex}`);
         const quantityInput = newItem.querySelector(`input[name="raw_materials[${rawMaterialIndex}][quantity]"]`);
-        const unitInput = newItem.querySelector(`input[name="raw_materials[${rawMaterialIndex}][unit]"]`);
-        if (nameInput && defaultName) {
-            nameInput.value = defaultName;
+        
+        // معالجة اختيار "إضافة مادة جديدة"
+        if (materialSelect) {
+            materialSelect.addEventListener('change', function() {
+                if (this.value === '__custom__') {
+                    customMaterialInput.classList.remove('d-none');
+                    customMaterialInput.required = true;
+                    this.required = false;
+                    this.name = '';
+                    customMaterialInput.name = `raw_materials[${rawMaterialIndex}][name]`;
+                } else {
+                    customMaterialInput.classList.add('d-none');
+                    customMaterialInput.required = false;
+                    this.required = true;
+                    customMaterialInput.name = `raw_materials[${rawMaterialIndex}][name_custom]`;
+                }
+            });
         }
+        
         if (quantityInput && defaultQuantity) {
             quantityInput.value = Number(defaultQuantity).toFixed(3);
         }
-        if (unitInput && defaultUnit) {
-            unitInput.value = defaultUnit;
+        
+        // إذا كانت المادة الافتراضية غير موجودة في القائمة، استخدم خيار "إضافة مادة جديدة"
+        if (defaultName && !commonMaterials.includes(defaultName)) {
+            if (materialSelect) {
+                materialSelect.value = '__custom__';
+                materialSelect.dispatchEvent(new Event('change'));
+                if (customMaterialInput) {
+                    customMaterialInput.value = defaultName;
+                }
+            }
         }
     }
     rawMaterialIndex++;
@@ -2197,28 +2289,48 @@ function addEditRawMaterial(defaults = {}) {
     const defaultName = typeof defaults.name === 'string' ? defaults.name : '';
     const defaultQuantity = typeof defaults.quantity === 'number' ? defaults.quantity : '';
     const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'جرام';
+    
+    // بناء خيارات القائمة المنسدلة
+    const materialOptions = commonMaterials.map(material => {
+        const selected = material === defaultName ? 'selected' : '';
+        return `<option value="${material}" ${selected}>${material}</option>`;
+    }).join('');
+    
     const materialHtml = `
-        <div class="raw-material-item mb-2 border p-2 rounded">
-            <div class="row g-2">
-                <div class="col-md-4">
+        <div class="raw-material-item mb-2 border p-2 rounded bg-light">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-5">
                     <label class="form-label small">اسم المادة <span class="text-danger">*</span></label>
-                    <input type="text" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][name]" 
-                           placeholder="مثل: مكسرات، لوز" required>
+                    <select class="form-select form-select-sm" name="raw_materials[${editMaterialIndex}][name]" 
+                            data-material-index="${editMaterialIndex}" required>
+                        <option value="">-- اختر المادة --</option>
+                        ${materialOptions}
+                        <option value="__custom__">-- إضافة مادة جديدة --</option>
+                    </select>
+                    <input type="text" class="form-control form-control-sm mt-1 d-none" 
+                           name="raw_materials[${editMaterialIndex}][name_custom]" 
+                           id="edit_custom_material_${editMaterialIndex}" 
+                           placeholder="أدخل اسم المادة الجديدة">
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small">الكمية <span class="text-danger">*</span></label>
                     <input type="number" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][quantity]" 
                            step="0.001" min="0.001" placeholder="0.000" required>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label small">الوحدة</label>
-                    <input type="text" class="form-control form-control-sm" name="raw_materials[${editMaterialIndex}][unit]" 
-                           value="جرام" placeholder="جرام">
+                    <select class="form-select form-select-sm" name="raw_materials[${editMaterialIndex}][unit]">
+                        <option value="جرام" ${defaultUnit === 'جرام' ? 'selected' : ''}>جرام</option>
+                        <option value="كيلوجرام" ${defaultUnit === 'كيلوجرام' ? 'selected' : ''}>كيلوجرام</option>
+                        <option value="مل" ${defaultUnit === 'مل' ? 'selected' : ''}>مل</option>
+                        <option value="لتر" ${defaultUnit === 'لتر' ? 'selected' : ''}>لتر</option>
+                        <option value="قطعة" ${defaultUnit === 'قطعة' ? 'selected' : ''}>قطعة</option>
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">&nbsp;</label>
                     <button type="button" class="btn btn-sm btn-danger w-100" onclick="removeRawMaterial(this)">
-                        <i class="bi bi-trash"></i>
+                        <i class="bi bi-trash"></i> حذف
                     </button>
                 </div>
             </div>
@@ -2227,17 +2339,41 @@ function addEditRawMaterial(defaults = {}) {
     container.insertAdjacentHTML('beforeend', materialHtml);
     const newItem = container.lastElementChild;
     if (newItem) {
-        const nameInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][name]"]`);
+        const materialSelect = newItem.querySelector(`select[name="raw_materials[${editMaterialIndex}][name]"]`);
+        const customMaterialInput = newItem.querySelector(`#edit_custom_material_${editMaterialIndex}`);
         const quantityInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][quantity]"]`);
-        const unitInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][unit]"]`);
-        if (nameInput && defaultName) {
-            nameInput.value = defaultName;
+        
+        // معالجة اختيار "إضافة مادة جديدة"
+        if (materialSelect) {
+            materialSelect.addEventListener('change', function() {
+                if (this.value === '__custom__') {
+                    customMaterialInput.classList.remove('d-none');
+                    customMaterialInput.required = true;
+                    this.required = false;
+                    this.name = '';
+                    customMaterialInput.name = `raw_materials[${editMaterialIndex}][name]`;
+                } else {
+                    customMaterialInput.classList.add('d-none');
+                    customMaterialInput.required = false;
+                    this.required = true;
+                    customMaterialInput.name = `raw_materials[${editMaterialIndex}][name_custom]`;
+                }
+            });
         }
+        
         if (quantityInput && defaultQuantity) {
             quantityInput.value = Number(defaultQuantity).toFixed(3);
         }
-        if (unitInput && defaultUnit) {
-            unitInput.value = defaultUnit;
+        
+        // إذا كانت المادة الافتراضية غير موجودة في القائمة، استخدم خيار "إضافة مادة جديدة"
+        if (defaultName && !commonMaterials.includes(defaultName)) {
+            if (materialSelect) {
+                materialSelect.value = '__custom__';
+                materialSelect.dispatchEvent(new Event('change'));
+                if (customMaterialInput) {
+                    customMaterialInput.value = defaultName;
+                }
+            }
         }
     }
     editMaterialIndex++;
@@ -2277,8 +2413,9 @@ document.getElementById('createTemplateForm')?.addEventListener('submit', functi
 
 // منع إرسال النموذج إذا لم يتم اختيار أدوات تعبئة (للتعديل)
 document.getElementById('editTemplateForm')?.addEventListener('submit', function(e) {
-    const packagingSelect = document.getElementById('editPackagingSelect');
-    if (packagingSelect && packagingSelect.selectedOptions.length === 0) {
+    const editPackagingContainer = document.getElementById('editPackagingCheckboxContainer');
+    const checkedEditPackaging = editPackagingContainer ? editPackagingContainer.querySelectorAll('input[type="checkbox"]:checked') : [];
+    if (checkedEditPackaging.length === 0) {
         e.preventDefault();
         alert('يرجى اختيار أداة تعبئة واحدة على الأقل');
         return false;
