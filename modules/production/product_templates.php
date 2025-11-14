@@ -558,14 +558,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fullMaterialName = $materialName . ' - ' . $materialType;
                 }
                 
+                // الحصول على حالة العسل (خام/مصفى) إذا كانت المادة عسل
+                $honeyState = '';
+                $isHoneyMaterial = (mb_stripos($materialName, 'عسل') !== false || stripos($materialName, 'honey') !== false);
+                if ($isHoneyMaterial) {
+                    $honeyState = trim($material['honey_state'] ?? '');
+                }
+                
                 if (!empty($materialName) && isset($material['quantity']) && $material['quantity'] > 0) {
-                    $rawMaterials[] = [
+                    $materialData = [
                         'name' => $fullMaterialName,
                         'material_name' => $materialName,
                         'material_type' => $materialType,
                         'quantity' => floatval($material['quantity']),
                         'unit' => trim($material['unit'] ?? 'كيلوجرام')
                     ];
+                    
+                    // إضافة حالة العسل إذا كانت محددة
+                    if ($honeyState !== '') {
+                        $materialData['honey_state'] = $honeyState;
+                        // تحديث material_type بناءً على حالة العسل
+                        if ($honeyState === 'raw') {
+                            $materialData['material_type'] = 'honey_raw';
+                        } elseif ($honeyState === 'filtered') {
+                            $materialData['material_type'] = 'honey_filtered';
+                        }
+                    }
+                    
+                    $rawMaterials[] = $materialData;
                 }
             }
         }
@@ -1902,10 +1922,18 @@ function addRawMaterial(defaults = {}) {
         return `<option value="${material}" ${selected}>${material}</option>`;
     }).join('');
     
-    // تقسيم اسم المادة الافتراضية إذا كان يحتوي على "عسل"
+    // تقسيم اسم المادة الافتراضية إذا كان يحتوي على "عسل" أو " - "
     let defaultMaterialName = defaultName;
     let defaultMaterialType = '';
-    if (defaultName && defaultName.startsWith('عسل ') && defaultName.length > 5) {
+    let defaultHoneyState = defaults.honey_state || '';
+    
+    if (defaultName && defaultName.includes(' - ')) {
+        const parts = defaultName.split(' - ', 2);
+        if (parts.length === 2) {
+            defaultMaterialName = parts[0].trim(); // "عسل"
+            defaultMaterialType = parts[1].trim(); // "حبة البركة" مثلاً
+        }
+    } else if (defaultName && defaultName.startsWith('عسل ') && defaultName.length > 5) {
         const parts = defaultName.split(' ', 2);
         if (parts.length === 2) {
             defaultMaterialName = parts[0]; // "عسل"
@@ -1932,7 +1960,7 @@ function addRawMaterial(defaults = {}) {
                            id="custom_material_${rawMaterialIndex}" 
                            placeholder="أدخل اسم المادة الجديدة">
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label small">نوع المادة</label>
                     <select class="form-select form-select-sm material-type-select" 
                             name="raw_materials[${rawMaterialIndex}][material_type]" 
@@ -1944,6 +1972,17 @@ function addRawMaterial(defaults = {}) {
                            name="raw_materials[${rawMaterialIndex}][type_custom]" 
                            id="custom_type_${rawMaterialIndex}" 
                            placeholder="أدخل نوع المادة">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">حالة العسل</label>
+                    <select class="form-select form-select-sm honey-state-select" 
+                            name="raw_materials[${rawMaterialIndex}][honey_state]" 
+                            id="honey_state_${rawMaterialIndex}"
+                            data-honey-state-select="${rawMaterialIndex}">
+                        <option value="">-- لا ينطبق --</option>
+                        <option value="raw" ${defaultHoneyState === 'raw' ? 'selected' : ''}>خام</option>
+                        <option value="filtered" ${defaultHoneyState === 'filtered' ? 'selected' : ''}>مصفى</option>
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">الكمية <span class="text-danger">*</span></label>
@@ -1972,9 +2011,10 @@ function addRawMaterial(defaults = {}) {
         const customMaterialInput = newItem.querySelector(`#custom_material_${rawMaterialIndex}`);
         const customTypeInput = newItem.querySelector(`#custom_type_${rawMaterialIndex}`);
         const quantityInput = newItem.querySelector(`input[name="raw_materials[${rawMaterialIndex}][quantity]"]`);
+        const honeyStateSelect = newItem.querySelector(`select[data-honey-state-select="${rawMaterialIndex}"]`);
         
-        // دالة لتحديث قائمة أنواع المادة
-        const updateMaterialTypes = function(selectedMaterialName) {
+        // دالة لتحديث قائمة أنواع المادة وحقل حالة العسل
+        const updateMaterialTypes = function(selectedMaterialName, selectedMaterialType) {
             if (!materialTypeSelect) return;
             
             // مسح القائمة الحالية
@@ -1982,9 +2022,17 @@ function addRawMaterial(defaults = {}) {
             materialTypeSelect.classList.add('d-none');
             customTypeInput.classList.add('d-none');
             
+            // إخفاء حقل حالة العسل افتراضياً
+            if (honeyStateSelect) {
+                honeyStateSelect.classList.add('d-none');
+            }
+            
             if (!selectedMaterialName || selectedMaterialName === '' || selectedMaterialName === '__custom__') {
                 return;
             }
+            
+            // التحقق من أن المادة هي عسل
+            const isHoneyMaterial = selectedMaterialName.includes('عسل') || selectedMaterialName.toLowerCase().includes('honey');
             
             const materialData = rawMaterialsData[selectedMaterialName];
             if (materialData && materialData.has_types && materialData.types && materialData.types.length > 0) {
@@ -1995,11 +2043,24 @@ function addRawMaterial(defaults = {}) {
                     const option = document.createElement('option');
                     option.value = type;
                     option.textContent = type;
-                    if (type === defaultMaterialType) {
+                    if (type === defaultMaterialType || type === selectedMaterialType) {
                         option.selected = true;
                     }
                     materialTypeSelect.appendChild(option);
                 });
+                
+                // إذا كانت المادة عسل ونوع المادة محدد، أظهر حقل حالة العسل
+                const finalMaterialType = selectedMaterialType || materialTypeSelect.value;
+                if (isHoneyMaterial && finalMaterialType && finalMaterialType !== '') {
+                    if (honeyStateSelect) {
+                        honeyStateSelect.classList.remove('d-none');
+                    }
+                }
+            } else if (isHoneyMaterial) {
+                // إذا كانت المادة عسل ولكن لا يوجد أنواع، أظهر حقل حالة العسل مباشرة
+                if (honeyStateSelect) {
+                    honeyStateSelect.classList.remove('d-none');
+                }
             }
         };
         
@@ -2028,13 +2089,22 @@ function addRawMaterial(defaults = {}) {
                     customMaterialInput.name = `raw_materials[${rawMaterialIndex}][name_custom]`;
                     
                     // تحديث قائمة أنواع المادة
-                    updateMaterialTypes(selectedValue);
+                    updateMaterialTypes(selectedValue, '');
                 }
             });
             
+            // تحديث حقل حالة العسل عند اختيار نوع المادة
+            if (materialTypeSelect) {
+                materialTypeSelect.addEventListener('change', function() {
+                    const selectedType = this.value;
+                    const selectedMaterialName = materialSelect ? materialSelect.value : '';
+                    updateMaterialTypes(selectedMaterialName, selectedType);
+                });
+            }
+            
             // تحديث قائمة الأنواع عند التحميل
             if (defaultMaterialName && commonMaterials.includes(defaultMaterialName)) {
-                updateMaterialTypes(defaultMaterialName);
+                updateMaterialTypes(defaultMaterialName, defaultMaterialType);
             }
         }
         
@@ -2559,10 +2629,23 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
                 // بناء اسم كامل للتوافق مع الكود القديم
                 const fullName = materialType !== '' ? materialName + ' - ' + materialType : materialName;
                 
+                // استخراج حالة العسل من material_type
+                let honeyState = '';
+                if (material.material_type) {
+                    const matType = String(material.material_type).toLowerCase();
+                    if (matType === 'honey_raw') {
+                        honeyState = 'raw';
+                    } else if (matType === 'honey_filtered') {
+                        honeyState = 'filtered';
+                    }
+                }
+                
                 addEditRawMaterial({
                     name: fullName,
                     quantity: material.quantity_per_unit || material.quantity || '',
-                    unit: material.unit || 'كيلوجرام'
+                    unit: material.unit || 'كيلوجرام',
+                    honey_state: honeyState,
+                    material_type: material.material_type || ''
                 });
             });
         } else {
@@ -2585,6 +2668,7 @@ function addEditRawMaterial(defaults = {}) {
     const defaultName = typeof defaults.name === 'string' ? defaults.name : '';
     const defaultQuantity = typeof defaults.quantity === 'number' ? defaults.quantity : '';
     const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'كيلوجرام';
+    let defaultHoneyState = defaults.honey_state || '';
     
     // بناء خيارات القائمة المنسدلة
     const materialOptions = commonMaterials.map(material => {
@@ -2609,6 +2693,16 @@ function addEditRawMaterial(defaults = {}) {
         }
     }
     
+    // استخراج حالة العسل من material_type إذا كان موجوداً
+    if (!defaultHoneyState && defaults.material_type) {
+        const matType = String(defaults.material_type).toLowerCase();
+        if (matType === 'honey_raw') {
+            defaultHoneyState = 'raw';
+        } else if (matType === 'honey_filtered') {
+            defaultHoneyState = 'filtered';
+        }
+    }
+    
     const materialHtml = `
         <div class="raw-material-item mb-2 border p-2 rounded bg-light">
             <div class="row g-2 align-items-end">
@@ -2628,7 +2722,7 @@ function addEditRawMaterial(defaults = {}) {
                            id="edit_custom_material_${editMaterialIndex}" 
                            placeholder="أدخل اسم المادة الجديدة">
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-2">
                     <label class="form-label small">نوع المادة</label>
                     <select class="form-select form-select-sm material-type-select" 
                             name="raw_materials[${editMaterialIndex}][material_type]" 
@@ -2640,6 +2734,17 @@ function addEditRawMaterial(defaults = {}) {
                            name="raw_materials[${editMaterialIndex}][type_custom]" 
                            id="edit_custom_type_${editMaterialIndex}" 
                            placeholder="أدخل نوع المادة">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">حالة العسل</label>
+                    <select class="form-select form-select-sm honey-state-select" 
+                            name="raw_materials[${editMaterialIndex}][honey_state]" 
+                            id="edit_honey_state_${editMaterialIndex}"
+                            data-honey-state-select="${editMaterialIndex}">
+                        <option value="">-- لا ينطبق --</option>
+                        <option value="raw" ${defaultHoneyState === 'raw' ? 'selected' : ''}>خام</option>
+                        <option value="filtered" ${defaultHoneyState === 'filtered' ? 'selected' : ''}>مصفى</option>
+                    </select>
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">الكمية <span class="text-danger">*</span></label>
@@ -2668,9 +2773,10 @@ function addEditRawMaterial(defaults = {}) {
         const customMaterialInput = newItem.querySelector(`#edit_custom_material_${editMaterialIndex}`);
         const customTypeInput = newItem.querySelector(`#edit_custom_type_${editMaterialIndex}`);
         const quantityInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][quantity]"]`);
+        const honeyStateSelect = newItem.querySelector(`select[data-honey-state-select="${editMaterialIndex}"]`);
         
-        // دالة لتحديث قائمة أنواع المادة
-        const updateMaterialTypes = function(selectedMaterialName) {
+        // دالة لتحديث قائمة أنواع المادة وحقل حالة العسل
+        const updateMaterialTypes = function(selectedMaterialName, selectedMaterialType) {
             if (!materialTypeSelect) return;
             
             // مسح القائمة الحالية
@@ -2678,9 +2784,17 @@ function addEditRawMaterial(defaults = {}) {
             materialTypeSelect.classList.add('d-none');
             customTypeInput.classList.add('d-none');
             
+            // إخفاء حقل حالة العسل افتراضياً
+            if (honeyStateSelect) {
+                honeyStateSelect.classList.add('d-none');
+            }
+            
             if (!selectedMaterialName || selectedMaterialName === '' || selectedMaterialName === '__custom__') {
                 return;
             }
+            
+            // التحقق من أن المادة هي عسل
+            const isHoneyMaterial = selectedMaterialName.includes('عسل') || selectedMaterialName.toLowerCase().includes('honey');
             
             const materialData = rawMaterialsData[selectedMaterialName];
             if (materialData && materialData.has_types && materialData.types && materialData.types.length > 0) {
@@ -2691,11 +2805,24 @@ function addEditRawMaterial(defaults = {}) {
                     const option = document.createElement('option');
                     option.value = type;
                     option.textContent = type;
-                    if (type === defaultMaterialType) {
+                    if (type === defaultMaterialType || type === selectedMaterialType) {
                         option.selected = true;
                     }
                     materialTypeSelect.appendChild(option);
                 });
+                
+                // إذا كانت المادة عسل ونوع المادة محدد، أظهر حقل حالة العسل
+                const finalMaterialType = selectedMaterialType || materialTypeSelect.value;
+                if (isHoneyMaterial && finalMaterialType && finalMaterialType !== '') {
+                    if (honeyStateSelect) {
+                        honeyStateSelect.classList.remove('d-none');
+                    }
+                }
+            } else if (isHoneyMaterial) {
+                // إذا كانت المادة عسل ولكن لا يوجد أنواع، أظهر حقل حالة العسل مباشرة
+                if (honeyStateSelect) {
+                    honeyStateSelect.classList.remove('d-none');
+                }
             }
         };
         
