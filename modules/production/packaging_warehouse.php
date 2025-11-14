@@ -3131,6 +3131,11 @@ document.addEventListener('DOMContentLoaded', function () {
             alert('تعذّر فتح التقرير الآن. يرجى تحديث الصفحة وإعادة المحاولة.');
             return;
         }
+        if (typeof window.openInAppModal === 'function') {
+            const opener = document.activeElement instanceof Element ? document.activeElement : reportButton;
+            window.openInAppModal(url, { opener: opener });
+            return;
+        }
         window.open(url, '_blank', 'noopener');
     };
 

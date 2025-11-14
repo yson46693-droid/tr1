@@ -2,6 +2,33 @@
  * JavaScript للتقارير
  */
 
+function openReportInModal(url, opener) {
+    if (!url) {
+        alert('تعذّر فتح التقرير. لم يتم توفير رابط صالح.');
+        return;
+    }
+    if (typeof window.openInAppModal === 'function') {
+        window.openInAppModal(url, { opener: opener || (document.activeElement instanceof Element ? document.activeElement : null) });
+    } else {
+        window.open(url, '_blank', 'noopener');
+    }
+}
+
+function openReportHtmlInModal(html, opener) {
+    if (typeof window.openHtmlInAppModal === 'function') {
+        window.openHtmlInAppModal(html, { opener: opener || (document.activeElement instanceof Element ? document.activeElement : null) });
+    } else {
+        const printWindow = window.open('', '_blank');
+        if (printWindow && printWindow.document) {
+            printWindow.document.open();
+            printWindow.document.write(html);
+            printWindow.document.close();
+        } else {
+            alert('يرجى السماح بالنوافذ المنبثقة لعرض التقرير.');
+        }
+    }
+}
+
 // دالة مساعدة للحصول على المسار الصحيح للـ API
 function getRelativeUrl(path) {
     if (typeof window !== 'undefined' && window.location) {
@@ -141,7 +168,7 @@ async function generatePDFReport(type, filters = {}, evt) {
             window.__lastGeneratedReport = data;
             if (data.file_path) {
                 if (data.is_html) {
-                    window.open(data.file_path, '_blank');
+                    openReportInModal(data.file_path, btn);
                 } else {
                     window.location.href = data.file_path;
                 }
@@ -308,10 +335,37 @@ function printReport(elementId) {
         alert('العنصر غير موجود');
         return;
     }
-    
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(printContent.innerHTML);
-    printWindow.document.close();
-    printWindow.print();
+
+    const pageLang = document.documentElement.getAttribute('lang') || 'ar';
+    const pageDir = document.documentElement.getAttribute('dir') || 'rtl';
+    const html = `
+<!DOCTYPE html>
+<html lang="${pageLang}" dir="${pageDir}">
+<head>
+    <meta charset="UTF-8">
+    <title>تقرير قابل للطباعة</title>
+    <style>
+        body { background: #fff; color: #000; padding: 24px; font-family: "Segoe UI", Tahoma, sans-serif; }
+        .print-wrapper { max-width: 1024px; margin: 0 auto; }
+    </style>
+</head>
+<body>
+    <div class="print-wrapper">
+        ${printContent.innerHTML}
+    </div>
+    <script>
+        window.addEventListener("load", function () {
+            try {
+                window.focus();
+                window.print();
+            } catch (error) {
+                console.error("Failed to trigger print dialog:", error);
+            }
+        });
+    <\/script>
+</body>
+</html>`;
+
+    openReportHtmlInModal(html, document.activeElement instanceof Element ? document.activeElement : null);
 }
 

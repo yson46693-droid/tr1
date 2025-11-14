@@ -4624,6 +4624,26 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+function openUrlInAppModalOrWindow(url, options = {}) {
+    if (!url) {
+        console.warn('Attempted to open an empty URL.');
+        return null;
+    }
+    const opener = options.opener instanceof Element
+        ? options.opener
+        : (document.activeElement instanceof Element ? document.activeElement : null);
+    if (typeof window.openInAppModal === 'function') {
+        window.openInAppModal(url, { opener: opener });
+        return null;
+    }
+    const features = typeof options.features === 'string' ? options.features : 'noopener';
+    const newWindow = window.open(url, '_blank', features);
+    if (newWindow && typeof newWindow.focus === 'function' && options.focus !== false) {
+        newWindow.focus();
+    }
+    return newWindow;
+}
+
 function showBarcodeModal(batchNumber, productName, defaultQuantity) {
     const modalElement = document.getElementById('printBarcodesModal');
     const quantity = defaultQuantity > 0 ? defaultQuantity : 1;
@@ -4661,7 +4681,7 @@ function showBarcodeModal(batchNumber, productName, defaultQuantity) {
         modal.show();
     } else {
         const fallbackUrl = `${PRINT_BARCODE_URL}?batch=${encodeURIComponent(batchNumber)}&quantity=${quantity}&print=1`;
-        window.open(fallbackUrl, '_blank');
+        openUrlInAppModalOrWindow(fallbackUrl, { opener: document.activeElement instanceof Element ? document.activeElement : null });
     }
 
     if (!window.batchPrintInfo || window.batchPrintInfo.batch_number !== batchNumber) {
@@ -5729,18 +5749,12 @@ function printBarcodes() {
                 if (!targetUrl) {
                     return;
                 }
-                const manualWindow = window.open(targetUrl, '_blank');
-                if (manualWindow && typeof manualWindow.focus === 'function') {
-                    manualWindow.focus();
-                }
+                openUrlInAppModalOrWindow(targetUrl, { opener: directPrintButton });
             };
         }
 
         if (autoOpen) {
-            const openedWindow = window.open(printUrl, '_blank');
-            if (openedWindow && typeof openedWindow.focus === 'function') {
-                openedWindow.focus();
-            }
+            openUrlInAppModalOrWindow(printUrl, { opener: document.activeElement instanceof Element ? document.activeElement : null });
         }
     };
 

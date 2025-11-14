@@ -1598,7 +1598,11 @@ function printSingleBatchBarcode() {
         return;
     }
     const url = `${PRINT_BARCODE_URL}?batch=${encodeURIComponent(lastCreatedBatchInfo.number)}&quantity=1&format=single&print=1`;
-    window.open(url, '_blank', 'noopener');
+    if (typeof window.openInAppModal === 'function') {
+        window.openInAppModal(url, { opener: document.activeElement instanceof Element ? document.activeElement : null });
+    } else {
+        window.open(url, '_blank', 'noopener');
+    }
 }
 
 function printMultipleBatchBarcodes() {
@@ -1609,7 +1613,11 @@ function printMultipleBatchBarcodes() {
     const quantityInput = document.getElementById('batchBarcodeQuantityInput');
     const quantity = quantityInput ? Math.max(1, parseInt(quantityInput.value, 10) || 1) : 1;
     const url = `${PRINT_BARCODE_URL}?batch=${encodeURIComponent(lastCreatedBatchInfo.number)}&quantity=${quantity}&format=multiple&print=1`;
-    window.open(url, '_blank', 'noopener');
+    if (typeof window.openInAppModal === 'function') {
+        window.openInAppModal(url, { opener: document.activeElement instanceof Element ? document.activeElement : null });
+    } else {
+        window.open(url, '_blank', 'noopener');
+    }
 }
 
 function downloadBatchBarcodePdf() {

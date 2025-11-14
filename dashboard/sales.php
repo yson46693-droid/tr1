@@ -431,79 +431,94 @@ if ($page === 'sales_collections') {
                             return;
                         }
 
-                        const section = document.getElementById(targetId);
-                        if (!section) {
-                            console.warn('Printable section not found:', targetId);
-                            return;
-                        }
+        const section = document.getElementById(targetId);
+        if (!section) {
+            console.warn('Printable section not found:', targetId);
+            return;
+        }
 
-                        const printWindow = window.open('', '_blank', 'width=1024,height=768,resizable=yes,scrollbars=yes');
-                        if (!printWindow) {
-                            alert('يرجى السماح بالنوافذ المنبثقة لإنشاء التقرير');
-                            return;
-                        }
+        const pageDirection = document.documentElement.getAttribute('dir') || 'rtl';
+        const pageLang = document.documentElement.getAttribute('lang') || 'ar';
+        const sanitizedTitle = typeof reportTitle === 'string' ? reportTitle : '';
+        const generatedAt = new Date().toLocaleString('ar-EG', { hour12: false });
+        const stylesheets = [
+            'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
+            assetsBaseUrl + '/css/homeline-dashboard.css',
+            assetsBaseUrl + '/css/tables.css',
+            assetsBaseUrl + '/css/cards.css'
+        ];
+        const printableHtml = buildPrintableSection(section, sanitizedTitle || 'تقرير قابل للطباعة');
+        const headLinks = stylesheets
+            .map(function (href) {
+                return '<link rel="stylesheet" href="' + href + '" media="all">';
+            })
+            .join('');
+        const documentTitle = escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة');
+        const metaInfo = escapeHtmlForPrint('تم الإنشاء في: ' + generatedAt);
+        const printableDocument = '<!DOCTYPE html>'
+            + '<html lang="' + pageLang + '" dir="' + pageDirection + '">'
+            + '<head>'
+            + '<meta charset="UTF-8">'
+            + '<title>' + documentTitle + '</title>'
+            + headLinks
+            + '<style>'
+            + 'body{background:#fff;color:#000;padding:32px;font-family:"Segoe UI",Tahoma,sans-serif;}'
+            + '.print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;}'
+            + '.print-header h1{font-size:1.6rem;margin-bottom:0;font-weight:700;}'
+            + '.print-meta{font-size:0.9rem;color:#6c757d;}'
+            + '.print-section{display:flex;flex-direction:column;gap:20px;}'
+            + '.print-block{border:1px solid #e5e7eb;border-radius:10px;padding:16px;background:#f9fafb;}'
+            + '.print-block-title{font-weight:700;margin-bottom:12px;font-size:1.05rem;}'
+            + '.print-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}'
+            + '.print-summary-item{display:flex;flex-direction:column;gap:4px;padding:12px;border-radius:8px;background:#fff;border:1px solid #e5e7eb;}'
+            + '.print-summary-label{font-size:0.85rem;color:#6c757d;}'
+            + '.print-summary-value{font-weight:600;font-size:1rem;}'
+            + '.print-stats-inline{display:flex;flex-wrap:wrap;gap:16px;}'
+            + '.print-stat-card{flex:1 1 160px;padding:14px;border-radius:10px;background:#fff;border:1px solid #e5e7eb;display:flex;flex-direction:column;gap:4px;}'
+            + '.print-stat-label{font-size:0.85rem;color:#6c757d;}'
+            + '.print-stat-value{font-size:1.25rem;font-weight:700;color:#0d6efd;}'
+            + '.print-content{display:flex;flex-direction:column;gap:18px;}'
+            + '.print-content table{width:100%;border-collapse:collapse;}'
+            + '.print-content table thead th{background:#0d6efd;color:#fff;padding:10px;border:1px solid #e5e7eb;font-weight:600;}'
+            + '.print-content table tbody td{padding:10px;border:1px solid #e5e7eb;font-size:0.95rem;}'
+            + '.print-content table tbody tr:nth-child(even){background:#f8f9fa;}'
+            + '.print-content .btn,.print-content .form-control,.print-content select,.print-content input{display:none!important;}'
+            + '.print-placeholder{padding:16px;border-radius:8px;background:#fff;border:1px dashed #ced4da;color:#6c757d;text-align:center;}'
+            + '@media print{.print-controls{display:none!important;}}'
+            + '</style>'
+            + '</head>'
+            + '<body>'
+            + '<div class="print-header text-center">'
+            + '<h1>' + documentTitle + '</h1>'
+            + '<div class="print-meta">' + metaInfo + '</div>'
+            + '</div>'
+            + '<div class="print-content">' + printableHtml + '</div>'
+            + '<script>window.addEventListener("load",function(){window.focus();window.print();});<' + '/script>'
+            + '</body>'
+            + '</html>';
 
-                        try {
-                            // حماية من هجمات reverse tabnabbing مع الحفاظ على إمكانية الكتابة في بعض المتصفحات
-                            printWindow.opener = null;
-                        } catch (error) {
-                            console.warn('Unable to clear window opener:', error);
-                        }
+        if (typeof window.openHtmlInAppModal === 'function') {
+            const opener = document.activeElement instanceof Element ? document.activeElement : null;
+            window.openHtmlInAppModal(printableDocument, { opener: opener });
+            return;
+        }
 
-                        const doc = printWindow.document;
-                        const pageDirection = document.documentElement.getAttribute('dir') || 'rtl';
-                        const pageLang = document.documentElement.getAttribute('lang') || 'ar';
+        const printWindow = window.open('', '_blank', 'width=1024,height=768,resizable=yes,scrollbars=yes');
+        if (!printWindow) {
+            alert('يرجى السماح بالنوافذ المنبثقة لإنشاء التقرير');
+            return;
+        }
 
-                        const sanitizedTitle = typeof reportTitle === 'string' ? reportTitle : '';
-                        const generatedAt = new Date().toLocaleString('ar-EG', { hour12: false });
-                        const stylesheets = [
-                            'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
-                            assetsBaseUrl + '/css/homeline-dashboard.css',
-                            assetsBaseUrl + '/css/tables.css',
-                            assetsBaseUrl + '/css/cards.css'
-                        ];
+        try {
+            printWindow.opener = null;
+        } catch (error) {
+            console.warn('Unable to clear window opener:', error);
+        }
 
-                        doc.open();
-                        doc.write('<!DOCTYPE html><html lang="' + pageLang + '" dir="' + pageDirection + '"><head><meta charset="UTF-8">');
-                        doc.write('<title>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</title>');
-                        stylesheets.forEach(function (href) {
-                            doc.write('<link rel="stylesheet" href="' + href + '" media="all">');
-                        });
-                        doc.write('<style>'
-                            + 'body{background:#fff;color:#000;padding:32px;font-family:"Segoe UI",Tahoma,sans-serif;}'
-                            + '.print-header{border-bottom:1px solid #dee2e6;margin-bottom:24px;padding-bottom:12px;}'
-                            + '.print-header h1{font-size:1.6rem;margin-bottom:0;font-weight:700;}'
-                            + '.print-meta{font-size:0.9rem;color:#6c757d;}'
-                            + '.print-section{display:flex;flex-direction:column;gap:20px;}'
-                            + '.print-block{border:1px solid #e5e7eb;border-radius:10px;padding:16px;background:#f9fafb;}'
-                            + '.print-block-title{font-weight:700;margin-bottom:12px;font-size:1.05rem;}'
-                            + '.print-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}'
-                            + '.print-summary-item{display:flex;flex-direction:column;gap:4px;padding:12px;border-radius:8px;background:#fff;border:1px solid #e5e7eb;}'
-                            + '.print-summary-label{font-size:0.85rem;color:#6c757d;}'
-                            + '.print-summary-value{font-weight:600;font-size:1rem;}'
-                            + '.print-stats-inline{display:flex;flex-wrap:wrap;gap:16px;}'
-                            + '.print-stat-card{flex:1 1 160px;padding:14px;border-radius:10px;background:#fff;border:1px solid #e5e7eb;display:flex;flex-direction:column;gap:4px;}'
-                            + '.print-stat-label{font-size:0.85rem;color:#6c757d;}'
-                            + '.print-stat-value{font-size:1.25rem;font-weight:700;color:#0d6efd;}'
-                            + '.print-content{display:flex;flex-direction:column;gap:18px;}'
-                            + '.print-content table{width:100%;border-collapse:collapse;}'
-                            + '.print-content table thead th{background:#0d6efd;color:#fff;padding:10px;border:1px solid #e5e7eb;font-weight:600;}'
-                            + '.print-content table tbody td{padding:10px;border:1px solid #e5e7eb;font-size:0.95rem;}'
-                            + '.print-content table tbody tr:nth-child(even){background:#f8f9fa;}'
-                            + '.print-content .btn,.print-content .form-control,.print-content select,.print-content input{display:none!important;}'
-                            + '.print-placeholder{padding:16px;border-radius:8px;background:#fff;border:1px dashed #ced4da;color:#6c757d;text-align:center;}'
-                            + '@media print{.print-controls{display:none!important;}}'
-                            + '</style>');
-                        doc.write('</head><body>');
-                        doc.write('<div class="print-header text-center">');
-                        doc.write('<h1>' + escapeHtmlForPrint(sanitizedTitle || 'تقرير قابل للطباعة') + '</h1>');
-                        doc.write('<div class="print-meta">' + escapeHtmlForPrint('تم الإنشاء في: ' + generatedAt) + '</div>');
-                        doc.write('</div>');
-                        const printableHtml = buildPrintableSection(section, sanitizedTitle || 'تقرير قابل للطباعة');
-                        doc.write('<div class="print-content">' + printableHtml + '</div>');
-                        doc.write('<script>window.addEventListener("load",function(){window.focus();window.print();});<' + '/script>');
-                        doc.write('</body></html>');
-                        doc.close();
+        const doc = printWindow.document;
+        doc.open();
+        doc.write(printableDocument);
+        doc.close();
                     }
 
                     function buildPrintableSection(section, reportTitle) {

@@ -11,33 +11,99 @@
     }
 
     const originalBodyOverflow = document.body.style.overflow || "";
+    let lastOpener = null;
+
+    const clearOpener = () => {
+        if (lastOpener && lastOpener instanceof Element) {
+            lastOpener.removeAttribute("data-modal-opener");
+        }
+        lastOpener = null;
+    };
+
+    const setOpener = (opener) => {
+        clearOpener();
+        if (opener && opener instanceof Element) {
+            lastOpener = opener;
+            opener.setAttribute("data-modal-opener", "true");
+        } else if (document.activeElement && document.activeElement instanceof Element) {
+            lastOpener = document.activeElement;
+            lastOpener.setAttribute("data-modal-opener", "true");
+        }
+    };
+
+    const restoreFocus = () => {
+        if (lastOpener && typeof lastOpener.focus === "function") {
+            lastOpener.focus({ preventScroll: true });
+        }
+        clearOpener();
+    };
+
+    const activateModal = () => {
+        backdrop.classList.add("is-active");
+        backdrop.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+        closeBtn.focus({ preventScroll: true });
+    };
+
+    const resetIframe = () => {
+        try {
+            const doc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (doc) {
+                doc.open();
+                doc.write("<!DOCTYPE html><title></title>");
+                doc.close();
+            }
+        } catch (error) {
+            console.debug("Unable to reset iframe document:", error);
+        }
+        iframe.src = "about:blank";
+    };
 
     const closeModal = () => {
         backdrop.classList.remove("is-active");
         backdrop.setAttribute("aria-hidden", "true");
-        iframe.src = "about:blank";
+        resetIframe();
         document.body.style.overflow = originalBodyOverflow;
-        const opener = document.body.querySelector('[data-modal-opener="true"]');
-        if (opener) {
-            opener.removeAttribute("data-modal-opener");
-            if (typeof opener.focus === "function") {
-                opener.focus({ preventScroll: true });
-            }
+        restoreFocus();
+    };
+
+    const openWithUrl = (href, options = {}) => {
+        if (!href) {
+            console.warn("Cannot open empty URL in modal.");
+            return;
+        }
+        setOpener(options.opener);
+        try {
+            const absoluteUrl = new URL(href, window.location.href).toString();
+            iframe.src = absoluteUrl;
+            activateModal();
+        } catch (error) {
+            console.error("Failed to open URL in modal, falling back to same-window navigation.", error);
+            window.location.assign(href);
         }
     };
 
-    const openModal = (link) => {
+    const openWithHtml = (html, options = {}) => {
+        if (typeof html !== "string" || html.trim() === "") {
+            console.warn("Cannot render empty HTML content inside the modal.");
+            return;
+        }
+        setOpener(options.opener);
         try {
-            const href = new URL(link.href, window.location.href).toString();
-            iframe.src = href;
-            link.setAttribute("data-modal-opener", "true");
-            backdrop.classList.add("is-active");
-            backdrop.setAttribute("aria-hidden", "false");
-            document.body.style.overflow = "hidden";
-            closeBtn.focus({ preventScroll: true });
+            const view = iframe.contentWindow;
+            if (!view || !view.document) {
+                throw new Error("Iframe content window is not accessible.");
+            }
+            activateModal();
+            const doc = view.document;
+            doc.open();
+            doc.write(html);
+            doc.close();
         } catch (error) {
-            console.error("Failed to open link in modal:", error);
-            window.open(link.href, "_self", "noopener,noreferrer");
+            console.error("Failed to render HTML content in modal.", error);
+            if (options.fallbackUrl) {
+                window.location.assign(options.fallbackUrl);
+            }
         }
     };
 
@@ -64,7 +130,7 @@
             }
             event.preventDefault();
             event.stopPropagation();
-            openModal(link);
+            window.AppModal.open(link.href, { opener: link });
         },
         true
     );
@@ -82,5 +148,22 @@
             closeModal();
         }
     });
+
+    window.AppModal = {
+        open: openWithUrl,
+        openHtml: openWithHtml,
+        close: closeModal,
+        isOpen: () => backdrop.classList.contains("is-active"),
+        getIframe: () => iframe,
+        getContentWindow: () => iframe.contentWindow || null,
+    };
+
+    window.openInAppModal = (url, options) => {
+        window.AppModal.open(url, options || {});
+    };
+
+    window.openHtmlInAppModal = (html, options) => {
+        window.AppModal.openHtml(html, options || {});
+    };
 })();
 
