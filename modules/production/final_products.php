@@ -1139,6 +1139,19 @@ if (!empty($finishedProductsTableExists)) {
                                OR LOWER(TRIM(COALESCE(pr.name, fp.product_name))) LIKE CONCAT('%', LOWER(TRIM(pt.product_name)), '%')
                            )
                        )
+                       -- إذا لم يكن هناك product_id في القالب، نبحث فقط بالاسم
+                       OR (
+                           (pt.product_id IS NULL OR pt.product_id = 0)
+                           AND pt.product_name IS NOT NULL 
+                           AND pt.product_name != ''
+                           AND COALESCE(pr.name, fp.product_name) IS NOT NULL
+                           AND COALESCE(pr.name, fp.product_name) != ''
+                           AND (
+                               LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name)))
+                               OR LOWER(TRIM(pt.product_name)) LIKE CONCAT('%', LOWER(TRIM(COALESCE(pr.name, fp.product_name))), '%')
+                               OR LOWER(TRIM(COALESCE(pr.name, fp.product_name))) LIKE CONCAT('%', LOWER(TRIM(pt.product_name)), '%')
+                           )
+                       )
                    )
                  ORDER BY 
                    CASE 
@@ -1428,16 +1441,62 @@ if ($isManager) {
                                             } else {
                                                 echo '<span class="text-muted">—</span>';
                                                 // عرض رسالة أكثر وضوحاً بناءً على السبب
-                                                if (isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
+                                                $hasTemplatePrice = isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null;
+                                                
+                                                if ($hasTemplatePrice) {
                                                     $rawTemplatePrice = (string)$finishedRow['template_unit_price'];
+                                                    $rawTemplatePrice = str_replace('262145', '', $rawTemplatePrice);
+                                                    $rawTemplatePrice = preg_replace('/262145\s*/', '', $rawTemplatePrice);
+                                                    $rawTemplatePrice = preg_replace('/\s*262145/', '', $rawTemplatePrice);
                                                     $checkTemplatePrice = cleanFinancialValue($rawTemplatePrice);
+                                                    
                                                     if (abs($checkTemplatePrice - 262145) < 0.01 || $checkTemplatePrice > 10000 || $checkTemplatePrice < 0) {
                                                         echo '<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> سعر القالب غير صالح</small>';
                                                     } else {
                                                         echo '<br><small class="text-muted">لم يتم تحديد سعر في القالب</small>';
                                                     }
                                                 } else {
-                                                    echo '<br><small class="text-muted"><i class="bi bi-info-circle"></i> لا يوجد قالب نشط للمنتج</small>';
+                                                    // محاولة البحث عن قالب يدوياً للتحقق
+                                                    $productIdForCheck = COALESCE($finishedRow['product_id'] ?? null, null);
+                                                    $productNameForCheck = $finishedRow['product_name'] ?? '';
+                                                    
+                                                    $templateCheck = null;
+                                                    if ($productIdForCheck && $productIdForCheck > 0) {
+                                                        $templateCheck = $db->queryOne(
+                                                            "SELECT id, unit_price FROM product_templates 
+                                                             WHERE status = 'active' 
+                                                               AND product_id = ? 
+                                                               AND unit_price IS NOT NULL 
+                                                               AND unit_price > 0 
+                                                               AND unit_price <= 10000 
+                                                             LIMIT 1",
+                                                            [$productIdForCheck]
+                                                        );
+                                                    }
+                                                    
+                                                    if (!$templateCheck && !empty($productNameForCheck)) {
+                                                        $templateCheck = $db->queryOne(
+                                                            "SELECT id, unit_price FROM product_templates 
+                                                             WHERE status = 'active' 
+                                                               AND product_name IS NOT NULL 
+                                                               AND product_name != ''
+                                                               AND (
+                                                                   LOWER(TRIM(product_name)) = LOWER(TRIM(?))
+                                                                   OR LOWER(TRIM(product_name)) LIKE CONCAT('%', LOWER(TRIM(?)), '%')
+                                                               )
+                                                               AND unit_price IS NOT NULL 
+                                                               AND unit_price > 0 
+                                                               AND unit_price <= 10000 
+                                                             LIMIT 1",
+                                                            [trim($productNameForCheck), trim($productNameForCheck)]
+                                                        );
+                                                    }
+                                                    
+                                                    if ($templateCheck) {
+                                                        echo '<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> يوجد قالب لكن لم يتم ربطه بشكل صحيح</small>';
+                                                    } else {
+                                                        echo '<br><small class="text-muted"><i class="bi bi-info-circle"></i> لا يوجد قالب نشط للمنتج</small>';
+                                                    }
                                                 }
                                             }
                                         ?>
