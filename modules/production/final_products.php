@@ -1107,7 +1107,7 @@ if (!empty($finishedProductsTableExists)) {
                 fp.id,
                 fp.batch_id,
                 fp.batch_number,
-                fp.product_id,
+                COALESCE(fp.product_id, bn.product_id) AS product_id,
                 COALESCE(pr.name, fp.product_name) AS product_name,
                 fp.production_date,
                 fp.quantity_produced,
@@ -1119,12 +1119,12 @@ if (!empty($finishedProductsTableExists)) {
                    AND pt.unit_price > 0
                    AND pt.unit_price <= 10000
                    AND (
-                       (pt.product_id IS NOT NULL AND pt.product_id = fp.product_id)
+                       (pt.product_id IS NOT NULL AND pt.product_id = COALESCE(fp.product_id, bn.product_id))
                        OR (pt.product_id IS NULL AND pt.product_name IS NOT NULL AND LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name, ''))))
                    )
                  ORDER BY 
                    CASE 
-                       WHEN pt.product_id IS NOT NULL AND pt.product_id = fp.product_id THEN 0 
+                       WHEN pt.product_id IS NOT NULL AND pt.product_id = COALESCE(fp.product_id, bn.product_id) THEN 0 
                        WHEN pt.product_id IS NULL AND pt.product_name IS NOT NULL AND LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name, ''))) THEN 1
                        ELSE 2 
                    END,
@@ -1132,7 +1132,8 @@ if (!empty($finishedProductsTableExists)) {
                  LIMIT 1) AS template_unit_price,
                 GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
             FROM finished_products fp
-            LEFT JOIN products pr ON fp.product_id = pr.id
+            LEFT JOIN batch_numbers bn ON fp.batch_number = bn.batch_number
+            LEFT JOIN products pr ON COALESCE(fp.product_id, bn.product_id) = pr.id
             LEFT JOIN batch_workers bw ON fp.batch_id = bw.batch_id
             LEFT JOIN users u ON bw.employee_id = u.id
             GROUP BY fp.id
