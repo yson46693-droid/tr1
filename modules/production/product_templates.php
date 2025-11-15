@@ -2649,23 +2649,26 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
     document.getElementById('editTemplateId').value = templateId;
     document.getElementById('editProductName').value = templateData.product_name || '';
 
-    // تحديد أدوات التعبئة
-    const packagingSelect = document.getElementById('editPackagingSelect');
-    if (packagingSelect && templateData.packaging && Array.isArray(templateData.packaging)) {
-        // إلغاء تحديد جميع الخيارات أولاً
-        Array.from(packagingSelect.options).forEach(option => {
-            option.selected = false;
+    // تحديد أدوات التعبئة (استخدام checkboxes)
+    const packagingContainer = document.getElementById('editPackagingCheckboxContainer');
+    if (packagingContainer && templateData.packaging && Array.isArray(templateData.packaging)) {
+        // إلغاء تحديد جميع checkboxes أولاً
+        const allCheckboxes = packagingContainer.querySelectorAll('input[type="checkbox"][name="packaging_ids[]"]');
+        allCheckboxes.forEach(checkbox => {
+            checkbox.checked = false;
         });
         
         // تحديد أدوات التعبئة الموجودة في القالب
+        let selectedCount = 0;
         templateData.packaging.forEach(pkg => {
             const packagingId = pkg.packaging_material_id || pkg.id;
             if (packagingId) {
-                const option = packagingSelect.querySelector(`option[value="${packagingId}"]`);
-                if (option) {
-                    option.selected = true;
+                const checkbox = packagingContainer.querySelector(`input[type="checkbox"][name="packaging_ids[]"][value="${packagingId}"]`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                    selectedCount++;
                 } else {
-                    console.warn('Packaging option not found for ID:', packagingId, 'Available options:', Array.from(packagingSelect.options).map(opt => opt.value));
+                    console.warn('Packaging checkbox not found for ID:', packagingId);
                 }
             } else {
                 console.warn('Packaging item missing ID:', pkg);
@@ -2673,16 +2676,16 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
         });
         
         // التحقق من أن هناك على الأقل أداة تعبئة واحدة محددة
-        const selectedCount = Array.from(packagingSelect.options).filter(opt => opt.selected).length;
         if (selectedCount === 0 && templateData.packaging.length > 0) {
-            console.error('No packaging items were selected despite having packaging data:', templateData.packaging);
+            console.warn('No packaging items were selected despite having packaging data:', templateData.packaging);
         }
     } else {
-        console.warn('Packaging select not found or no packaging data:', {
-            hasSelect: !!packagingSelect,
-            hasPackaging: !!(templateData.packaging && Array.isArray(templateData.packaging)),
-            packagingData: templateData.packaging
-        });
+        if (!packagingContainer) {
+            console.warn('Packaging checkbox container not found');
+        }
+        if (!templateData.packaging || !Array.isArray(templateData.packaging)) {
+            console.warn('No packaging data available:', templateData.packaging);
+        }
     }
 
     // ملء المواد الخام
