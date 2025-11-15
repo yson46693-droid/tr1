@@ -1457,7 +1457,7 @@ if ($isManager) {
                                                     }
                                                 } else {
                                                     // محاولة البحث عن قالب يدوياً للتحقق
-                                                    $productIdForCheck = COALESCE($finishedRow['product_id'] ?? null, null);
+                                                    $productIdForCheck = $finishedRow['product_id'] ?? null;
                                                     $productNameForCheck = $finishedRow['product_name'] ?? '';
                                                     
                                                     $templateCheck = null;
