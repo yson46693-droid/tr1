@@ -5419,9 +5419,28 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
                 : normalizedVariety;
             selectEl.appendChild(option);
 
-            // التحقق من تطابق نوع العسل المحدد مسبقاً في القالب
-            if (!matchedOption && defaultValue !== '' && normalizedVariety.toLocaleLowerCase('ar') === defaultValueLower) {
-                matchedOption = option;
+            // التحقق من تطابق نوع العسل المحدد مسبقاً في القالب (مطابقة مرنة)
+            if (!matchedOption && defaultValue !== '') {
+                const varietyLower = normalizedVariety.toLocaleLowerCase('ar');
+                // المطابقة الدقيقة
+                if (varietyLower === defaultValueLower) {
+                    matchedOption = option;
+                }
+                // المطابقة المرنة: التحقق إذا كان نوع العسل يحتوي على القيمة الافتراضية أو العكس
+                else if (!matchedOption && (varietyLower.includes(defaultValueLower) || defaultValueLower.includes(varietyLower))) {
+                    matchedOption = option;
+                }
+                // المطابقة الجزئية: البحث عن تطابق في الكلمات
+                else if (!matchedOption && defaultValueLower.length > 2) {
+                    const defaultValueWords = defaultValueLower.split(/\s+/).filter(w => w.length > 2);
+                    const varietyWords = varietyLower.split(/\s+/).filter(w => w.length > 2);
+                    if (defaultValueWords.length > 0 && varietyWords.length > 0) {
+                        const hasMatch = defaultValueWords.some(dw => varietyWords.some(vw => vw.includes(dw) || dw.includes(vw)));
+                        if (hasMatch) {
+                            matchedOption = option;
+                        }
+                    }
+                }
             }
         });
     }
@@ -5440,12 +5459,25 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
         selectEl.disabled = false;
     }
 
+    // اختيار نوع العسل تلقائياً إذا كان محدداً في القالب
     if (matchedOption) {
         matchedOption.selected = true;
         selectEl.value = matchedOption.value;
         placeholderOption.selected = false;
         // إذا تم تحديد نوع العسل تلقائياً من القالب، قم بتشغيل حدث change
         selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (defaultValue !== '' && entries.length > 0) {
+        // إذا كان هناك نوع عسل محدد في القالب لكن لم يتم العثور على تطابق دقيق،
+        // جرب اختيار أول خيار متاح كبديل (إذا كان هناك خيار واحد فقط)
+        if (entries.length === 1) {
+            const firstOption = selectEl.querySelector('option:not([value=""])');
+            if (firstOption) {
+                firstOption.selected = true;
+                selectEl.value = firstOption.value;
+                placeholderOption.selected = false;
+                selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
     } else if (entries.length === 0) {
         // إذا لم يكن نوع العسل متوفراً في المخزون لكنه موجود في القالب، أضفه مع تحذير
         if (defaultValue !== '') {
@@ -6336,6 +6368,18 @@ function renderTemplateSuppliers(details) {
         if (autoSelectSupplierId !== null) {
             select.value = String(autoSelectSupplierId);
             select.dispatchEvent(new Event('change', { bubbles: true }));
+            
+            // إذا كان نوع العسل محدد في القالب، تأكد من اختياره تلقائياً
+            if (isHoneyType && honeySelect && defaultHoneyVariety) {
+                // انتظر قليلاً لضمان تحديث الخيارات أولاً
+                setTimeout(() => {
+                    const honeyValue = honeySelect.dataset.defaultValue || defaultHoneyVariety;
+                    if (honeyValue && honeySelect.querySelector(`option[value="${honeyValue}"]`)) {
+                        honeySelect.value = honeyValue;
+                        honeySelect.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }, 100);
+            }
         }
     });
 
