@@ -1128,6 +1128,7 @@ if (!empty($finishedProductsTableExists)) {
                        WHEN pt.product_id IS NULL AND pt.product_name IS NOT NULL AND LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name, ''))) THEN 1
                        ELSE 2 
                    END,
+                   pt.unit_price ASC,
                    pt.id DESC 
                  LIMIT 1) AS template_unit_price,
                 GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
