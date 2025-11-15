@@ -393,13 +393,14 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                             <th>النوع</th>
                                             <th>الطلب من</th>
                                             <th>التاريخ</th>
+                                            <th>التفاصيل</th>
                                             <th>الإجراءات</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         <?php if (empty($approvals)): ?>
                                             <tr>
-                                                <td colspan="4" class="text-center text-muted">لا توجد موافقات معلقة</td>
+                                                <td colspan="5" class="text-center text-muted">لا توجد موافقات معلقة</td>
                                             </tr>
                                         <?php else: ?>
                                             <?php foreach ($approvals as $approval): ?>
@@ -407,6 +408,40 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                                     <td><?php echo htmlspecialchars($approval['type']); ?></td>
                                                     <td><?php echo htmlspecialchars($approval['requested_by_full_name'] ?? $approval['requested_by_name']); ?></td>
                                                     <td><?php echo formatDateTime($approval['created_at']); ?></td>
+                                                    <td>
+                                                        <?php if ($approval['type'] === 'warehouse_transfer'): ?>
+                                                            <?php
+                                                            // جلب تفاصيل طلب النقل
+                                                            require_once __DIR__ . '/../includes/approval_system.php';
+                                                            $entityColumn = getApprovalsEntityColumn();
+                                                            $transferId = $approval[$entityColumn] ?? null;
+                                                            if ($transferId) {
+                                                                $transferItems = $db->query(
+                                                                    "SELECT wti.*, p.name as product_name 
+                                                                     FROM warehouse_transfer_items wti
+                                                                     LEFT JOIN products p ON wti.product_id = p.id
+                                                                     WHERE wti.transfer_id = ?
+                                                                     ORDER BY wti.id",
+                                                                    [$transferId]
+                                                                );
+                                                                if (!empty($transferItems)) {
+                                                                    echo '<div class="small">';
+                                                                    foreach ($transferItems as $item) {
+                                                                        $batchInfo = !empty($item['batch_number']) ? ' - تشغيلة ' . htmlspecialchars($item['batch_number']) : '';
+                                                                        echo '<span class="badge bg-info me-1 mb-1">';
+                                                                        echo htmlspecialchars($item['product_name'] ?? '-');
+                                                                        echo ' (' . number_format((float)$item['quantity'], 2) . ')';
+                                                                        echo $batchInfo;
+                                                                        echo '</span>';
+                                                                    }
+                                                                    echo '</div>';
+                                                                } else {
+                                                                    echo '<span class="text-muted small">لا توجد منتجات</span>';
+                                                                }
+                                                            }
+                                                            ?>
+                                                        <?php endif; ?>
+                                                    </td>
                                                     <td>
                                                         <div class="btn-group btn-group-sm" role="group">
                                                             <button class="btn btn-success" onclick="approveRequest(<?php echo $approval['id']; ?>, event)">
