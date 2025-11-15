@@ -6,6 +6,9 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
+// تعيين ترميز UTF-8
+mb_internal_encoding('UTF-8');
+mb_http_output('UTF-8');
 
 require_once __DIR__ . '/../../includes/config.php';
 require_once __DIR__ . '/../../includes/db.php';
@@ -914,9 +917,24 @@ unset($template);
 $packagingTableCheck = $db->queryOne("SHOW TABLES LIKE 'packaging_materials'");
 $packagingMaterials = [];
 if (!empty($packagingTableCheck)) {
-    $packagingMaterials = $db->query(
-        "SELECT id, name, type, quantity, unit FROM packaging_materials WHERE status = 'active' ORDER BY name"
-    );
+    try {
+        $packagingMaterials = $db->query(
+            "SELECT id, name, type, quantity, unit FROM packaging_materials WHERE status = 'active' ORDER BY name"
+        );
+        // التأكد من ترميز UTF-8 لجميع البيانات
+        foreach ($packagingMaterials as &$pkg) {
+            if (isset($pkg['name'])) {
+                $pkg['name'] = mb_convert_encoding($pkg['name'], 'UTF-8', 'UTF-8');
+            }
+            if (isset($pkg['unit'])) {
+                $pkg['unit'] = mb_convert_encoding($pkg['unit'], 'UTF-8', 'UTF-8');
+            }
+        }
+        unset($pkg);
+    } catch (Exception $e) {
+        error_log('Failed to load packaging materials: ' . $e->getMessage());
+        $packagingMaterials = [];
+    }
 }
 
 // جلب المواد الخام من مخزن الخامات مع أنواعها
@@ -1751,10 +1769,10 @@ $lang = isset($translations) ? $translations : [];
                                                value="<?php echo $pkg['id']; ?>" 
                                                id="packaging_<?php echo $pkg['id']; ?>">
                                         <label class="form-check-label w-100" for="packaging_<?php echo $pkg['id']; ?>">
-                                            <span class="fw-semibold"><?php echo htmlspecialchars($pkg['name']); ?></span>
+                                            <span class="fw-semibold"><?php echo htmlspecialchars($pkg['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span>
                                             <?php if (!empty($pkg['quantity'])): ?>
                                                 <span class="text-muted small ms-2">
-                                                    (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
+                                                    (المخزون: <?php echo number_format((float)($pkg['quantity'] ?? 0), 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? '', ENT_QUOTES, 'UTF-8'); ?>)
                                                 </span>
                                             <?php endif; ?>
                                         </label>
@@ -1827,10 +1845,10 @@ $lang = isset($translations) ? $translations : [];
                                                value="<?php echo $pkg['id']; ?>" 
                                                id="edit_packaging_<?php echo $pkg['id']; ?>">
                                         <label class="form-check-label w-100" for="edit_packaging_<?php echo $pkg['id']; ?>">
-                                            <span class="fw-semibold"><?php echo htmlspecialchars($pkg['name']); ?></span>
+                                            <span class="fw-semibold"><?php echo htmlspecialchars($pkg['name'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span>
                                             <?php if (!empty($pkg['quantity'])): ?>
                                                 <span class="text-muted small ms-2">
-                                                    (المخزون: <?php echo number_format($pkg['quantity'], 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? ''); ?>)
+                                                    (المخزون: <?php echo number_format((float)($pkg['quantity'] ?? 0), 2); ?> <?php echo htmlspecialchars($pkg['unit'] ?? '', ENT_QUOTES, 'UTF-8'); ?>)
                                                 </span>
                                             <?php endif; ?>
                                         </label>
