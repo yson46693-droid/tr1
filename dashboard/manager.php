@@ -918,6 +918,8 @@ function approveRequest(id) {
             if (btn) {
                 btn.innerHTML = '<i class="bi bi-check-circle me-2"></i>تمت الموافقة';
             }
+            // إرسال حدث لتحديث العداد
+            document.dispatchEvent(new CustomEvent('approvalUpdated'));
             setTimeout(() => {
                 location.reload();
             }, 1000);
@@ -987,6 +989,8 @@ function rejectRequest(id, evt) {
             if (btn) {
                 btn.innerHTML = '<i class="bi bi-x-circle me-2"></i>تم الرفض';
             }
+            // إرسال حدث لتحديث العداد
+            document.dispatchEvent(new CustomEvent('approvalUpdated'));
             setTimeout(() => {
                 location.reload();
             }, 1000);
@@ -997,7 +1001,7 @@ function rejectRequest(id, evt) {
             }
             alert('خطأ: ' + (data.error || data.message || 'حدث خطأ غير معروف'));
         }
-    })
+    }) 
     .catch(error => {
         console.error('Error rejecting request:', error);
         if (btn) {
@@ -1007,5 +1011,53 @@ function rejectRequest(id, evt) {
         alert('خطأ في الاتصال بالخادم. يرجى المحاولة مرة أخرى.');
     });
 }
+
+/**
+ * تحديث عداد الموافقات المعلقة
+ */
+async function updateApprovalBadge() {
+    try {
+        const basePath = '<?php echo getBasePath(); ?>';
+        const apiPath = basePath + '/api/approvals.php';
+        const response = await fetch(apiPath, {
+            credentials: 'same-origin',
+            cache: 'no-cache'
+        });
+        
+        if (!response.ok) {
+            return;
+        }
+        
+        const data = await response.json();
+        if (data && data.success && typeof data.count === 'number') {
+            const badge = document.getElementById('approvalBadge');
+            if (badge) {
+                const count = Math.max(0, parseInt(data.count, 10));
+                badge.textContent = count.toString();
+                if (count > 0) {
+                    badge.style.display = 'inline-block';
+                    badge.classList.add('badge-danger');
+                } else {
+                    badge.style.display = 'none';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error updating approval badge:', error);
+    }
+}
+
+// تحديث العداد عند تحميل الصفحة
+document.addEventListener('DOMContentLoaded', function() {
+    updateApprovalBadge();
+    
+    // تحديث العداد كل 30 ثانية
+    setInterval(updateApprovalBadge, 30000);
+    
+    // تحديث العداد بعد الموافقة أو الرفض
+    document.addEventListener('approvalUpdated', function() {
+        setTimeout(updateApprovalBadge, 1000);
+    });
+});
 </script>
 

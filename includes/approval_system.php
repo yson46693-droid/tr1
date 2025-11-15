@@ -113,9 +113,29 @@ function requestApproval($type, $entityId, $requestedBy, $notes = null) {
         
         // إرسال إشعار للمديرين
         $entityName = getEntityName($type, $entityId);
+        
+        // تحسين رسالة الإشعار لطلبات نقل المنتجات
+        if ($type === 'warehouse_transfer') {
+            $transferNumber = '';
+            try {
+                $transfer = $db->queryOne("SELECT transfer_number FROM warehouse_transfers WHERE id = ?", [$entityId]);
+                if ($transfer && !empty($transfer['transfer_number'])) {
+                    $transferNumber = ' رقم ' . $transfer['transfer_number'];
+                }
+            } catch (Exception $e) {
+                error_log('Error getting transfer number for notification: ' . $e->getMessage());
+            }
+            
+            $notificationTitle = 'طلب موافقة نقل منتجات بين المخازن';
+            $notificationMessage = "تم استلام طلب موافقة جديد لنقل منتجات بين المخازن{$transferNumber}. يرجى مراجعة الطلب والموافقة عليه.";
+        } else {
+            $notificationTitle = 'طلب موافقة جديد';
+            $notificationMessage = "تم طلب موافقة على {$entityName} من نوع {$type}";
+        }
+        
         notifyManagers(
-            'طلب موافقة جديد',
-            "تم طلب موافقة على {$entityName} من نوع {$type}",
+            $notificationTitle,
+            $notificationMessage,
             'approval',
             "dashboard/manager.php?page=approvals&id={$result['insert_id']}"
         );

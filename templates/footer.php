@@ -424,6 +424,67 @@ if (!defined('ACCESS_ALLOWED')) {
             
         })();
     </script>
+    
+    <?php if (isset($currentUser) && ($currentUser['role'] ?? '') === 'manager'): ?>
+    <script>
+    /**
+     * تحديث عداد الموافقات المعلقة للمديرين
+     */
+    (function() {
+        async function updateApprovalBadge() {
+            try {
+                const badge = document.getElementById('approvalBadge');
+                if (!badge) {
+                    return;
+                }
+                
+                const basePath = '<?php echo getBasePath(); ?>';
+                const apiPath = basePath + '/api/approvals.php';
+                const response = await fetch(apiPath, {
+                    credentials: 'same-origin',
+                    cache: 'no-cache'
+                });
+                
+                if (!response.ok) {
+                    return;
+                }
+                
+                const data = await response.json();
+                if (data && data.success && typeof data.count === 'number') {
+                    const count = Math.max(0, parseInt(data.count, 10));
+                    badge.textContent = count.toString();
+                    if (count > 0) {
+                        badge.style.display = 'inline-block';
+                        badge.classList.add('badge-danger', 'bg-danger');
+                    } else {
+                        badge.style.display = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('Error updating approval badge:', error);
+            }
+        }
+        
+        // تحديث العداد عند تحميل الصفحة
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+                updateApprovalBadge();
+                // تحديث العداد كل 30 ثانية
+                setInterval(updateApprovalBadge, 30000);
+            });
+        } else {
+            updateApprovalBadge();
+            // تحديث العداد كل 30 ثانية
+            setInterval(updateApprovalBadge, 30000);
+        }
+        
+        // تحديث العداد عند استلام حدث
+        document.addEventListener('approvalUpdated', function() {
+            setTimeout(updateApprovalBadge, 1000);
+        });
+    })();
+    </script>
+    <?php endif; ?>
         </main>
     </div>
 </body>
