@@ -1119,14 +1119,42 @@ if (!empty($finishedProductsTableExists)) {
                    AND pt.unit_price > 0
                    AND pt.unit_price <= 10000
                    AND (
-                       (pt.product_id IS NOT NULL AND pt.product_id = COALESCE(fp.product_id, bn.product_id))
-                       OR (pt.product_id IS NULL AND pt.product_name IS NOT NULL AND LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name, ''))))
+                       -- مطابقة product_id أولاً (الأكثر دقة)
+                       (
+                           COALESCE(fp.product_id, bn.product_id) IS NOT NULL 
+                           AND COALESCE(fp.product_id, bn.product_id) > 0
+                           AND pt.product_id IS NOT NULL 
+                           AND pt.product_id > 0 
+                           AND pt.product_id = COALESCE(fp.product_id, bn.product_id)
+                       )
+                       -- مطابقة product_name (مطابقة دقيقة أو جزئية)
+                       OR (
+                           pt.product_name IS NOT NULL 
+                           AND pt.product_name != ''
+                           AND COALESCE(pr.name, fp.product_name) IS NOT NULL
+                           AND COALESCE(pr.name, fp.product_name) != ''
+                           AND (
+                               LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name)))
+                               OR LOWER(TRIM(pt.product_name)) LIKE CONCAT('%', LOWER(TRIM(COALESCE(pr.name, fp.product_name))), '%')
+                               OR LOWER(TRIM(COALESCE(pr.name, fp.product_name))) LIKE CONCAT('%', LOWER(TRIM(pt.product_name)), '%')
+                           )
+                       )
                    )
                  ORDER BY 
                    CASE 
-                       WHEN pt.product_id IS NOT NULL AND pt.product_id = COALESCE(fp.product_id, bn.product_id) THEN 0 
-                       WHEN pt.product_id IS NULL AND pt.product_name IS NOT NULL AND LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name, ''))) THEN 1
-                       ELSE 2 
+                       WHEN COALESCE(fp.product_id, bn.product_id) IS NOT NULL 
+                            AND COALESCE(fp.product_id, bn.product_id) > 0
+                            AND pt.product_id IS NOT NULL 
+                            AND pt.product_id > 0 
+                            AND pt.product_id = COALESCE(fp.product_id, bn.product_id) THEN 0 
+                       WHEN LOWER(TRIM(pt.product_name)) = LOWER(TRIM(COALESCE(pr.name, fp.product_name))) THEN 1
+                       WHEN pt.product_name IS NOT NULL 
+                            AND COALESCE(pr.name, fp.product_name) IS NOT NULL
+                            AND (
+                                LOWER(TRIM(pt.product_name)) LIKE CONCAT('%', LOWER(TRIM(COALESCE(pr.name, fp.product_name))), '%')
+                                OR LOWER(TRIM(COALESCE(pr.name, fp.product_name))) LIKE CONCAT('%', LOWER(TRIM(pt.product_name)), '%')
+                            ) THEN 2
+                       ELSE 3
                    END,
                    pt.unit_price ASC,
                    pt.id DESC 
