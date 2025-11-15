@@ -228,6 +228,26 @@ function getFinishedProductBatchOptions($onlyAvailable = true, $fromWarehouseId 
                     } else {
                         // إذا كان المخزن المصدر رئيسي، نستخدم الكمية الفعلية من products.quantity
                         $availableQuantity = (float)($row['product_stock_quantity'] ?? 0);
+                        
+                        // إذا كانت الكمية في products = 0 أو NULL، نستخدم quantity_produced من finished_products
+                        if ($availableQuantity <= 0) {
+                            $availableQuantity = (float)($row['quantity_produced'] ?? 0);
+                            
+                            // خصم الكمية المنقولة بالفعل (approved أو completed)
+                            $transferred = $db->queryOne(
+                                "SELECT COALESCE(SUM(
+                                    CASE
+                                        WHEN wt.status IN ('approved', 'completed') THEN wti.quantity
+                                        ELSE 0
+                                    END
+                                ), 0) AS transferred_quantity
+                                FROM warehouse_transfer_items wti
+                                LEFT JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                                WHERE wti.batch_id = ?",
+                                [$batchId]
+                            );
+                            $availableQuantity -= (float)($transferred['transferred_quantity'] ?? 0);
+                        }
                     }
 
                     // خصم الكمية المحجوزة في طلبات النقل المعلقة (pending) من نفس المخزن
