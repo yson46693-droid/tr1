@@ -360,30 +360,30 @@ $lines[] = '';
 $lines[] = '🔖 رقم التشغيلة: <code>' . $escape($batchNumber) . '</code>';
 
 if ($productName !== '') {
-    $lines[] = '\n📦 المنتج: ' . $escape($productName);
+    $lines[] = '📦 المنتج: ' . $escape($productName);
 }
 
 $formattedQuantity = $formatQuantity($quantityValue);
 if ($formattedQuantity !== null) {
-    $quantityLine = '\n📊 كمية الإنتاج: ' . $escape($formattedQuantity);
+    $quantityLine = '📊 كمية الإنتاج: ' . $escape($formattedQuantity);
     if ($unitLabel) {
         $quantityLine .= ' ' . $escape($unitLabel);
     }
     $lines[] = $quantityLine;
 }
 
-$lines[] = '\n🏷️ عدد الملصقات المطلوبة: ' . $escape($labels);
+$lines[] = '🏷️ عدد الملصقات المطلوبة: ' . $escape($labels);
 
 if ($productionDate) {
-    $lines[] = '\n🗓️ تاريخ الإنتاج: ' . $escape($productionDate);
+    $lines[] = '🗓️ تاريخ الإنتاج: ' . $escape($productionDate);
 }
 
 if ($createdByName !== '') {
-    $lines[] = '\n👤 أنشأها: ' . $escape($createdByName);
+    $lines[] = '👤 أنشأها: ' . $escape($createdByName);
 }
 
 if (!empty($workers)) {
-    $lines[] = '\n👷‍♀️ طاقم الإنتاج: ' . $escape(implode('، ', $workers));
+    $lines[] = '👷‍♀️ طاقم الإنتاج: ' . $escape(implode('، ', $workers));
 }
 
 $buildMaterialsSection = static function ($items, $title, $escape, $formatQuantity) {
@@ -426,7 +426,7 @@ $buildMaterialsSection = static function ($items, $title, $escape, $formatQuanti
 
 
 if ($notes) {
-    $lines[] = '\n📝 ملاحظات التشغيلة: ' . $escape($notes);
+    $lines[] = '📝 ملاحظات التشغيلة: ' . $escape($notes);
 }
 
 $lines[] = '';
