@@ -2621,101 +2621,29 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // إصلاح مشكلة فتح وإغلاق modal إضافة المنتج الخارجي
-    const addExternalProductBtn = document.querySelector('[data-bs-target="#addExternalProductModal"]');
+    // منع إغلاق modal إضافة المنتج الخارجي إلا عند النقر على زر الإغلاق
     const addExternalProductModal = document.getElementById('addExternalProductModal');
-    
-    if (addExternalProductBtn && addExternalProductModal) {
-        // إزالة data-bs-toggle من الزر لتجنب التعارض
-        addExternalProductBtn.removeAttribute('data-bs-toggle');
+    if (addExternalProductModal) {
+        let lastClickedElement = null;
         
-        // إضافة event listener جديد لفتح الـ modal بشكل صحيح
-        addExternalProductBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            
-            // التأكد من أن الـ modal موجود
-            if (!addExternalProductModal) {
-                return;
-            }
-            
-            // فتح الـ modal باستخدام Bootstrap API مع إعدادات لمنع الإغلاق التلقائي
-            const modalInstance = bootstrap.Modal.getOrCreateInstance(addExternalProductModal, {
-                backdrop: 'static',
-                keyboard: false
-            });
-            
-            // إضافة event listener على backdrop بعد فتح الـ modal
-            addExternalProductModal.addEventListener('shown.bs.modal', function() {
-                const backdrop = document.querySelector('.modal-backdrop');
-                if (backdrop) {
-                    // منع النقر على backdrop من إغلاق الـ modal
-                    backdrop.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.stopImmediatePropagation();
-                        return false;
-                    }, true);
-                    // منع أي تفاعل مع backdrop
-                    backdrop.style.cursor = 'default';
-                }
-            }, { once: true });
-            
-            modalInstance.show();
+        // تتبع العنصر الذي تم النقر عليه داخل المودال
+        addExternalProductModal.addEventListener('click', function(e) {
+            lastClickedElement = e.target;
         });
         
-        // متغير لتتبع العنصر الذي تم النقر عليه
-        let clickedElement = null;
-        
-        // تتبع العنصر الذي تم النقر عليه
-        document.addEventListener('mousedown', function(e) {
-            if (addExternalProductModal.classList.contains('show')) {
-                clickedElement = e.target;
-            }
-        }, true);
-        
-        // منع النقر على backdrop من إغلاق الـ modal
-        addExternalProductModal.addEventListener('click', function(e) {
-            if (e.target === addExternalProductModal || e.target.classList.contains('modal-backdrop')) {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-            }
-        }, true);
-        
-        // منع إغلاق الـ modal إلا عند النقر على زر الإغلاق أو الإلغاء
+        // منع الإغلاق إلا عند النقر على زر الإغلاق
         addExternalProductModal.addEventListener('hide.bs.modal', function(e) {
-            // التحقق من أن العنصر الذي تم النقر عليه هو زر الإغلاق
-            const isCloseButton = clickedElement && (
-                clickedElement.closest('[data-bs-dismiss="modal"]') !== null || 
-                clickedElement.closest('.btn-close') !== null ||
-                clickedElement.classList.contains('btn-close')
+            const isCloseButton = lastClickedElement && (
+                lastClickedElement.matches('[data-bs-dismiss="modal"]') ||
+                lastClickedElement.closest('[data-bs-dismiss="modal"]')
             );
             
-            // إعادة تعيين المتغير
-            clickedElement = null;
-            
-            // إذا لم يكن العنصر زر إغلاق، منع الإغلاق
             if (!isCloseButton) {
                 e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                return false;
             }
+            
+            lastClickedElement = null;
         });
-        
-        // منع أي تفاعل مع backdrop
-        document.addEventListener('click', function(e) {
-            if (addExternalProductModal.classList.contains('show')) {
-                const backdrop = document.querySelector('.modal-backdrop');
-                if (backdrop && (e.target === backdrop || backdrop.contains(e.target))) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                }
-            }
-        }, true);
     }
 
     // إصلاح مشكلة فتح وإغلاق modal تفاصيل التشغيلة
@@ -2773,5 +2701,23 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }, true);
     }
+    
+    // إزالة أي عناصر modal-backdrop عالقة في الصفحة
+    document.addEventListener('DOMContentLoaded', function() {
+        const stuckBackdrops = document.querySelectorAll('.modal-backdrop.fade.show');
+        stuckBackdrops.forEach(function(backdrop) {
+            backdrop.remove();
+        });
+        document.body.classList.remove('modal-open');
+    });
+    
+    // إزالة backdrop عند إغلاق أي modal
+    document.addEventListener('hidden.bs.modal', function() {
+        const backdrops = document.querySelectorAll('.modal-backdrop');
+        backdrops.forEach(function(backdrop) {
+            backdrop.remove();
+        });
+        document.body.classList.remove('modal-open');
+    });
 </script>
 
