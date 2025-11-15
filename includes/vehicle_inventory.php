@@ -158,8 +158,9 @@ function ensureWarehouseTransferBatchColumns(): void
 
 /**
  * الحصول على قائمة المنتجات بالتشغيلات المتاحة للنقل
+ * الآن يحسب الكمية المتاحة من المخزن الفعلي بدلاً من quantity_produced
  */
-function getFinishedProductBatchOptions($onlyAvailable = true): array
+function getFinishedProductBatchOptions($onlyAvailable = true, $fromWarehouseId = null): array
 {
     $db = db();
 
@@ -171,6 +172,14 @@ function getFinishedProductBatchOptions($onlyAvailable = true): array
 
         ensureWarehouseTransferBatchColumns();
 
+        // إذا لم يُحدد المخزن المصدر، نستخدم المخزن الرئيسي الافتراضي
+        if ($fromWarehouseId === null) {
+            $primaryWarehouse = $db->queryOne(
+                "SELECT id FROM warehouses WHERE warehouse_type = 'main' AND status = 'active' ORDER BY id ASC LIMIT 1"
+            );
+            $fromWarehouseId = $primaryWarehouse['id'] ?? null;
+        }
+
         $sql = "
             SELECT
                 fp.id AS batch_id,
@@ -179,17 +188,10 @@ function getFinishedProductBatchOptions($onlyAvailable = true): array
                 fp.batch_number,
                 fp.production_date,
                 fp.quantity_produced,
-                COALESCE(SUM(
-                    CASE
-                        WHEN wt.status IN ('approved', 'completed') THEN wti.quantity
-                        ELSE 0
-                    END
-                ), 0) AS transferred_quantity
+                COALESCE(p.quantity, 0) AS product_stock_quantity
             FROM finished_products fp
             LEFT JOIN products p ON fp.product_id = p.id
-            LEFT JOIN warehouse_transfer_items wti ON wti.batch_id = fp.id
-            LEFT JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
-            GROUP BY fp.id, fp.product_id, fp.product_name, fp.batch_number, fp.production_date, fp.quantity_produced, p.name
+            GROUP BY fp.id, fp.product_id, fp.product_name, fp.batch_number, fp.production_date, fp.quantity_produced, p.name, p.quantity
             ORDER BY fp.production_date DESC, product_name ASC, fp.batch_number ASC
         ";
 
@@ -197,19 +199,69 @@ function getFinishedProductBatchOptions($onlyAvailable = true): array
         $options = [];
 
         foreach ($rows as $row) {
-            $available = (float)$row['quantity_produced'] - (float)$row['transferred_quantity'];
-            if ($onlyAvailable && $available <= 0) {
+            $productId = $row['product_id'] ? (int)$row['product_id'] : null;
+            $batchId = (int)$row['batch_id'];
+            $availableQuantity = 0.0;
+
+            if ($productId > 0 && $fromWarehouseId) {
+                // حساب الكمية المتاحة الفعلية من المخزن المصدر
+                $fromWarehouse = $db->queryOne(
+                    "SELECT warehouse_type, vehicle_id FROM warehouses WHERE id = ?",
+                    [$fromWarehouseId]
+                );
+
+                if ($fromWarehouse) {
+                    // إذا كان المخزن المصدر سيارة، نفحص مخزون السيارة
+                    if (($fromWarehouse['warehouse_type'] ?? '') === 'vehicle' && !empty($fromWarehouse['vehicle_id'])) {
+                        $vehicleStock = $db->queryOne(
+                            "SELECT quantity FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ?",
+                            [$fromWarehouse['vehicle_id'], $productId]
+                        );
+                        $availableQuantity = (float)($vehicleStock['quantity'] ?? 0);
+                    } else {
+                        // إذا كان المخزن المصدر رئيسي، نستخدم الكمية الفعلية من products.quantity
+                        $availableQuantity = (float)($row['product_stock_quantity'] ?? 0);
+                    }
+
+                    // خصم الكمية المحجوزة في طلبات النقل المعلقة (pending) من نفس المخزن
+                    $pendingTransfers = $db->queryOne(
+                        "SELECT COALESCE(SUM(wti.quantity), 0) AS pending_quantity
+                         FROM warehouse_transfer_items wti
+                         INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                         WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND wt.status = 'pending'",
+                        [$batchId, $fromWarehouseId]
+                    );
+                    $availableQuantity -= (float)($pendingTransfers['pending_quantity'] ?? 0);
+                }
+            } else {
+                // إذا لم يكن هناك product_id أو fromWarehouseId، نستخدم الطريقة القديمة كبديل
+                $transferred = $db->queryOne(
+                    "SELECT COALESCE(SUM(
+                        CASE
+                            WHEN wt.status IN ('approved', 'completed') THEN wti.quantity
+                            ELSE 0
+                        END
+                    ), 0) AS transferred_quantity
+                    FROM warehouse_transfer_items wti
+                    LEFT JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                    WHERE wti.batch_id = ?",
+                    [$batchId]
+                );
+                $availableQuantity = (float)$row['quantity_produced'] - (float)($transferred['transferred_quantity'] ?? 0);
+            }
+
+            if ($onlyAvailable && $availableQuantity <= 0) {
                 continue;
             }
 
             $options[] = [
-                'batch_id' => (int)$row['batch_id'],
-                'product_id' => $row['product_id'] ? (int)$row['product_id'] : null,
+                'batch_id' => $batchId,
+                'product_id' => $productId,
                 'product_name' => $row['product_name'] ?? 'منتج غير محدد',
                 'batch_number' => $row['batch_number'] ?? '',
                 'production_date' => $row['production_date'] ?? null,
                 'quantity_produced' => (float)$row['quantity_produced'],
-                'quantity_available' => max(0, $available),
+                'quantity_available' => max(0, $availableQuantity),
             ];
         }
 
