@@ -2880,12 +2880,23 @@ if (!window.transferFormInitialized) {
     if (!clickEventAttached) {
         clickEventAttached = true;
         document.addEventListener('click', function (event) {
+            // التحقق من أن النقر ليس داخل أي modal مفتوح
+            const openModal = document.querySelector('.modal.show');
+            if (openModal && openModal.contains(event.target)) {
+                // النقر داخل modal - لا نتعامل معه
+                return;
+            }
+            
+            // التحقق من أن النقر ليس على backdrop
+            if (event.target.classList.contains('modal-backdrop')) {
+                return;
+            }
+            
             // فتح نموذج إضافة منتج خارجي
             const addExternalBtn = event.target.closest('.js-open-add-external-modal');
             if (addExternalBtn) {
                 event.preventDefault();
                 event.stopPropagation();
-                event.stopImmediatePropagation();
                 
                 const modal = document.getElementById('addExternalProductModal');
                 if (modal) {
@@ -2908,7 +2919,6 @@ if (!window.transferFormInitialized) {
                 if (batchNumber) {
                     event.preventDefault();
                     event.stopPropagation();
-                    event.stopImmediatePropagation();
                     const productName = detailsButton.dataset.product || '';
                     showBatchDetailsModal(batchNumber, productName);
                 }
@@ -2963,7 +2973,6 @@ if (!window.transferFormInitialized) {
         if (adjustButton) {
             event.preventDefault();
             event.stopPropagation();
-            event.stopImmediatePropagation();
             
             const modal = document.getElementById('externalStockModal');
             if (!modal) {
@@ -3025,7 +3034,6 @@ if (!window.transferFormInitialized) {
         if (editButton) {
             event.preventDefault();
             event.stopPropagation();
-            event.stopImmediatePropagation();
             
             const modal = document.getElementById('editExternalProductModal');
             if (!modal) {
@@ -3094,19 +3102,6 @@ if (!window.transferFormInitialized) {
         });
     }
     
-    // تنظيف backdrop عند إغلاق أي modal
-    document.addEventListener('hidden.bs.modal', function(e) {
-        const modal = e.target;
-        if (modal && modal.classList.contains('modal')) {
-            const backdrops = document.querySelectorAll('.modal-backdrop');
-            backdrops.forEach(function(backdrop) {
-                backdrop.remove();
-            });
-            document.body.classList.remove('modal-open');
-            document.body.style.overflow = '';
-            document.body.style.paddingRight = '';
-        }
-    });
     }
 </script>
 
