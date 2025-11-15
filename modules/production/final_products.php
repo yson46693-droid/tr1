@@ -2765,7 +2765,27 @@ if (!window.transferFormInitialized) {
                     backdrop: 'static',
                     keyboard: false
                 });
+                
+                // إزالة أي transitions قبل فتح النموذج
+                modal.style.transition = 'none';
+                const modalDialog = modal.querySelector('.modal-dialog');
+                if (modalDialog) {
+                    modalDialog.style.transition = 'none';
+                    modalDialog.style.transform = 'none';
+                }
+                
                 modalInstance.show();
+                
+                // التأكد من الاستقرار بعد فتح النموذج
+                setTimeout(function() {
+                    if (modal.classList.contains('show')) {
+                        modal.style.transition = 'none';
+                        if (modalDialog) {
+                            modalDialog.style.transition = 'none';
+                            modalDialog.style.transform = 'none';
+                        }
+                    }
+                }, 10);
             }
             return;
         }
@@ -2824,7 +2844,27 @@ if (!window.transferFormInitialized) {
                     backdrop: 'static',
                     keyboard: false
                 });
+                
+                // إزالة أي transitions قبل فتح النموذج
+                modal.style.transition = 'none';
+                const modalDialog = modal.querySelector('.modal-dialog');
+                if (modalDialog) {
+                    modalDialog.style.transition = 'none';
+                    modalDialog.style.transform = 'none';
+                }
+                
                 modalInstance.show();
+                
+                // التأكد من الاستقرار بعد فتح النموذج
+                setTimeout(function() {
+                    if (modal.classList.contains('show')) {
+                        modal.style.transition = 'none';
+                        if (modalDialog) {
+                            modalDialog.style.transition = 'none';
+                            modalDialog.style.transform = 'none';
+                        }
+                    }
+                }, 10);
             }
             return;
         }
@@ -2931,7 +2971,27 @@ if (!window.transferFormInitialized) {
                     backdrop: 'static',
                     keyboard: false
                 });
+                
+                // إزالة أي transitions قبل فتح النموذج
+                modal.style.transition = 'none';
+                const modalDialog = modal.querySelector('.modal-dialog');
+                if (modalDialog) {
+                    modalDialog.style.transition = 'none';
+                    modalDialog.style.transform = 'none';
+                }
+                
                 modalInstance.show();
+                
+                // التأكد من الاستقرار بعد فتح النموذج
+                setTimeout(function() {
+                    if (modal.classList.contains('show')) {
+                        modal.style.transition = 'none';
+                        if (modalDialog) {
+                            modalDialog.style.transition = 'none';
+                            modalDialog.style.transform = 'none';
+                        }
+                    }
+                }, 10);
             }
         }
         });
@@ -3044,5 +3104,210 @@ if (!window.transferFormInitialized) {
         }
     });
     }
+</script>
+
+<style>
+    /* إصلاح مشكلة استقرار النماذج - منع الحركة والوميض */
+    .modal {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        z-index: 1055 !important;
+        width: 100% !important;
+        height: 100% !important;
+        overflow: hidden !important;
+        outline: 0 !important;
+    }
+    
+    .modal.show {
+        display: block !important;
+    }
+    
+    .modal-dialog {
+        position: relative !important;
+        width: auto !important;
+        margin: 1.75rem auto !important;
+        max-width: 500px !important;
+        pointer-events: auto !important;
+        transform: none !important;
+        transition: none !important;
+    }
+    
+    .modal-dialog-centered {
+        display: flex !important;
+        align-items: center !important;
+        min-height: calc(100% - 3.5rem) !important;
+    }
+    
+    .modal-content {
+        position: relative !important;
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+        pointer-events: auto !important;
+        background-color: #fff !important;
+        background-clip: padding-box !important;
+        border: 1px solid rgba(0, 0, 0, 0.2) !important;
+        border-radius: 0.3rem !important;
+        outline: 0 !important;
+        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.5) !important;
+    }
+    
+    .modal-backdrop {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        z-index: 1050 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        background-color: #000 !important;
+        opacity: 0.5 !important;
+        pointer-events: none !important;
+        transition: none !important;
+    }
+    
+    .modal-backdrop.show {
+        opacity: 0.5 !important;
+    }
+    
+    .modal.fade .modal-dialog {
+        transition: none !important;
+        transform: none !important;
+    }
+    
+    .modal.show .modal-dialog {
+        transform: none !important;
+    }
+    
+    /* منع أي حركة أو تحريك للنماذج */
+    .modal,
+    .modal-dialog,
+    .modal-content {
+        will-change: auto !important;
+        transform: none !important;
+        animation: none !important;
+    }
+    
+    /* التأكد من أن النماذج ثابتة */
+    body.modal-open {
+        overflow: hidden !important;
+        padding-right: 0 !important;
+    }
+    
+    /* منع أي تأثيرات hover على النماذج */
+    .modal * {
+        pointer-events: auto !important;
+    }
+    
+    .modal-backdrop * {
+        pointer-events: none !important;
+    }
+</style>
+
+<script>
+    // إصلاح نهائي لمشكلة استقرار النماذج
+    (function() {
+        'use strict';
+        
+        // منع أي تحريك أو حركة للنماذج
+        function stabilizeModals() {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(function(modal) {
+                if (modal.classList.contains('show')) {
+                    // إزالة أي transitions أو animations
+                    modal.style.transition = 'none';
+                    modal.style.animation = 'none';
+                    modal.style.transform = 'none';
+                    
+                    const modalDialog = modal.querySelector('.modal-dialog');
+                    if (modalDialog) {
+                        modalDialog.style.transition = 'none';
+                        modalDialog.style.animation = 'none';
+                        modalDialog.style.transform = 'none';
+                        modalDialog.style.position = 'relative';
+                        modalDialog.style.margin = '1.75rem auto';
+                    }
+                    
+                    const modalContent = modal.querySelector('.modal-content');
+                    if (modalContent) {
+                        modalContent.style.transition = 'none';
+                        modalContent.style.animation = 'none';
+                        modalContent.style.transform = 'none';
+                    }
+                }
+            });
+        }
+        
+        // تطبيق الاستقرار عند فتح أي نموذج
+        document.addEventListener('shown.bs.modal', function() {
+            stabilizeModals();
+            
+            // التأكد من أن النموذج ثابت كل 100ms
+            const stabilityCheck = setInterval(function() {
+                stabilizeModals();
+            }, 100);
+            
+            // إيقاف الفحص بعد 2 ثانية
+            setTimeout(function() {
+                clearInterval(stabilityCheck);
+            }, 2000);
+        });
+        
+        // تطبيق الاستقرار عند تحميل الصفحة
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', stabilizeModals);
+        } else {
+            stabilizeModals();
+        }
+        
+        // منع أي محاولة لإغلاق النماذج عند تحريك الماوس
+        let lastModalCheck = 0;
+        document.addEventListener('mousemove', function(e) {
+            // تقليل عدد الفحوصات لتحسين الأداء
+            const now = Date.now();
+            if (now - lastModalCheck < 50) {
+                return;
+            }
+            lastModalCheck = now;
+            
+            const openModals = document.querySelectorAll('.modal.show');
+            openModals.forEach(function(modal) {
+                // التأكد من أن النموذج لا يزال مفتوحاً
+                if (!modal.classList.contains('show')) {
+                    return;
+                }
+                
+                // منع أي تغيير في حالة النموذج
+                if (e.target === modal || modal.contains(e.target)) {
+                    e.stopPropagation();
+                }
+                
+                // التأكد من أن النموذج ثابت
+                stabilizeModals();
+            });
+        }, true);
+        
+        // منع فتح النماذج بشكل متكرر
+        const modalOpenTimes = {};
+        const originalShow = bootstrap?.Modal?.prototype?.show;
+        if (originalShow && typeof originalShow === 'function') {
+            bootstrap.Modal.prototype.show = function() {
+                const modalId = this._element?.id;
+                if (modalId) {
+                    const now = Date.now();
+                    const lastOpen = modalOpenTimes[modalId] || 0;
+                    
+                    // منع فتح النموذج إذا كان قد فُتح قبل أقل من 500ms
+                    if (now - lastOpen < 500) {
+                        return;
+                    }
+                    
+                    modalOpenTimes[modalId] = now;
+                }
+                
+                return originalShow.call(this);
+            };
+        }
+    })();
 </script>
 
