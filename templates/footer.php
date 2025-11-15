@@ -59,15 +59,47 @@ if (!defined('ACCESS_ALLOWED')) {
     <!-- jQuery (optional, for some features) -->
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
     <!-- Custom JS -->
-    <script src="<?php echo ASSETS_URL; ?>js/fix-modal-interaction.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/main.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/sidebar.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/tables.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/notifications.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/dark-mode.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/pwa-install.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/modal-link-interceptor.js?v=<?php echo $cacheVersion; ?>"></script>
-    <script src="<?php echo ASSETS_URL; ?>js/keyboard-shortcuts-global.js?v=<?php echo $cacheVersion; ?>"></script>
+    <?php
+    // التأكد من أن ASSETS_URL صحيح
+    $assetsUrl = ASSETS_URL;
+    // إذا كان ASSETS_URL يبدأ بـ //، أزل /
+    if (strpos($assetsUrl, '//') === 0) {
+        $assetsUrl = '/' . ltrim($assetsUrl, '/');
+    }
+    // إذا لم يبدأ بـ /، أضفه
+    if (strpos($assetsUrl, '/') !== 0) {
+        $assetsUrl = '/' . $assetsUrl;
+    }
+    // إزالة /assets/ المكرر
+    $assetsUrl = rtrim($assetsUrl, '/') . '/';
+    ?>
+    <script src="<?php echo $assetsUrl; ?>js/fix-modal-interaction.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/main.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/sidebar.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/tables.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/notifications.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/dark-mode.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/pwa-install.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/modal-link-interceptor.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script src="<?php echo $assetsUrl; ?>js/keyboard-shortcuts-global.js?v=<?php echo $cacheVersion; ?>"></script>
+    <script>
+    // التحقق من تحميل ملفات JavaScript بشكل صحيح
+    (function() {
+        const scripts = document.querySelectorAll('script[src*=".js"]');
+        scripts.forEach(function(script) {
+            script.addEventListener('error', function() {
+                console.error('Failed to load script:', script.src);
+                // محاولة تحميل من مسار بديل
+                const src = script.getAttribute('src');
+                if (src && !src.startsWith('http')) {
+                    const basePath = '<?php echo getBasePath(); ?>';
+                    const fallbackSrc = (basePath ? basePath : '') + src.replace(/^\/[^\/]+/, '/assets');
+                    console.warn('Trying fallback path:', fallbackSrc);
+                }
+            });
+        });
+    })();
+    </script>
     
     <?php if (isset($extraScripts)): ?>
         <?php foreach ($extraScripts as $script): ?>
@@ -442,14 +474,38 @@ if (!defined('ACCESS_ALLOWED')) {
                 const apiPath = basePath + '/api/approvals.php';
                 const response = await fetch(apiPath, {
                     credentials: 'same-origin',
-                    cache: 'no-cache'
+                    cache: 'no-cache',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
                 });
                 
                 if (!response.ok) {
                     return;
                 }
                 
-                const data = await response.json();
+                // التحقق من content-type قبل parse JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    console.warn('updateApprovalBadge: Expected JSON but got', contentType);
+                    return;
+                }
+                
+                const text = await response.text();
+                if (!text || text.trim().startsWith('<')) {
+                    console.warn('updateApprovalBadge: Received HTML instead of JSON');
+                    return;
+                }
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (parseError) {
+                    console.warn('updateApprovalBadge: Failed to parse JSON:', parseError);
+                    return;
+                }
+                
                 if (data && data.success && typeof data.count === 'number') {
                     const count = Math.max(0, parseInt(data.count, 10));
                     badge.textContent = count.toString();
@@ -461,7 +517,10 @@ if (!defined('ACCESS_ALLOWED')) {
                     }
                 }
             } catch (error) {
-                console.error('Error updating approval badge:', error);
+                // تجاهل الأخطاء بصمت لتجنب إزعاج المستخدم
+                if (error.name !== 'SyntaxError') {
+                    console.error('Error updating approval badge:', error);
+                }
             }
         }
         
