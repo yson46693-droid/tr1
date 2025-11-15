@@ -110,19 +110,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isManager) {
                 $hasValidationError = true;
                 $validationMessage = 'يرجى إدخال سعر صالح أو استخدام خيار الإزالة.';
             } else {
-                $normalizedPrice = preg_replace('/[^\d,.\-]/', '', $rawPrice);
-                if ($normalizedPrice !== null) {
-                    $normalizedPrice = str_replace(',', '.', $normalizedPrice);
-                }
-                if ($normalizedPrice === '' || !is_numeric($normalizedPrice)) {
+                // تنظيف القيمة من 262145 أولاً
+                $rawPrice = str_replace('262145', '', $rawPrice);
+                $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
+                $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
+                
+                // استخدام cleanFinancialValue لتنظيف القيمة
+                $cleanedPrice = cleanFinancialValue($rawPrice);
+                
+                // التحقق من أن القيمة ليست 262145 أو قيمة غير منطقية
+                if (abs($cleanedPrice - 262145) < 0.01 || $cleanedPrice > 10000 || $cleanedPrice < 0) {
                     $hasValidationError = true;
-                    $validationMessage = 'السعر المدخل غير صالح.';
+                    $validationMessage = 'السعر المدخل غير صالح. يرجى إدخال قيمة صحيحة.';
                 } else {
-                    $priceValue = round((float)$normalizedPrice, 2);
-                    if ($priceValue < 0) {
-                        $hasValidationError = true;
-                        $validationMessage = 'لا يمكن أن يكون السعر سالباً.';
-                    }
+                    $priceValue = $cleanedPrice;
                 }
             }
         }
@@ -1259,7 +1260,22 @@ if ($isManager) {
                                                     min="0"
                                                     class="form-control form-control-sm"
                                                     name="manager_unit_price"
-                                                    value="<?php echo isset($finishedRow['manager_unit_price']) ? htmlspecialchars(number_format((float)$finishedRow['manager_unit_price'], 2, '.', '')) : ''; ?>"
+                                                    value="<?php 
+                                                        $priceValue = null;
+                                                        if (isset($finishedRow['manager_unit_price']) && $finishedRow['manager_unit_price'] !== null) {
+                                                            // تنظيف القيمة من 262145
+                                                            $rawPrice = (string)$finishedRow['manager_unit_price'];
+                                                            $rawPrice = str_replace('262145', '', $rawPrice);
+                                                            $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
+                                                            $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
+                                                            $priceValue = cleanFinancialValue($rawPrice);
+                                                            // التحقق من أن القيمة ليست 262145
+                                                            if (abs($priceValue - 262145) < 0.01 || $priceValue > 10000 || $priceValue < 0) {
+                                                                $priceValue = null;
+                                                            }
+                                                        }
+                                                        echo $priceValue !== null ? htmlspecialchars(number_format((float)$priceValue, 2, '.', '')) : '';
+                                                    ?>"
                                                     placeholder="0.00"
                                                 >
                                             </div>
@@ -1267,7 +1283,21 @@ if ($isManager) {
                                                 <i class="bi bi-save"></i>
                                                 <span class="d-none d-md-inline">حفظ</span>
                                             </button>
-                                            <?php if (!empty($finishedRow['manager_unit_price'])): ?>
+                                            <?php 
+                                                // التحقق من وجود سعر صالح (بعد التنظيف)
+                                                $hasValidPrice = false;
+                                                if (isset($finishedRow['manager_unit_price']) && $finishedRow['manager_unit_price'] !== null) {
+                                                    $rawPrice = (string)$finishedRow['manager_unit_price'];
+                                                    $rawPrice = str_replace('262145', '', $rawPrice);
+                                                    $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
+                                                    $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
+                                                    $cleanedPrice = cleanFinancialValue($rawPrice);
+                                                    if (abs($cleanedPrice - 262145) >= 0.01 && $cleanedPrice <= 10000 && $cleanedPrice >= 0) {
+                                                        $hasValidPrice = true;
+                                                    }
+                                                }
+                                                if ($hasValidPrice): 
+                                            ?>
                                                 <button type="submit" name="clear_price" value="1" class="btn btn-outline-secondary btn-sm" title="إزالة السعر">
                                                     <i class="bi bi-x-circle"></i>
                                                 </button>
