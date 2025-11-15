@@ -60,8 +60,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'template_details' && isset($_GET[
         
         $normalisedPackaging = [];
         foreach ($packagingDetails as $pack) {
+            $packagingId = isset($pack['packaging_material_id']) ? (int)$pack['packaging_material_id'] : null;
             $normalisedPackaging[] = [
-                'packaging_material_id' => isset($pack['packaging_material_id']) ? (int)$pack['packaging_material_id'] : null,
+                'id' => $packagingId,
+                'packaging_material_id' => $packagingId,
                 'packaging_name' => trim((string)($pack['packaging_name'] ?? '')),
                 'quantity_per_unit' => isset($pack['quantity_per_unit']) ? (float)$pack['quantity_per_unit'] : 1.0,
                 'unit' => trim((string)($pack['packaging_unit'] ?? '')) ?: 'وحدة'
@@ -70,7 +72,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'template_details' && isset($_GET[
         
         // جلب المواد الخام
         $rawMaterialsRows = $db->query(
-            "SELECT material_name, quantity_per_unit, unit 
+            "SELECT material_name, material_type, quantity_per_unit, unit 
              FROM product_template_raw_materials 
              WHERE template_id = ?",
             [$templateId]
@@ -78,9 +80,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'template_details' && isset($_GET[
         
         $materialDetails = [];
         foreach ($rawMaterialsRows as $raw) {
+            $quantity = (float)($raw['quantity_per_unit'] ?? 0);
             $materialDetails[] = [
                 'material_name' => $raw['material_name'],
-                'quantity_per_unit' => (float)($raw['quantity_per_unit'] ?? 0),
+                'material_type' => $raw['material_type'] ?? '',
+                'quantity' => $quantity,
+                'quantity_per_unit' => $quantity,
                 'unit' => $raw['unit'] ?? 'وحدة'
             ];
         }
@@ -2637,8 +2642,24 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
                 const option = packagingSelect.querySelector(`option[value="${packagingId}"]`);
                 if (option) {
                     option.selected = true;
+                } else {
+                    console.warn('Packaging option not found for ID:', packagingId, 'Available options:', Array.from(packagingSelect.options).map(opt => opt.value));
                 }
+            } else {
+                console.warn('Packaging item missing ID:', pkg);
             }
+        });
+        
+        // التحقق من أن هناك على الأقل أداة تعبئة واحدة محددة
+        const selectedCount = Array.from(packagingSelect.options).filter(opt => opt.selected).length;
+        if (selectedCount === 0 && templateData.packaging.length > 0) {
+            console.error('No packaging items were selected despite having packaging data:', templateData.packaging);
+        }
+    } else {
+        console.warn('Packaging select not found or no packaging data:', {
+            hasSelect: !!packagingSelect,
+            hasPackaging: !!(templateData.packaging && Array.isArray(templateData.packaging)),
+            packagingData: templateData.packaging
         });
     }
 
