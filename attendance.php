@@ -18,6 +18,27 @@ $currentUser = getCurrentUser();
 $db = db();
 $today = date('Y-m-d');
 
+// تنظيف صور الحضور والانصراف القديمة (أكثر من 30 يوم) عند فتح الصفحة
+// يتم التنظيف مرة واحدة فقط في اليوم لتجنب التأثير على الأداء
+$cleanupCacheKey = 'attendance_photos_cleanup_' . $today;
+if (!isset($_SESSION[$cleanupCacheKey])) {
+    try {
+        $cleanupStats = cleanupOldAttendancePhotos(30);
+        $_SESSION[$cleanupCacheKey] = true;
+        
+        // تسجيل عملية التنظيف فقط إذا تم حذف ملفات
+        if ($cleanupStats['deleted_files'] > 0) {
+            error_log(sprintf(
+                'Attendance photos auto-cleanup: %d files deleted, %.2f MB freed',
+                $cleanupStats['deleted_files'],
+                $cleanupStats['total_size_freed'] / (1024 * 1024)
+            ));
+        }
+    } catch (Exception $e) {
+        error_log('Attendance photos cleanup error: ' . $e->getMessage());
+    }
+}
+
 // التحقق من وجود جدول attendance_records وإنشاؤه إذا لم يكن موجوداً
 $tableCheck = $db->queryOne("SHOW TABLES LIKE 'attendance_records'");
 if (empty($tableCheck)) {

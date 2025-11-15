@@ -504,6 +504,9 @@ if (!defined('ENABLE_PAGE_LOADER')) {
 if (!defined('ENABLE_DAILY_BACKUP_DELIVERY')) {
     define('ENABLE_DAILY_BACKUP_DELIVERY', true);
 }
+if (!defined('ENABLE_DAILY_ATTENDANCE_PHOTOS_CLEANUP')) {
+    define('ENABLE_DAILY_ATTENDANCE_PHOTOS_CLEANUP', true);
+}
 
 # وظيفة مساعده لجدولة المهام اليومية بفاصل زمني
 if (ENABLE_DAILY_LOW_STOCK_REPORT) {
@@ -524,6 +527,75 @@ if (ENABLE_DAILY_CONSUMPTION_REPORT) {
 if (ENABLE_DAILY_BACKUP_DELIVERY) {
     require_once __DIR__ . '/daily_backup_sender.php';
     triggerDailyBackupDelivery();
+}
+
+/**
+ * تشغيل تنظيف صور الحضور والانصراف تلقائياً مرة واحدة يومياً
+ * يتم تشغيله مع أول زائر لأي صفحة من صفحات الموقع
+ */
+if (ENABLE_DAILY_ATTENDANCE_PHOTOS_CLEANUP) {
+    // ملف العلم لتتبع آخر مرة تم فيها التنظيف
+    $cleanupFlagFile = PRIVATE_STORAGE_PATH . '/logs/attendance_photos_cleanup_last_run.txt';
+    $today = date('Y-m-d');
+    $shouldRun = false;
+    
+    // التحقق من آخر مرة تم فيها التنظيف
+    if (file_exists($cleanupFlagFile)) {
+        $lastRunDate = trim(@file_get_contents($cleanupFlagFile));
+        if ($lastRunDate !== $today) {
+            $shouldRun = true;
+        }
+    } else {
+        // إذا لم يكن الملف موجوداً، قم بالتنظيف
+        $shouldRun = true;
+    }
+    
+    // تشغيل التنظيف إذا لزم الأمر
+    if ($shouldRun) {
+        try {
+            // حفظ تاريخ اليوم في ملف العلم أولاً لمنع التشغيل المتكرر
+            $logsDir = dirname($cleanupFlagFile);
+            if (!is_dir($logsDir)) {
+                @mkdir($logsDir, 0755, true);
+            }
+            @file_put_contents($cleanupFlagFile, $today, LOCK_EX);
+            
+            // تحميل الملفات المطلوبة
+            if (!function_exists('cleanupOldAttendancePhotos')) {
+                require_once __DIR__ . '/attendance.php';
+            }
+            if (!function_exists('db')) {
+                require_once __DIR__ . '/db.php';
+            }
+            
+            // تشغيل التنظيف (30 يوم كافتراضي)
+            if (function_exists('cleanupOldAttendancePhotos')) {
+                $stats = cleanupOldAttendancePhotos(30);
+                
+                // تسجيل النتائج
+                $message = sprintf(
+                    "Attendance photos cleanup (automatic daily): %d files deleted, %d folders deleted, %.2f MB freed, %d errors",
+                    $stats['deleted_files'],
+                    $stats['deleted_folders'],
+                    $stats['total_size_freed'] / (1024 * 1024),
+                    $stats['errors']
+                );
+                error_log($message);
+            }
+        } catch (Exception $e) {
+            error_log('Daily attendance photos cleanup error: ' . $e->getMessage());
+            // في حالة الخطأ، احذف ملف العلم للسماح بإعادة المحاولة لاحقاً
+            if (file_exists($cleanupFlagFile)) {
+                @unlink($cleanupFlagFile);
+            }
+        } catch (Throwable $e) {
+            error_log('Daily attendance photos cleanup error: ' . $e->getMessage());
+            // في حالة الخطأ، احذف ملف العلم للسماح بإعادة المحاولة لاحقاً
+            if (file_exists($cleanupFlagFile)) {
+                @unlink($cleanupFlagFile);
+            }
+        }
+    }
 }
 
 
