@@ -1343,6 +1343,8 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
             }
         }
         
+        error_log("Successfully processed " . count($items) . " items for transfer ID: $transferId");
+        
         // تحديث حالة الطلب إلى مكتمل
         $db->execute(
             "UPDATE warehouse_transfers SET status = 'completed' WHERE id = ?",
