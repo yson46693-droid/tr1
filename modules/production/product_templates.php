@@ -1046,7 +1046,14 @@ try {
 try {
     $oliveOilExists = $db->queryOne("SHOW TABLES LIKE 'olive_oil_stock'");
     if (!empty($oliveOilExists)) {
-        $hasOliveOil = $db->queryOne("SELECT COUNT(*) as count FROM olive_oil_stock WHERE quantity > 0");
+        // التحقق من وجود زيت الزيتون المتاح من الموردين النشطين
+        $hasOliveOil = $db->queryOne("
+            SELECT COUNT(*) as count 
+            FROM olive_oil_stock os
+            INNER JOIN suppliers s ON os.supplier_id = s.id
+            WHERE os.quantity > 0 
+            AND s.status = 'active'
+        ");
         if ($hasOliveOil && $hasOliveOil['count'] > 0) {
             $rawMaterialsData['زيت زيتون'] = [
                 'material_type' => 'olive_oil',
@@ -1063,7 +1070,14 @@ try {
 try {
     $beeswaxExists = $db->queryOne("SHOW TABLES LIKE 'beeswax_stock'");
     if (!empty($beeswaxExists)) {
-        $hasBeeswax = $db->queryOne("SELECT COUNT(*) as count FROM beeswax_stock WHERE weight > 0");
+        // التحقق من وجود شمع العسل المتاح من الموردين النشطين
+        $hasBeeswax = $db->queryOne("
+            SELECT COUNT(*) as count 
+            FROM beeswax_stock bs
+            INNER JOIN suppliers s ON bs.supplier_id = s.id
+            WHERE bs.weight > 0 
+            AND s.status = 'active'
+        ");
         if ($hasBeeswax && $hasBeeswax['count'] > 0) {
             $rawMaterialsData['شمع عسل'] = [
                 'material_type' => 'beeswax',
