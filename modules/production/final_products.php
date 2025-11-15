@@ -391,7 +391,10 @@ if (!empty($warehousesTableExists)) {
             }
         }
 
-        $finishedProductOptions = getFinishedProductBatchOptions();
+        $finishedProductOptions = [];
+        if ($primaryWarehouse && !empty($primaryWarehouse['id'])) {
+            $finishedProductOptions = getFinishedProductBatchOptions(true, $primaryWarehouse['id']);
+        }
         $hasDestinationWarehouses = !empty($destinationWarehouses);
         $hasFinishedBatches = !empty($finishedProductOptions);
 
