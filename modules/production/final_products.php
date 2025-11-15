@@ -1253,7 +1253,7 @@ if ($isManager) {
                                             <input type="hidden" name="action" value="update_manager_price">
                                             <input type="hidden" name="finished_product_id" value="<?php echo (int)($finishedRow['id'] ?? 0); ?>">
                                             <div class="input-group input-group-sm">
-                                                <span class="input-group-text"><?php echo htmlspecialchars(CURRENCY_SYMBOL ?? 'ج.م'); ?></span>
+                                                <span class="input-group-text"><?php echo htmlspecialchars(function_exists('getCurrencySymbol') ? getCurrencySymbol() : (CURRENCY_SYMBOL ?? 'ج.م')); ?></span>
                                                 <input
                                                     type="number"
                                                     step="0.01"

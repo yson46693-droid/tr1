@@ -41,7 +41,17 @@ if (!defined('CURRENCY')) {
     define('CURRENCY', 'جنيه');
 }
 if (!defined('CURRENCY_SYMBOL')) {
-    define('CURRENCY_SYMBOL', 'ج.م');
+    // تنظيف رمز العملة من أي آثار لـ 262145
+    $currencySymbol = 'ج.م';
+    $currencySymbol = str_replace('262145', '', $currencySymbol);
+    $currencySymbol = preg_replace('/262145\s*/', '', $currencySymbol);
+    $currencySymbol = preg_replace('/\s*262145/', '', $currencySymbol);
+    $currencySymbol = trim($currencySymbol);
+    // إذا أصبح فارغاً بعد التنظيف، استخدم القيمة الافتراضية
+    if (empty($currencySymbol)) {
+        $currencySymbol = 'ج.م';
+    }
+    define('CURRENCY_SYMBOL', $currencySymbol);
 }
 if (!defined('CURRENCY_CODE')) {
     define('CURRENCY_CODE', 'EGP');
@@ -273,14 +283,32 @@ function getCurrentLanguage() {
     return $_SESSION['language'] ?? DEFAULT_LANGUAGE;
 }
 
+// دالة مساعدة للحصول على رمز العملة بعد تنظيفه من 262145
+function getCurrencySymbol() {
+    $symbol = defined('CURRENCY_SYMBOL') ? CURRENCY_SYMBOL : 'ج.م';
+    // تنظيف رمز العملة من 262145
+    $symbol = str_replace('262145', '', $symbol);
+    $symbol = preg_replace('/262145\s*/', '', $symbol);
+    $symbol = preg_replace('/\s*262145/', '', $symbol);
+    $symbol = trim($symbol);
+    // إذا أصبح فارغاً بعد التنظيف، استخدم القيمة الافتراضية
+    if (empty($symbol)) {
+        $symbol = 'ج.م';
+    }
+    return $symbol;
+}
+
 // دالة مساعدة لتنسيق الأرقام
 function formatCurrency($amount) {
     // تنظيف القيمة باستخدام cleanFinancialValue
     $amount = cleanFinancialValue($amount);
     
-    $formatted = number_format($amount, 2, '.', ',') . ' ' . CURRENCY_SYMBOL;
+    // استخدام getCurrencySymbol للحصول على رمز العملة المنظف
+    $currencySymbol = function_exists('getCurrencySymbol') ? getCurrencySymbol() : (defined('CURRENCY_SYMBOL') ? CURRENCY_SYMBOL : 'ج.م');
     
-    // حذف أي آثار لـ 262145 من النص النهائي
+    $formatted = number_format($amount, 2, '.', ',') . ' ' . $currencySymbol;
+    
+    // حذف أي آثار لـ 262145 من النص النهائي (حماية إضافية)
     $formatted = str_replace('262145', '', $formatted);
     $formatted = str_replace('262,145', '', $formatted);
     $formatted = preg_replace('/\s+/', ' ', $formatted);
