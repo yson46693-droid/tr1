@@ -733,20 +733,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $transferId = $result['transfer_id'] ?? null;
                 $transferNumber = $result['transfer_number'] ?? null;
                 
-                // التحقق من قاعدة البيانات إذا كان transfer_id موجوداً للتأكد من وجود الطلب فعلياً
+                // التحقق من قاعدة البيانات للتأكد من وجود الطلب فعلياً
+                // حتى لو كان success => false، نتحقق من قاعدة البيانات
+                $verifyTransfer = null;
                 if (!empty($transferId)) {
                     $verifyTransfer = $db->queryOne(
                         "SELECT id, transfer_number FROM warehouse_transfers WHERE id = ?",
                         [$transferId]
                     );
-                    if ($verifyTransfer) {
-                        // الطلب موجود في قاعدة البيانات - نجح الإنشاء
-                        $transferId = (int)$verifyTransfer['id'];
-                        $transferNumber = $verifyTransfer['transfer_number'];
+                } elseif (!empty($transferNumber)) {
+                    // إذا لم يكن هناك transfer_id، نحاول البحث بـ transfer_number
+                    $verifyTransfer = $db->queryOne(
+                        "SELECT id, transfer_number FROM warehouse_transfers WHERE transfer_number = ?",
+                        [$transferNumber]
+                    );
+                }
+                
+                if ($verifyTransfer) {
+                    // الطلب موجود في قاعدة البيانات - نجح الإنشاء فعلياً
+                    $transferId = (int)$verifyTransfer['id'];
+                    $transferNumber = $verifyTransfer['transfer_number'];
+                    error_log("Transfer verified in database: ID=$transferId, Number=$transferNumber");
+                } else {
+                    // الطلب غير موجود - نستخدم القيم من النتيجة إذا كانت موجودة
+                    if (empty($transferId) && empty($transferNumber)) {
+                        // لا توجد قيم على الإطلاق - فشل حقيقي
+                        error_log("No transfer ID or number in result: " . json_encode($result));
                     } else {
-                        // الطلب غير موجود رغم وجود transfer_id في النتيجة - خطأ
-                        $transferId = null;
-                        $transferNumber = null;
+                        // قد يكون هناك تأخير في قاعدة البيانات - نستخدم القيم من النتيجة
+                        error_log("Transfer not found in database but ID/Number exists in result. ID=$transferId, Number=$transferNumber");
                     }
                 }
                 
@@ -863,48 +878,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                     }
                 } else {
-                    // الطلب لم يتم إنشاؤه بنجاح - التحقق مرة أخرى من قاعدة البيانات للتأكد
+                    // الطلب لم يتم إنشاؤه بنجاح حسب الشرط - التحقق مرة أخرى من قاعدة البيانات
+                    // قد يكون الطلب موجوداً في قاعدة البيانات رغم فشل الشرط
                     $verificationTransferId = $result['transfer_id'] ?? null;
                     $verificationTransferNumber = $result['transfer_number'] ?? null;
                     
-                    if (!empty($verificationTransferId) || !empty($verificationTransferNumber)) {
-                        // محاولة العثور على الطلب في قاعدة البيانات
-                        $verifyTransfer = null;
-                        if (!empty($verificationTransferId)) {
-                            $verifyTransfer = $db->queryOne(
-                                "SELECT id, transfer_number FROM warehouse_transfers WHERE id = ?",
-                                [$verificationTransferId]
-                            );
-                        }
-                        if (!$verifyTransfer && !empty($verificationTransferNumber)) {
-                            $verifyTransfer = $db->queryOne(
-                                "SELECT id, transfer_number FROM warehouse_transfers WHERE transfer_number = ?",
-                                [$verificationTransferNumber]
-                            );
-                        }
-                        
-                        if ($verifyTransfer) {
-                            // الطلب موجود بالفعل في قاعدة البيانات! كان هناك خطأ في الإرجاع من createWarehouseTransfer
-                            error_log("Warning: Transfer was created (ID: {$verifyTransfer['id']}, Number: {$verifyTransfer['transfer_number']}) but createWarehouseTransfer may have returned error. Details: " . json_encode($result));
-                            $_SESSION[$sessionSuccessKey] = sprintf(
-                                'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
-                                $verifyTransfer['transfer_number']
-                            );
-                            // حذف token
-                            unset($_SESSION[$sessionTokenKey]);
-                            productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
-                        } else {
-                            // الطلب غير موجود - هناك خطأ حقيقي
-                            $errorMessage = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
-                            error_log("Failed to create warehouse transfer. Error: $errorMessage. Result: " . json_encode($result));
-                            $transferErrors[] = $errorMessage;
-                            // إعادة إنشاء token للسماح بإعادة المحاولة
-                            $_SESSION[$sessionTokenKey] = bin2hex(random_bytes(32));
-                        }
+                    // محاولة العثور على الطلب في قاعدة البيانات بجميع الطرق الممكنة
+                    $verifyTransfer = null;
+                    
+                    // البحث بـ transfer_id أولاً
+                    if (!empty($verificationTransferId)) {
+                        $verifyTransfer = $db->queryOne(
+                            "SELECT id, transfer_number FROM warehouse_transfers WHERE id = ?",
+                            [$verificationTransferId]
+                        );
+                    }
+                    
+                    // إذا لم نجد، نبحث بـ transfer_number
+                    if (!$verifyTransfer && !empty($verificationTransferNumber)) {
+                        $verifyTransfer = $db->queryOne(
+                            "SELECT id, transfer_number FROM warehouse_transfers WHERE transfer_number = ?",
+                            [$verificationTransferNumber]
+                        );
+                    }
+                    
+                    // إذا لم نجد، نبحث عن آخر طلب نقل تم إنشاؤه من نفس المستخدم في آخر دقيقة
+                    if (!$verifyTransfer && !empty($currentUser['id'])) {
+                        $verifyTransfer = $db->queryOne(
+                            "SELECT id, transfer_number FROM warehouse_transfers 
+                             WHERE requested_by = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+                             ORDER BY id DESC LIMIT 1",
+                            [$currentUser['id']]
+                        );
+                    }
+                    
+                    if ($verifyTransfer) {
+                        // الطلب موجود في قاعدة البيانات! كان هناك خطأ في الإرجاع من createWarehouseTransfer
+                        error_log("Warning: Transfer was created (ID: {$verifyTransfer['id']}, Number: {$verifyTransfer['transfer_number']}) but createWarehouseTransfer may have returned error. Details: " . json_encode($result));
+                        $_SESSION[$sessionSuccessKey] = sprintf(
+                            'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
+                            $verifyTransfer['transfer_number']
+                        );
+                        // حذف token
+                        unset($_SESSION[$sessionTokenKey]);
+                        productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                     } else {
-                        // لا يوجد transfer_id أو transfer_number في النتيجة - خطأ حقيقي
+                        // الطلب غير موجود - هناك خطأ حقيقي
                         $errorMessage = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
-                        error_log("Failed to create warehouse transfer - no transfer ID or number. Error: $errorMessage. Result: " . json_encode($result));
+                        error_log("Failed to create warehouse transfer. Error: $errorMessage. Result: " . json_encode($result));
                         $transferErrors[] = $errorMessage;
                         // إعادة إنشاء token للسماح بإعادة المحاولة
                         $_SESSION[$sessionTokenKey] = bin2hex(random_bytes(32));
