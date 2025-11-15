@@ -104,6 +104,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'template_details' && isset($_GET[
             'product_name' => $template['product_name'],
             'status' => $template['status'] ?? 'active',
             'template_type' => $template['template_type'] ?? 'general',
+            'unit_price' => $template['unit_price'] ?? null,
             'notes' => trim((string)($template['notes'] ?? '')),
             'raw_materials' => $materialDetails,
             'packaging' => $normalisedPackaging,
@@ -498,11 +499,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $templateDetailsJson = null;
                 }
 
+                // معالجة سعر الوحدة
+                $unitPrice = null;
+                if (isset($_POST['unit_price']) && $_POST['unit_price'] !== '') {
+                    $rawPrice = trim((string)$_POST['unit_price']);
+                    // تنظيف القيمة من 262145
+                    $rawPrice = str_replace('262145', '', $rawPrice);
+                    $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
+                    $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
+                    $unitPrice = cleanFinancialValue($rawPrice);
+                    // التحقق من أن القيمة صحيحة
+                    if (abs($unitPrice - 262145) < 0.01 || $unitPrice > 10000 || $unitPrice < 0) {
+                        $unitPrice = null;
+                    }
+                }
+                
                 // إنشاء القالب
                 $result = $db->execute(
-                    "INSERT INTO product_templates (product_name, honey_quantity, created_by, status, template_type, main_supplier_id, notes, details_json) 
-                     VALUES (?, 0, ?, 'active', ?, NULL, NULL, ?)",
-                    [$productName, $currentUser['id'], 'legacy', $templateDetailsJson]
+                    "INSERT INTO product_templates (product_name, honey_quantity, created_by, status, template_type, main_supplier_id, notes, details_json, unit_price) 
+                     VALUES (?, 0, ?, 'active', ?, NULL, NULL, ?, ?)",
+                    [$productName, $currentUser['id'], 'legacy', $templateDetailsJson, $unitPrice]
                 );
                 
                 $templateId = $result['insert_id'];
@@ -739,12 +755,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $templateDetailsJson = null;
                 }
 
+                // معالجة سعر الوحدة
+                $unitPrice = null;
+                if (isset($_POST['unit_price']) && $_POST['unit_price'] !== '') {
+                    $rawPrice = trim((string)$_POST['unit_price']);
+                    // تنظيف القيمة من 262145
+                    $rawPrice = str_replace('262145', '', $rawPrice);
+                    $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
+                    $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
+                    $unitPrice = cleanFinancialValue($rawPrice);
+                    // التحقق من أن القيمة صحيحة
+                    if (abs($unitPrice - 262145) < 0.01 || $unitPrice > 10000 || $unitPrice < 0) {
+                        $unitPrice = null;
+                    }
+                }
+                
                 // تحديث القالب
                 $db->execute(
                     "UPDATE product_templates 
-                     SET product_name = ?, details_json = ?, updated_at = NOW()
+                     SET product_name = ?, details_json = ?, unit_price = ?, updated_at = NOW()
                      WHERE id = ?",
-                    [$productName, $templateDetailsJson, $templateId]
+                    [$productName, $templateDetailsJson, $unitPrice, $templateId]
                 );
                 
                 // حذف أدوات التعبئة القديمة
@@ -1780,6 +1811,22 @@ $lang = isset($translations) ? $translations : [];
                         <?php endif; ?>
                     </div>
                     
+                    <!-- سعر الوحدة -->
+                    <div class="mb-3">
+                        <label class="form-label">سعر الوحدة (<?php echo htmlspecialchars(function_exists('getCurrencySymbol') ? getCurrencySymbol() : (CURRENCY_SYMBOL ?? 'ج.م')); ?>)</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><?php echo htmlspecialchars(function_exists('getCurrencySymbol') ? getCurrencySymbol() : (CURRENCY_SYMBOL ?? 'ج.م')); ?></span>
+                            <input type="number" 
+                                   class="form-control" 
+                                   name="unit_price" 
+                                   step="0.01" 
+                                   min="0" 
+                                   placeholder="0.00"
+                                   value="">
+                        </div>
+                        <small class="text-muted">سعر بيع الوحدة الواحدة من المنتج (اختياري)</small>
+                    </div>
+                    
                     <!-- المواد الخام الأخرى (للاستخدام لاحقاً) -->
                     <div class="mb-3">
                         <label class="form-label">المواد الخام الأساسية</label>
@@ -1854,6 +1901,23 @@ $lang = isset($translations) ? $translations : [];
                                 <i class="bi bi-info-circle me-1"></i>يمكنك اختيار أكثر من أداة تعبئة
                             </small>
                         <?php endif; ?>
+                    </div>
+                    
+                    <!-- سعر الوحدة -->
+                    <div class="mb-3">
+                        <label class="form-label">سعر الوحدة (<?php echo htmlspecialchars(function_exists('getCurrencySymbol') ? getCurrencySymbol() : (CURRENCY_SYMBOL ?? 'ج.م')); ?>)</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><?php echo htmlspecialchars(function_exists('getCurrencySymbol') ? getCurrencySymbol() : (CURRENCY_SYMBOL ?? 'ج.م')); ?></span>
+                            <input type="number" 
+                                   class="form-control" 
+                                   name="unit_price" 
+                                   id="editUnitPrice"
+                                   step="0.01" 
+                                   min="0" 
+                                   placeholder="0.00"
+                                   value="">
+                        </div>
+                        <small class="text-muted">سعر بيع الوحدة الواحدة من المنتج (اختياري)</small>
                     </div>
                     
                     <!-- المواد الخام الأخرى -->
@@ -2727,6 +2791,13 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
     // ملء البيانات في النموذج
     document.getElementById('editTemplateId').value = templateId;
     document.getElementById('editProductName').value = templateData.product_name || '';
+    
+    // ملء حقل السعر
+    const editUnitPriceEl = document.getElementById('editUnitPrice');
+    if (editUnitPriceEl) {
+        const unitPrice = templateData.unit_price || '';
+        editUnitPriceEl.value = unitPrice ? parseFloat(unitPrice).toFixed(2) : '';
+    }
 
     // تحديد أدوات التعبئة (استخدام checkboxes)
     const packagingContainer = document.getElementById('editPackagingCheckboxContainer');

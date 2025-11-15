@@ -594,6 +594,7 @@ function ensureProductTemplatesExtendedSchema($db): void
         'main_supplier_id' => "ALTER TABLE `product_templates` ADD COLUMN `main_supplier_id` int(11) DEFAULT NULL AFTER `source_template_id`",
         'notes' => "ALTER TABLE `product_templates` ADD COLUMN `notes` text DEFAULT NULL AFTER `main_supplier_id`",
         'details_json' => "ALTER TABLE `product_templates` ADD COLUMN `details_json` longtext DEFAULT NULL AFTER `notes`",
+        'unit_price' => "ALTER TABLE `product_templates` ADD COLUMN `unit_price` DECIMAL(12,2) NULL DEFAULT NULL COMMENT 'سعر الوحدة بالجنيه' AFTER `details_json`",
     ];
 
     foreach ($columnAdjustments as $column => $alterSql) {

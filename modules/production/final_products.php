@@ -90,97 +90,7 @@ if ($currentSection !== null && $currentSection !== '') {
 }
 $managerRedirectRole = 'manager';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isManager) {
-    $postAction = $_POST['action'] ?? '';
-    if ($postAction === 'update_manager_price') {
-        $finishedProductId = isset($_POST['finished_product_id']) ? (int) $_POST['finished_product_id'] : 0;
-        $clearPriceRequested = isset($_POST['clear_price']) && (string)$_POST['clear_price'] === '1';
-        $rawPrice = trim((string) ($_POST['manager_unit_price'] ?? ''));
-        $priceValue = null;
-        $hasValidationError = false;
-        $validationMessage = '';
-
-        if ($finishedProductId <= 0) {
-            $hasValidationError = true;
-            $validationMessage = 'معرف التشغيلة غير صالح.';
-        }
-
-        if (!$hasValidationError && !$clearPriceRequested) {
-            if ($rawPrice === '') {
-                $hasValidationError = true;
-                $validationMessage = 'يرجى إدخال سعر صالح أو استخدام خيار الإزالة.';
-            } else {
-                // تنظيف القيمة من 262145 أولاً
-                $rawPrice = str_replace('262145', '', $rawPrice);
-                $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
-                $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
-                
-                // استخدام cleanFinancialValue لتنظيف القيمة
-                $cleanedPrice = cleanFinancialValue($rawPrice);
-                
-                // التحقق من أن القيمة ليست 262145 أو قيمة غير منطقية
-                if (abs($cleanedPrice - 262145) < 0.01 || $cleanedPrice > 10000 || $cleanedPrice < 0) {
-                    $hasValidationError = true;
-                    $validationMessage = 'السعر المدخل غير صالح. يرجى إدخال قيمة صحيحة.';
-                } else {
-                    $priceValue = $cleanedPrice;
-                }
-            }
-        }
-
-        if ($hasValidationError) {
-            $_SESSION[$sessionErrorKey] = $validationMessage ?: 'تعذر تحديث السعر.';
-            productionSafeRedirect($finalProductsUrl, $managerRedirectParams, $managerRedirectRole);
-        }
-
-        try {
-            $existingFinishedProduct = $db->queryOne(
-                "SELECT id FROM finished_products WHERE id = ? LIMIT 1",
-                [$finishedProductId]
-            );
-
-            if (!$existingFinishedProduct) {
-                $_SESSION[$sessionErrorKey] = 'لم يتم العثور على التشغيلة المحددة.';
-                productionSafeRedirect($finalProductsUrl, $managerRedirectParams, $managerRedirectRole);
-            }
-
-            if ($clearPriceRequested) {
-                $db->execute(
-                    "UPDATE finished_products SET manager_unit_price = NULL WHERE id = ?",
-                    [$finishedProductId]
-                );
-            } else {
-                $db->execute(
-                    "UPDATE finished_products SET manager_unit_price = ? WHERE id = ?",
-                    [$priceValue, $finishedProductId]
-                );
-            }
-
-            if (function_exists('logAudit')) {
-                logAudit(
-                    $currentUser['id'] ?? null,
-                    'update_finished_product_price',
-                    'finished_products',
-                    $finishedProductId,
-                    null,
-                    [
-                        'manager_unit_price' => $clearPriceRequested ? null : $priceValue,
-                        'cleared' => $clearPriceRequested,
-                    ]
-                );
-            }
-
-            $_SESSION[$sessionSuccessKey] = $clearPriceRequested
-                ? 'تمت إزالة سعر التشغيلة بنجاح.'
-                : 'تم تحديث سعر التشغيلة بنجاح.';
-        } catch (Exception $updatePriceError) {
-            error_log('Final products manager price update error: ' . $updatePriceError->getMessage());
-            $_SESSION[$sessionErrorKey] = 'حدث خطأ أثناء تحديث السعر.';
-        }
-
-        productionSafeRedirect($finalProductsUrl, $managerRedirectParams, $managerRedirectRole);
-    }
-}
+// تم إزالة معالجة تحديث السعر اليدوي - الاعتماد فقط على سعر القالب
 
 // التحقق من وجود عمود date أو production_date
 $dateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'date'");
@@ -1028,10 +938,11 @@ if (!empty($finishedProductsTableExists)) {
                 COALESCE(pr.name, fp.product_name) AS product_name,
                 fp.production_date,
                 fp.quantity_produced,
-                fp.manager_unit_price,
+                COALESCE(pt.unit_price, NULL) AS template_unit_price,
                 GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
             FROM finished_products fp
             LEFT JOIN products pr ON fp.product_id = pr.id
+            LEFT JOIN product_templates pt ON pt.product_id = fp.product_id
             LEFT JOIN batch_workers bw ON fp.batch_id = bw.batch_id
             LEFT JOIN users u ON bw.employee_id = u.id
             GROUP BY fp.id
@@ -1224,7 +1135,7 @@ if ($isManager) {
                             <th>تاريخ الإنتاج</th>
                             <th>الكمية المنتجة</th>
                             <?php if ($isManager): ?>
-                                <th style="min-width: 220px;">سعر البيع</th>
+                                <th>السعر الإجمالي</th>
                             <?php endif; ?>
                             <th>العمال المشاركون</th>
                             <th>إجراءات</th>
@@ -1249,60 +1160,29 @@ if ($isManager) {
                                 <td><?php echo number_format((float)($finishedRow['quantity_produced'] ?? 0), 2); ?></td>
                                 <?php if ($isManager): ?>
                                     <td>
-                                        <form method="POST" class="d-flex align-items-center gap-2 manager-price-form">
-                                            <input type="hidden" name="action" value="update_manager_price">
-                                            <input type="hidden" name="finished_product_id" value="<?php echo (int)($finishedRow['id'] ?? 0); ?>">
-                                            <div class="input-group input-group-sm">
-                                                <span class="input-group-text"><?php echo htmlspecialchars(function_exists('getCurrencySymbol') ? getCurrencySymbol() : (CURRENCY_SYMBOL ?? 'ج.م')); ?></span>
-                                                <input
-                                                    type="number"
-                                                    step="0.01"
-                                                    min="0"
-                                                    class="form-control form-control-sm"
-                                                    name="manager_unit_price"
-                                                    value="<?php 
-                                                        $priceValue = null;
-                                                        if (isset($finishedRow['manager_unit_price']) && $finishedRow['manager_unit_price'] !== null) {
-                                                            // تنظيف القيمة من 262145
-                                                            $rawPrice = (string)$finishedRow['manager_unit_price'];
-                                                            $rawPrice = str_replace('262145', '', $rawPrice);
-                                                            $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
-                                                            $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
-                                                            $priceValue = cleanFinancialValue($rawPrice);
-                                                            // التحقق من أن القيمة ليست 262145
-                                                            if (abs($priceValue - 262145) < 0.01 || $priceValue > 10000 || $priceValue < 0) {
-                                                                $priceValue = null;
-                                                            }
-                                                        }
-                                                        echo $priceValue !== null ? htmlspecialchars(number_format((float)$priceValue, 2, '.', '')) : '';
-                                                    ?>"
-                                                    placeholder="0.00"
-                                                >
-                                            </div>
-                                            <button type="submit" class="btn btn-success btn-sm">
-                                                <i class="bi bi-save"></i>
-                                                <span class="d-none d-md-inline">حفظ</span>
-                                            </button>
-                                            <?php 
-                                                // التحقق من وجود سعر صالح (بعد التنظيف)
-                                                $hasValidPrice = false;
-                                                if (isset($finishedRow['manager_unit_price']) && $finishedRow['manager_unit_price'] !== null) {
-                                                    $rawPrice = (string)$finishedRow['manager_unit_price'];
-                                                    $rawPrice = str_replace('262145', '', $rawPrice);
-                                                    $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
-                                                    $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
-                                                    $cleanedPrice = cleanFinancialValue($rawPrice);
-                                                    if (abs($cleanedPrice - 262145) >= 0.01 && $cleanedPrice <= 10000 && $cleanedPrice >= 0) {
-                                                        $hasValidPrice = true;
-                                                    }
+                                        <?php 
+                                            // حساب السعر الإجمالي بناءً على سعر القالب فقط
+                                            $unitPrice = null;
+                                            if (isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
+                                                $rawPrice = (string)$finishedRow['template_unit_price'];
+                                                $rawPrice = str_replace('262145', '', $rawPrice);
+                                                $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
+                                                $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
+                                                $unitPrice = cleanFinancialValue($rawPrice);
+                                                if (abs($unitPrice - 262145) < 0.01 || $unitPrice > 10000 || $unitPrice < 0) {
+                                                    $unitPrice = null;
                                                 }
-                                                if ($hasValidPrice): 
-                                            ?>
-                                                <button type="submit" name="clear_price" value="1" class="btn btn-outline-secondary btn-sm" title="إزالة السعر">
-                                                    <i class="bi bi-x-circle"></i>
-                                                </button>
-                                            <?php endif; ?>
-                                        </form>
+                                            }
+                                            $quantity = (float)($finishedRow['quantity_produced'] ?? 0);
+                                            if ($unitPrice !== null && $quantity > 0) {
+                                                $totalPrice = $unitPrice * $quantity;
+                                                echo '<span class="fw-bold text-success">' . htmlspecialchars(formatCurrency($totalPrice)) . '</span>';
+                                                echo '<br><small class="text-muted">(' . htmlspecialchars(formatCurrency($unitPrice)) . ' × ' . number_format($quantity, 2) . ')</small>';
+                                            } else {
+                                                echo '<span class="text-muted">—</span>';
+                                                echo '<br><small class="text-muted">لم يتم تحديد سعر في القالب</small>';
+                                            }
+                                        ?>
                                     </td>
                                 <?php endif; ?>
                                 <td><?php echo $workersDisplay; ?></td>
