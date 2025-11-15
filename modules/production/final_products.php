@@ -2894,37 +2894,9 @@ if (!window.transferFormInitialized) {
                         return;
                     }
                     
-                    // إخفاء pageLoader
-                    const pageLoader = document.getElementById('pageLoader');
-                    if (pageLoader) {
-                        pageLoader.classList.add('hidden');
-                        pageLoader.style.display = 'none';
-                        pageLoader.style.zIndex = '-1';
-                    }
-                    
                     if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                        const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
-                            backdrop: 'static',
-                            keyboard: false
-                        });
-                        
-                        modal.style.transition = 'none';
-                        const modalDialog = modal.querySelector('.modal-dialog');
-                        if (modalDialog) {
-                            modalDialog.style.transition = 'none';
-                            modalDialog.style.transform = 'none';
-                        }
-                        
+                        const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
                         modalInstance.show();
-                        
-                        setTimeout(function() {
-                            if (modal.classList.contains('show')) {
-                                modal.style.zIndex = '10000';
-                                if (modalDialog) {
-                                    modalDialog.style.zIndex = '10001';
-                                }
-                            }
-                        }, 10);
                     }
                 }
                 return;
@@ -3041,56 +3013,10 @@ if (!window.transferFormInitialized) {
                     : 'btn btn-primary js-external-stock-submit';
             }
             
-            // فتح النموذج يدوياً
+            // فتح النموذج
             if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
-                    backdrop: 'static',
-                    keyboard: false
-                });
-                
-                // إزالة أي transitions قبل فتح النموذج
-                modal.style.transition = 'none';
-                const modalDialog = modal.querySelector('.modal-dialog');
-                if (modalDialog) {
-                    modalDialog.style.transition = 'none';
-                    modalDialog.style.transform = 'none';
-                }
-                
-                // إخفاء pageLoader قبل فتح النموذج
-                const pageLoader = document.getElementById('pageLoader');
-                if (pageLoader) {
-                    pageLoader.classList.add('hidden');
-                    pageLoader.style.display = 'none';
-                    pageLoader.style.zIndex = '-1';
-                    pageLoader.style.pointerEvents = 'none';
-                }
-                
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
                 modalInstance.show();
-                
-                // التأكد من z-index بعد فتح النموذج
-                setTimeout(function() {
-                    if (modal.classList.contains('show')) {
-                        modal.style.transition = 'none';
-                        modal.style.zIndex = '10000';
-                        
-                        if (modalDialog) {
-                            modalDialog.style.transition = 'none';
-                            modalDialog.style.transform = 'none';
-                            modalDialog.style.zIndex = '10001';
-                        }
-                        
-                        const modalContent = modal.querySelector('.modal-content');
-                        if (modalContent) {
-                            modalContent.style.zIndex = '10002';
-                        }
-                        
-                        // التأكد من إخفاء pageLoader
-                        if (pageLoader) {
-                            pageLoader.style.zIndex = '-1';
-                            pageLoader.style.display = 'none';
-                        }
-                    }
-                }, 10);
             }
             return;
         }
@@ -3143,56 +3069,10 @@ if (!window.transferFormInitialized) {
                 descriptionInput.value = editButton.dataset.description || '';
             }
             
-            // فتح النموذج يدوياً
+            // فتح النموذج
             if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
-                    backdrop: 'static',
-                    keyboard: false
-                });
-                
-                // إزالة أي transitions قبل فتح النموذج
-                modal.style.transition = 'none';
-                const modalDialog = modal.querySelector('.modal-dialog');
-                if (modalDialog) {
-                    modalDialog.style.transition = 'none';
-                    modalDialog.style.transform = 'none';
-                }
-                
-                // إخفاء pageLoader قبل فتح النموذج
-                const pageLoader = document.getElementById('pageLoader');
-                if (pageLoader) {
-                    pageLoader.classList.add('hidden');
-                    pageLoader.style.display = 'none';
-                    pageLoader.style.zIndex = '-1';
-                    pageLoader.style.pointerEvents = 'none';
-                }
-                
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
                 modalInstance.show();
-                
-                // التأكد من z-index بعد فتح النموذج
-                setTimeout(function() {
-                    if (modal.classList.contains('show')) {
-                        modal.style.transition = 'none';
-                        modal.style.zIndex = '10000';
-                        
-                        if (modalDialog) {
-                            modalDialog.style.transition = 'none';
-                            modalDialog.style.transform = 'none';
-                            modalDialog.style.zIndex = '10001';
-                        }
-                        
-                        const modalContent = modal.querySelector('.modal-content');
-                        if (modalContent) {
-                            modalContent.style.zIndex = '10002';
-                        }
-                        
-                        // التأكد من إخفاء pageLoader
-                        if (pageLoader) {
-                            pageLoader.style.zIndex = '-1';
-                            pageLoader.style.display = 'none';
-                        }
-                    }
-                }, 10);
             }
             return;
         }
@@ -3231,82 +3111,4 @@ if (!window.transferFormInitialized) {
 </script>
 
 
-<script>
-    // إصلاح مبسط لمشكلة استقرار النماذج
-    (function() {
-        'use strict';
-        
-        // منع أي تحريك أو حركة للنماذج
-        function stabilizeModals() {
-            const modals = document.querySelectorAll('.modal.show');
-            modals.forEach(function(modal) {
-                // إزالة أي transitions أو animations
-                modal.style.transition = 'none';
-                modal.style.animation = 'none';
-                
-                const modalDialog = modal.querySelector('.modal-dialog');
-                if (modalDialog) {
-                    modalDialog.style.transition = 'none';
-                    modalDialog.style.animation = 'none';
-                    modalDialog.style.transform = 'none';
-                }
-            });
-        }
-        
-        // دالة للانتظار حتى يتم تحميل Bootstrap
-        function waitForBootstrap(callback) {
-            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                callback();
-            } else {
-                let attempts = 0;
-                const maxAttempts = 50;
-                const checkInterval = setInterval(function() {
-                    attempts++;
-                    if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                        clearInterval(checkInterval);
-                        callback();
-                    } else if (attempts >= maxAttempts) {
-                        clearInterval(checkInterval);
-                        console.warn('Bootstrap not loaded after waiting period');
-                    }
-                }, 100);
-            }
-        }
-        
-        // تهيئة الكود بعد تحميل Bootstrap
-        waitForBootstrap(function() {
-            // تطبيق الاستقرار عند فتح أي نموذج
-            document.addEventListener('shown.bs.modal', function(e) {
-                const modal = e.target;
-                
-                // تطبيق الاستقرار مرة واحدة فقط
-                stabilizeModals();
-            });
-        });
-        
-        // منع فتح النماذج بشكل متكرر
-        const modalOpenTimes = {};
-        if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined' && bootstrap.Modal.prototype) {
-            const originalShow = bootstrap.Modal.prototype.show;
-            if (originalShow && typeof originalShow === 'function') {
-                bootstrap.Modal.prototype.show = function() {
-                    const modalId = this._element?.id;
-                    if (modalId) {
-                        const now = Date.now();
-                        const lastOpen = modalOpenTimes[modalId] || 0;
-                        
-                        // منع فتح النموذج إذا كان قد فُتح قبل أقل من 500ms
-                        if (now - lastOpen < 500) {
-                            return;
-                        }
-                        
-                        modalOpenTimes[modalId] = now;
-                    }
-                    
-                    return originalShow.call(this);
-                };
-            }
-        }
-    })();
-</script>
 
