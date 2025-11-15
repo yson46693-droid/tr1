@@ -863,9 +863,15 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
         $templateWorkerIdsFromDetails = array_values(array_unique(array_map('intval', $templateWorkerIdsFromDetails)));
 
         // تجهيز الجداول المرتبطة بالمواد الخام
-        $templateMaterialsTable = batchCreationTableExists($pdo, 'template_materials')
-            ? 'template_materials'
-            : (batchCreationTableExists($pdo, 'product_template_materials') ? 'product_template_materials' : null);
+        // البحث عن الجدول الصحيح - الأولوية لـ product_template_raw_materials ثم product_template_materials
+        $templateMaterialsTable = null;
+        if (batchCreationTableExists($pdo, 'product_template_raw_materials')) {
+            $templateMaterialsTable = 'product_template_raw_materials';
+        } elseif (batchCreationTableExists($pdo, 'product_template_materials')) {
+            $templateMaterialsTable = 'product_template_materials';
+        } elseif (batchCreationTableExists($pdo, 'template_materials')) {
+            $templateMaterialsTable = 'template_materials';
+        }
 
         if ($templateMaterialsTable === null) {
             throw new RuntimeException('جدول المواد الخام غير موجود');
@@ -877,10 +883,11 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
         $materials = [];
         $materialsForStockDeduction = [];
 
-        if ($templateMaterialsTable === 'product_template_materials') {
+        if ($templateMaterialsTable === 'product_template_raw_materials' || $templateMaterialsTable === 'product_template_materials') {
+            // استخدام نفس SQL لكل من product_template_raw_materials و product_template_materials
             $materialsStmt = $pdo->prepare("
                 SELECT id, material_type, material_name, material_id, quantity_per_unit, unit, notes
-                FROM product_template_materials
+                FROM {$templateMaterialsTable}
                 WHERE template_id = ?
             ");
             $materialsStmt->execute([$templateId]);

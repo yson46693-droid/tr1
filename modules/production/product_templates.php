@@ -1063,7 +1063,7 @@ try {
             INNER JOIN suppliers s ON ds.supplier_id = s.id
             WHERE ds.derivative_type IS NOT NULL 
             AND ds.derivative_type != '' 
-            AND ds.quantity > 0
+            AND ds.weight > 0
             AND s.status = 'active'
             GROUP BY ds.derivative_type
             ORDER BY ds.derivative_type
