@@ -1275,7 +1275,18 @@ if ($isManager) {
                                                 }
                                             } else {
                                                 echo '<span class="text-muted">—</span>';
-                                                echo '<br><small class="text-muted">لم يتم تحديد سعر في القالب</small>';
+                                                // عرض رسالة أكثر وضوحاً بناءً على السبب
+                                                if (isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
+                                                    $rawTemplatePrice = (string)$finishedRow['template_unit_price'];
+                                                    $checkTemplatePrice = cleanFinancialValue($rawTemplatePrice);
+                                                    if (abs($checkTemplatePrice - 262145) < 0.01 || $checkTemplatePrice > 10000 || $checkTemplatePrice < 0) {
+                                                        echo '<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> سعر القالب غير صالح</small>';
+                                                    } else {
+                                                        echo '<br><small class="text-muted">لم يتم تحديد سعر في القالب</small>';
+                                                    }
+                                                } else {
+                                                    echo '<br><small class="text-muted"><i class="bi bi-info-circle"></i> لا يوجد قالب نشط للمنتج</small>';
+                                                }
                                             }
                                         ?>
                                     </td>
@@ -1446,12 +1457,12 @@ if ($isManager) {
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label">اسم المنتج <span class="text-danger">*</span></label>
-                    <input type="text" name="external_name" class="form-control" required>
+                    <label class="form-label" for="externalProductName">اسم المنتج <span class="text-danger">*</span></label>
+                    <input type="text" id="externalProductName" name="external_name" class="form-control" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">نوع البيع <span class="text-danger">*</span></label>
-                    <select name="external_channel" class="form-select" required>
+                    <label class="form-label" for="externalProductChannel">نوع البيع <span class="text-danger">*</span></label>
+                    <select id="externalProductChannel" name="external_channel" class="form-select" required>
                         <option value="company">بيع داخل الشركة</option>
                         <option value="delegate">مندوب المبيعات</option>
                         <option value="other">أخرى</option>
@@ -1459,22 +1470,22 @@ if ($isManager) {
                 </div>
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">الكمية الابتدائية</label>
-                        <input type="number" name="external_quantity" class="form-control" min="0" step="0.01" value="0">
+                        <label class="form-label" for="externalProductQuantity">الكمية الابتدائية</label>
+                        <input type="number" id="externalProductQuantity" name="external_quantity" class="form-control" min="0" step="0.01" value="0">
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">الوحدة</label>
-                        <input type="text" name="external_unit" class="form-control" value="قطعة">
+                        <label class="form-label" for="externalProductUnit">الوحدة</label>
+                        <input type="text" id="externalProductUnit" name="external_unit" class="form-control" value="قطعة">
                     </div>
                 </div>
                 <div class="row g-3 mt-0">
                     <div class="col-md-6">
-                        <label class="form-label">سعر البيع</label>
-                        <input type="number" name="external_price" class="form-control" min="0" step="0.01" value="0.00">
+                        <label class="form-label" for="externalProductPrice">سعر البيع</label>
+                        <input type="number" id="externalProductPrice" name="external_price" class="form-control" min="0" step="0.01" value="0.00">
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">وصف مختصر</label>
-                        <input type="text" name="external_description" class="form-control" placeholder="اختياري">
+                        <label class="form-label" for="externalProductDescription">وصف مختصر</label>
+                        <input type="text" id="externalProductDescription" name="external_description" class="form-control" placeholder="اختياري">
                     </div>
                 </div>
                 <div class="alert alert-info mt-3">
@@ -1502,16 +1513,16 @@ if ($isManager) {
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label">اسم المنتج</label>
-                    <input type="text" class="form-control js-external-stock-name" readonly>
+                    <label class="form-label" for="externalStockProductName">اسم المنتج</label>
+                    <input type="text" id="externalStockProductName" class="form-control js-external-stock-name" readonly>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label js-external-stock-label">الكمية المراد إضافتها</label>
-                    <input type="number" name="quantity" class="form-control" min="0" step="0.01" required>
+                    <label class="form-label js-external-stock-label" for="externalStockQuantity">الكمية المراد إضافتها</label>
+                    <input type="number" id="externalStockQuantity" name="quantity" class="form-control" min="0" step="0.01" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">ملاحظة</label>
-                    <textarea name="note" class="form-control" rows="2" placeholder="اختياري"></textarea>
+                    <label class="form-label" for="externalStockNote">ملاحظة</label>
+                    <textarea id="externalStockNote" name="note" class="form-control" rows="2" placeholder="اختياري"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1533,12 +1544,12 @@ if ($isManager) {
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label">اسم المنتج <span class="text-danger">*</span></label>
-                    <input type="text" name="edit_name" class="form-control" required>
+                    <label class="form-label" for="editExternalProductName">اسم المنتج <span class="text-danger">*</span></label>
+                    <input type="text" id="editExternalProductName" name="edit_name" class="form-control" required>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">نوع البيع <span class="text-danger">*</span></label>
-                    <select name="edit_channel" class="form-select" required>
+                    <label class="form-label" for="editExternalProductChannel">نوع البيع <span class="text-danger">*</span></label>
+                    <select id="editExternalProductChannel" name="edit_channel" class="form-select" required>
                         <option value="company">بيع داخل الشركة</option>
                         <option value="delegate">مندوب المبيعات</option>
                         <option value="other">أخرى</option>
@@ -1546,17 +1557,17 @@ if ($isManager) {
                 </div>
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">سعر البيع</label>
-                        <input type="number" name="edit_price" class="form-control" min="0" step="0.01">
+                        <label class="form-label" for="editExternalProductPrice">سعر البيع</label>
+                        <input type="number" id="editExternalProductPrice" name="edit_price" class="form-control" min="0" step="0.01">
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">الوحدة</label>
-                        <input type="text" name="edit_unit" class="form-control">
+                        <label class="form-label" for="editExternalProductUnit">الوحدة</label>
+                        <input type="text" id="editExternalProductUnit" name="edit_unit" class="form-control">
                     </div>
                 </div>
                 <div class="mt-3">
-                    <label class="form-label">ملاحظات</label>
-                    <textarea name="edit_description" class="form-control" rows="2" placeholder="اختياري"></textarea>
+                    <label class="form-label" for="editExternalProductDescription">ملاحظات</label>
+                    <textarea id="editExternalProductDescription" name="edit_description" class="form-control" rows="2" placeholder="اختياري"></textarea>
                 </div>
             </div>
             <div class="modal-footer">
@@ -1656,13 +1667,13 @@ if ($isManager) {
                     <?php else: ?>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label">من المخزن</label>
-                                <div class="form-control-plaintext fw-semibold">
+                                <label class="form-label" for="transferFromWarehouse">من المخزن</label>
+                                <div class="form-control-plaintext fw-semibold" id="transferFromWarehouse">
                                     <?php echo htmlspecialchars($primaryWarehouse['name']); ?> (مخزن رئيسي)
                                 </div>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">إلى المخزن <span class="text-danger">*</span></label>
+                                <label class="form-label" for="transferToWarehouse">إلى المخزن <span class="text-danger">*</span></label>
                                 <select class="form-select" name="to_warehouse_id" id="transferToWarehouse" required>
                                     <option value="">اختر المخزن الوجهة</option>
                                     <?php foreach ($destinationWarehouses as $warehouse): ?>
@@ -1677,12 +1688,12 @@ if ($isManager) {
 
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label">تاريخ النقل <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="transfer_date" value="<?php echo date('Y-m-d'); ?>" required>
+                                <label class="form-label" for="transferDate">تاريخ النقل <span class="text-danger">*</span></label>
+                                <input type="date" id="transferDate" class="form-control" name="transfer_date" value="<?php echo date('Y-m-d'); ?>" required>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">السبب</label>
-                                <input type="text" class="form-control" name="reason" placeholder="مثال: تجهيز مخزون لمندوب المبيعات">
+                                <label class="form-label" for="transferReason">السبب</label>
+                                <input type="text" id="transferReason" class="form-control" name="reason" placeholder="مثال: تجهيز مخزون لمندوب المبيعات">
                             </div>
                         </div>
 
@@ -1691,8 +1702,8 @@ if ($isManager) {
                             <div id="mainWarehouseTransferItems">
                                 <div class="transfer-item row g-2 align-items-end mb-2">
                                     <div class="col-md-5">
-                                        <label class="form-label small text-muted">المنتج</label>
-                                        <select class="form-select product-select" required>
+                                        <label class="form-label small text-muted" for="transferProduct0">المنتج</label>
+                                        <select id="transferProduct0" class="form-select product-select" name="items[0][product_select]" required>
                                             <option value="">اختر المنتج</option>
                                             <?php foreach ($finishedProductOptions as $option): ?>
                                                 <option value="<?php echo intval($option['product_id'] ?? 0); ?>"
@@ -1708,18 +1719,18 @@ if ($isManager) {
                                         </select>
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label small text-muted">الكمية</label>
-                                        <input type="number" step="0.01" min="0.01" class="form-control quantity-input" name="items[0][quantity]" placeholder="الكمية" required>
+                                        <label class="form-label small text-muted" for="transferQuantity0">الكمية</label>
+                                        <input type="number" id="transferQuantity0" step="0.01" min="0.01" class="form-control quantity-input" name="items[0][quantity]" placeholder="الكمية" required>
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label small text-muted">ملاحظات</label>
-                                        <input type="text" class="form-control" name="items[0][notes]" placeholder="ملاحظات (اختياري)">
+                                        <label class="form-label small text-muted" for="transferNotes0">ملاحظات</label>
+                                        <input type="text" id="transferNotes0" class="form-control" name="items[0][notes]" placeholder="ملاحظات (اختياري)">
                                     </div>
                                     <div class="col-12">
                                         <small class="text-muted available-hint d-block"></small>
-                                        <input type="hidden" name="items[0][product_id]" class="selected-product-id">
-                                        <input type="hidden" name="items[0][batch_id]" class="selected-batch-id">
-                                        <input type="hidden" name="items[0][batch_number]" class="selected-batch-number">
+                                        <input type="hidden" id="transferProductId0" name="items[0][product_id]" class="selected-product-id">
+                                        <input type="hidden" id="transferBatchId0" name="items[0][batch_id]" class="selected-batch-id">
+                                        <input type="hidden" id="transferBatchNumber0" name="items[0][batch_number]" class="selected-batch-number">
                                     </div>
                                     <div class="col-md-1 text-end">
                                         <button type="button" class="btn btn-outline-danger remove-transfer-item" title="حذف العنصر">
@@ -1735,8 +1746,8 @@ if ($isManager) {
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label">ملاحظات إضافية</label>
-                            <textarea class="form-control" name="notes" rows="3" placeholder="أي تفاصيل إضافية للمدير (اختياري)"></textarea>
+                            <label class="form-label" for="transferAdditionalNotes">ملاحظات إضافية</label>
+                            <textarea id="transferAdditionalNotes" class="form-control" name="notes" rows="3" placeholder="أي تفاصيل إضافية للمدير (اختياري)"></textarea>
                         </div>
 
                         <div class="alert alert-info d-flex align-items-center gap-2">
@@ -1777,8 +1788,8 @@ document.addEventListener('DOMContentLoaded', function () {
         wrapper.className = 'transfer-item row g-2 align-items-end mb-2';
         wrapper.innerHTML = `
             <div class="col-md-5">
-                <label class="form-label small text-muted">المنتج</label>
-                <select class="form-select product-select" required>
+                <label class="form-label small text-muted" for="transferProduct${index}">المنتج</label>
+                <select id="transferProduct${index}" class="form-select product-select" name="items[${index}][product_select]" required>
                     <option value="">اختر المنتج</option>
                     <?php foreach ($finishedProductOptions as $option): ?>
                         <option value="<?php echo intval($option['product_id'] ?? 0); ?>"
@@ -1794,18 +1805,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 </select>
             </div>
             <div class="col-md-3">
-                <label class="form-label small text-muted">الكمية</label>
-                <input type="number" step="0.01" min="0.01" class="form-control quantity-input" name="items[${index}][quantity]" placeholder="الكمية" required>
+                <label class="form-label small text-muted" for="transferQuantity${index}">الكمية</label>
+                <input type="number" id="transferQuantity${index}" step="0.01" min="0.01" class="form-control quantity-input" name="items[${index}][quantity]" placeholder="الكمية" required>
             </div>
             <div class="col-md-3">
-                <label class="form-label small text-muted">ملاحظات</label>
-                <input type="text" class="form-control" name="items[${index}][notes]" placeholder="ملاحظات (اختياري)">
+                <label class="form-label small text-muted" for="transferNotes${index}">ملاحظات</label>
+                <input type="text" id="transferNotes${index}" class="form-control" name="items[${index}][notes]" placeholder="ملاحظات (اختياري)">
             </div>
             <div class="col-12">
                 <small class="text-muted available-hint d-block"></small>
-                <input type="hidden" name="items[${index}][product_id]" class="selected-product-id">
-                <input type="hidden" name="items[${index}][batch_id]" class="selected-batch-id">
-                <input type="hidden" name="items[${index}][batch_number]" class="selected-batch-number">
+                <input type="hidden" id="transferProductId${index}" name="items[${index}][product_id]" class="selected-product-id">
+                <input type="hidden" id="transferBatchId${index}" name="items[${index}][batch_id]" class="selected-batch-id">
+                <input type="hidden" id="transferBatchNumber${index}" name="items[${index}][batch_number]" class="selected-batch-number">
             </div>
             <div class="col-md-1 text-end">
                 <button type="button" class="btn btn-outline-danger remove-transfer-item" title="حذف العنصر">
