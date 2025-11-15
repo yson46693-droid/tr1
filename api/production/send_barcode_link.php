@@ -354,18 +354,28 @@ if ($notes) {
 }
 
 $lines[] = '';
-$lines[] = '🔗 رابط الطباعة: ' . $escape($printUrl);
-$lines[] = '📄 تفاصيل التشغيلة: ' . $escape($detailsUrl);
 
 $message = implode("\n", array_filter($lines, static function ($line) {
     return $line !== null;
 }));
 
-$telegramResult = sendTelegramMessage($message);
+// إضافة أزرار واضحة وكبيرة في أسفل الرسالة
+$buttons = [
+    [
+        [
+            'text' => '🖨️ طباعة الباركود',
+            'url' => $printUrl
+        ]
+    ],
+    []
+];
 
-if (!$telegramResult) {
+$telegramResult = sendTelegramMessageWithButtons($message, $buttons);
+
+if (!$telegramResult || !($telegramResult['success'] ?? false)) {
+    $errorMsg = $telegramResult['error'] ?? 'تعذر إرسال الرسالة إلى تليجرام';
     http_response_code(502);
-    echo json_encode(['success' => false, 'error' => 'تعذر إرسال الرسالة إلى تليجرام'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['success' => false, 'error' => $errorMsg], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -375,8 +385,9 @@ $_SESSION['created_batch_metadata']['last_telegram_labels'] = $labels;
 $_SESSION['created_batch_metadata']['last_print_url'] = $printUrl;
 
 $telegramMessageId = null;
-if (isset($telegramResult['result']['message_id'])) {
-    $telegramMessageId = (int) $telegramResult['result']['message_id'];
+$telegramResponse = $telegramResult['response'] ?? null;
+if ($telegramResponse && isset($telegramResponse['result']['message_id'])) {
+    $telegramMessageId = (int) $telegramResponse['result']['message_id'];
     $_SESSION['created_batch_metadata']['last_telegram_message_id'] = $telegramMessageId;
 }
 
