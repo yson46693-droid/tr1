@@ -730,7 +730,7 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         return $quantity;
     };
 
-    $checkStock = static function (string $table, string $column, ?int $supplierId = null, ?string $honeyVariety = null) use ($db): float {
+    $checkStock = static function (string $table, string $column, ?int $supplierId = null, ?string $honeyVariety = null, bool $flexibleSearch = false) use ($db): float {
         $sql = "SELECT SUM({$column}) AS total_quantity FROM {$table}";
         $params = [];
         $conditions = [];
@@ -742,8 +742,18 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         
         // إذا كان الجدول هو honey_stock ونوع العسل محدد، أضفه إلى الشروط
         if ($table === 'honey_stock' && $honeyVariety !== null && $honeyVariety !== '') {
-            $conditions[] = "honey_variety = ?";
-            $params[] = trim($honeyVariety);
+            $varietyTrimmed = trim($honeyVariety);
+            if ($flexibleSearch) {
+                // استخدام LIKE للبحث المرن (مطابقة جزئية)
+                $conditions[] = "(honey_variety = ? OR honey_variety LIKE ? OR honey_variety LIKE ?)";
+                $params[] = $varietyTrimmed;
+                $params[] = '%' . $varietyTrimmed . '%';
+                $params[] = $varietyTrimmed . '%';
+            } else {
+                // المطابقة الدقيقة أولاً
+                $conditions[] = "honey_variety = ?";
+                $params[] = $varietyTrimmed;
+            }
         }
         
         if (!empty($conditions)) {
@@ -751,7 +761,14 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         }
         
         $stockRow = $db->queryOne($sql, $params);
-        return (float)($stockRow['total_quantity'] ?? 0);
+        $quantity = (float)($stockRow['total_quantity'] ?? 0);
+        
+        // إذا كانت المطابقة الدقيقة فشلت وكان نوع العسل محدد، جرب البحث المرن
+        if ($quantity == 0 && $table === 'honey_stock' && $honeyVariety !== null && $honeyVariety !== '' && !$flexibleSearch) {
+            return $checkStock($table, $column, $supplierId, $honeyVariety, true);
+        }
+        
+        return $quantity;
     };
 
     $resolveSpecialStock = static function (?string $materialType, ?int $supplierId, string $materialName, ?string $honeyVariety = null) use ($db, $checkStock, $normalizeMaterialType, $normalizeUnitLabel): array {
@@ -767,7 +784,22 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                 $honeyStockExists = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
                 if (!empty($honeyStockExists)) {
                     $column = ($normalizedType === 'honey_raw') ? 'raw_honey_quantity' : 'filtered_honey_quantity';
-                    $availableQuantity = $checkStock('honey_stock', $column, $supplierId, $honeyVariety);
+                    // البحث مع المورد المحدد ونوع العسل المحدد أولاً
+                    if ($supplierId && $honeyVariety) {
+                        $availableQuantity = $checkStock('honey_stock', $column, $supplierId, $honeyVariety);
+                    }
+                    // إذا لم يتم العثور على شيء، جرب البحث مع المورد فقط (جميع أنواع العسل)
+                    if ($availableQuantity == 0 && $supplierId) {
+                        $availableQuantity = $checkStock('honey_stock', $column, $supplierId, null);
+                    }
+                    // إذا لم يتم العثور على شيء، جرب البحث بنوع العسل فقط (جميع الموردين)
+                    if ($availableQuantity == 0 && $honeyVariety) {
+                        $availableQuantity = $checkStock('honey_stock', $column, null, $honeyVariety);
+                    }
+                    // إذا لم يتم العثور على شيء، جرب البحث بدون أي قيود
+                    if ($availableQuantity == 0) {
+                        $availableQuantity = $checkStock('honey_stock', $column, null, null);
+                    }
                     $resolved = true;
                     $availableUnit = 'kg';
                 }
@@ -847,18 +879,44 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         
         // إذا كان نوع العسل غير محدد في rawDetail، حاول استخراجه من اسم المادة
         if (empty($honeyVarietyMeta) && (mb_stripos($materialName, 'عسل') !== false || stripos($materialName, 'honey') !== false)) {
-            // إذا كان الاسم يحتوي على " - "، استخرج نوع العسل
-            if (mb_strpos($materialName, ' - ') !== false) {
-                $parts = explode(' - ', $materialName, 2);
+            // تطبيع الاسم للبحث عن نوع العسل
+            $nameForVarietyExtraction = trim($materialName);
+            
+            // 1. إذا كان الاسم يحتوي على " - "، استخرج نوع العسل
+            if (mb_strpos($nameForVarietyExtraction, ' - ') !== false) {
+                $parts = explode(' - ', $nameForVarietyExtraction, 2);
                 if (count($parts) === 2) {
                     $honeyVarietyMeta = trim($parts[1]);
                 }
             }
-            // إذا كان الاسم يبدأ بـ "عسل "، استخرج نوع العسل
-            elseif (mb_strpos($materialName, 'عسل ') === 0 && mb_strlen($materialName) > 5) {
-                $parts = explode(' ', $materialName, 2);
+            // 2. إذا كان الاسم يحتوي على "-" بدون مسافات، استخرج نوع العسل
+            elseif (mb_strpos($nameForVarietyExtraction, '-') !== false && mb_strpos($nameForVarietyExtraction, ' - ') === false) {
+                $parts = explode('-', $nameForVarietyExtraction, 2);
                 if (count($parts) === 2) {
                     $honeyVarietyMeta = trim($parts[1]);
+                }
+            }
+            // 3. إذا كان الاسم يبدأ بـ "عسل "، استخرج نوع العسل
+            elseif (mb_strpos($nameForVarietyExtraction, 'عسل ') === 0 && mb_strlen($nameForVarietyExtraction) > 5) {
+                $parts = explode(' ', $nameForVarietyExtraction, 2);
+                if (count($parts) === 2) {
+                    $honeyVarietyMeta = trim($parts[1]);
+                }
+            }
+            // 4. إذا كان الاسم يحتوي على "عسل" في أي مكان، حاول استخراج الكلمة التالية
+            elseif (mb_stripos($nameForVarietyExtraction, 'عسل') !== false) {
+                // البحث عن "عسل" واستخراج ما بعده
+                $honeyPos = mb_stripos($nameForVarietyExtraction, 'عسل');
+                if ($honeyPos !== false) {
+                    $afterHoney = mb_substr($nameForVarietyExtraction, $honeyPos + mb_strlen('عسل'));
+                    $afterHoney = trim($afterHoney);
+                    // إزالة أي شرطات أو رموز في البداية
+                    $afterHoney = preg_replace('/^[\s\-_]+/', '', $afterHoney);
+                    if (!empty($afterHoney) && mb_strlen($afterHoney) > 1) {
+                        // أخذ أول كلمة أو كلمتين كحد أقصى
+                        $words = preg_split('/[\s\-_]+/', $afterHoney, 2);
+                        $honeyVarietyMeta = trim($words[0]);
+                    }
                 }
             }
         }
@@ -882,20 +940,23 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         $hasDashSeparator = (mb_strpos($materialName, ' - ') !== false);
         $materialParts = $hasDashSeparator ? array_map('trim', explode(' - ', $materialName, 2)) : [];
         
+        // التحقق إذا كانت المادة عسل
+        $isHoneyMaterial = (mb_stripos($materialName, 'عسل') !== false || stripos($materialName, 'honey') !== false) ||
+                          ($materialTypeMeta === 'honey_raw' || $materialTypeMeta === 'honey_filtered' || $materialTypeMeta === 'honey');
+        
         // التحقق إذا كانت المادة عسل ولدينا معلومات محددة (مورد ونوع عسل)
-        // في هذه الحالة، يجب البحث فقط في honey_stock وليس في جدول products
+        // في هذه الحالة، يجب البحث أولاً في honey_stock
         $isHoneyWithSpecificDetails = false;
-        if ((mb_stripos($materialName, 'عسل') !== false || stripos($materialName, 'honey') !== false) && 
+        if ($isHoneyMaterial && 
             ($materialTypeMeta === 'honey_raw' || $materialTypeMeta === 'honey_filtered' || $materialTypeMeta === 'honey') &&
-            ($materialSupplierMeta !== null && $materialSupplierMeta > 0) &&
             ($honeyVarietyMeta !== null && $honeyVarietyMeta !== '')) {
             $isHoneyWithSpecificDetails = true;
             
             error_log(sprintf(
-                'Honey material with specific details detected: Name="%s", Type="%s", Supplier="%s", Variety="%s" - Will search only in honey_stock',
+                'Honey material detected: Name="%s", Type="%s", Supplier="%s", Variety="%s" - Will search in honey_stock first',
                 $materialName,
-                $materialTypeMeta,
-                $materialSupplierMeta,
+                $materialTypeMeta ?? 'auto-detected',
+                $materialSupplierMeta ?? 'any',
                 $honeyVarietyMeta
             ));
         }
@@ -1131,7 +1192,13 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
         } // نهاية if (!$isHoneyWithSpecificDetails)
         
         // 4. البحث في جداول المخزون الخاصة (honey_stock, etc.)
-        // بالنسبة للعسل مع معلومات محددة، هذا هو المصدر الوحيد للبحث
+        // إذا كانت المادة عسل ولكن نوع المادة غير محدد في metadata، حاول اكتشافه
+        if ($isHoneyMaterial && empty($materialTypeMeta)) {
+            // افتراض أن العسل المصفى هو الافتراضي للإنتاج
+            $materialTypeMeta = 'honey_filtered';
+        }
+        
+        // البحث في جداول المخزون الخاصة
         $specialStock = $resolveSpecialStock($materialTypeMeta, $materialSupplierMeta, $materialName, $honeyVarietyMeta);
         if ($specialStock['resolved']) {
             $availableFromSpecial = $specialStock['quantity'];
@@ -1169,16 +1236,70 @@ function checkMaterialsAvailability($db, $templateId, $productionQuantity, array
                     ));
                 }
             }
-        } elseif ($isHoneyWithSpecificDetails) {
-            // إذا كانت المادة عسل بمعلومات محددة ولم يتم العثور عليها في honey_stock
-            error_log(sprintf(
-                'Honey NOT found in special stock (specific search failed): Template name="%s", Type="%s", Supplier="%s", Variety="%s", Required=%s',
-                $materialName,
-                $materialTypeMeta ?? 'unknown',
-                $materialSupplierMeta ?? 'none',
-                $honeyVarietyMeta ?? 'none',
-                $requiredQuantity
-            ));
+        } elseif ($isHoneyMaterial && !$foundInProducts) {
+            // إذا كانت المادة عسل ولم يتم العثور عليها في honey_stock أو products
+            // جرب البحث في جدول products كبديل
+            $honeySearchTerms = [];
+            $honeySearchParams = [];
+            
+            // إضافة مصطلحات البحث بناءً على اسم المادة ونوع العسل
+            if ($honeyVarietyMeta) {
+                $honeySearchTerms[] = "(name LIKE ? OR name LIKE ?)";
+                $honeySearchParams[] = '%عسل%' . $honeyVarietyMeta . '%';
+                $honeySearchParams[] = '%' . $honeyVarietyMeta . '%عسل%';
+            }
+            
+            // إضافة البحث بالاسم الكامل
+            $honeySearchTerms[] = "(name = ? OR name LIKE ?)";
+            $honeySearchParams[] = $materialName;
+            $honeySearchParams[] = $materialName . '%';
+            
+            // إضافة البحث بالاسم المطبيع
+            if ($normalizedMaterialName !== $materialName) {
+                $honeySearchTerms[] = "(name = ? OR name LIKE ?)";
+                $honeySearchParams[] = $normalizedMaterialName;
+                $honeySearchParams[] = $normalizedMaterialName . '%';
+            }
+            
+            if (!empty($honeySearchTerms)) {
+                $honeyProduct = $db->queryOne(
+                    "SELECT id, name, quantity FROM products 
+                     WHERE (" . implode(' OR ', $honeySearchTerms) . ") AND status = 'active'
+                     ORDER BY 
+                        CASE 
+                            WHEN name = ? THEN 1
+                            WHEN name LIKE ? THEN 2
+                            WHEN name LIKE ? THEN 3
+                            ELSE 4 
+                        END,
+                        quantity DESC
+                     LIMIT 1",
+                    array_merge($honeySearchParams, [$materialName, $materialName . '%', '%' . $materialName . '%'])
+                );
+                
+                if ($honeyProduct) {
+                    $foundInProducts = true;
+                    $product = $honeyProduct;
+                    $availableQuantity = floatval($honeyProduct['quantity'] ?? 0);
+                    
+                    error_log(sprintf(
+                        'Honey found in products as fallback: Template name="%s", Found name="%s", Available=%s, Required=%s',
+                        $materialName,
+                        $honeyProduct['name'],
+                        $availableQuantity,
+                        $requiredQuantity
+                    ));
+                } else {
+                    error_log(sprintf(
+                        'Honey NOT found in special stock or products: Template name="%s", Type="%s", Supplier="%s", Variety="%s", Required=%s',
+                        $materialName,
+                        $materialTypeMeta ?? 'unknown',
+                        $materialSupplierMeta ?? 'none',
+                        $honeyVarietyMeta ?? 'none',
+                        $requiredQuantity
+                    ));
+                }
+            }
         }
         
         // التحقق من توفر الكمية المطلوبة
