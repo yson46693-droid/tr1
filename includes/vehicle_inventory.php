@@ -750,6 +750,10 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
         
         $transferId = $db->getLastInsertId();
         
+        if (!$transferId || $transferId <= 0) {
+            throw new Exception('فشل في الحصول على معرف طلب النقل من قاعدة البيانات.');
+        }
+        
         // إضافة العناصر
         foreach ($items as $item) {
             $batchId = isset($item['batch_id']) ? (int)$item['batch_id'] : null;
@@ -948,7 +952,28 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
             error_log('Warehouse transfer audit log exception: ' . $auditException->getMessage());
         }
         
-        return ['success' => true, 'transfer_id' => $transferId, 'transfer_number' => $transferNumber];
+        // التحقق النهائي من أن الطلب تم إنشاؤه بنجاح في قاعدة البيانات
+        $verifyTransfer = $db->queryOne(
+            "SELECT id, transfer_number FROM warehouse_transfers WHERE id = ?",
+            [$transferId]
+        );
+        
+        if (!$verifyTransfer) {
+            error_log("Critical: Transfer ID $transferId was created but not found in database!");
+            throw new Exception('تم إنشاء الطلب لكن لم يتم العثور عليه في قاعدة البيانات.');
+        }
+        
+        // التأكد من أن transfer_number متطابق
+        if ($verifyTransfer['transfer_number'] !== $transferNumber) {
+            error_log("Warning: Transfer number mismatch. Expected: $transferNumber, Found: {$verifyTransfer['transfer_number']}");
+            $transferNumber = $verifyTransfer['transfer_number']; // استخدام القيمة من قاعدة البيانات
+        }
+        
+        return [
+            'success' => true, 
+            'transfer_id' => (int)$verifyTransfer['id'], 
+            'transfer_number' => $verifyTransfer['transfer_number']
+        ];
         
     } catch (Exception $e) {
         error_log("Transfer Creation Error: " . $e->getMessage());

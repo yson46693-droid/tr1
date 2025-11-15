@@ -729,12 +729,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $currentUser['id'] ?? null
                 );
 
-                // التحقق من نجاح العملية - حتى لو كانت النتيجة success => false، نتحقق من وجود transfer_id
+                // التحقق من نجاح العملية - التحقق أولاً من وجود transfer_id و transfer_number
                 $transferId = $result['transfer_id'] ?? null;
                 $transferNumber = $result['transfer_number'] ?? null;
-                $isSuccess = !empty($result['success']) || (!empty($transferId) && !empty($transferNumber));
                 
-                if ($isSuccess && !empty($transferId) && !empty($transferNumber)) {
+                // التحقق من قاعدة البيانات إذا كان transfer_id موجوداً للتأكد من وجود الطلب فعلياً
+                if (!empty($transferId)) {
+                    $verifyTransfer = $db->queryOne(
+                        "SELECT id, transfer_number FROM warehouse_transfers WHERE id = ?",
+                        [$transferId]
+                    );
+                    if ($verifyTransfer) {
+                        // الطلب موجود في قاعدة البيانات - نجح الإنشاء
+                        $transferId = (int)$verifyTransfer['id'];
+                        $transferNumber = $verifyTransfer['transfer_number'];
+                    } else {
+                        // الطلب غير موجود رغم وجود transfer_id في النتيجة - خطأ
+                        $transferId = null;
+                        $transferNumber = null;
+                    }
+                }
+                
+                // إذا كان الطلب تم إنشاؤه بنجاح (يوجد transfer_id و transfer_number)
+                if (!empty($transferId) && !empty($transferNumber)) {
                     $isManagerInitiator = isset($currentUser['role']) && $currentUser['role'] === 'manager';
 
                     if ($isManagerInitiator && !empty($transferId)) {
@@ -822,6 +839,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'تم تنفيذ نقل المنتجات رقم %s بواسطة المدير بنجاح دون الحاجة للموافقة.',
                                 $transferNumber
                             );
+                            // حذف token بعد نجاح الطلب لمنع إعادة الإرسال
+                            unset($_SESSION[$sessionTokenKey]);
                             productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                         } catch (Throwable $autoApprovalError) {
                             error_log('final_products auto-approval transfer error: ' . $autoApprovalError->getMessage());
@@ -829,28 +848,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'تم حفظ طلب النقل رقم %s لكن تعذر تنفيذه تلقائياً. يرجى المراجعة اليدوية.',
                                 $transferNumber
                             );
+                            // حذف token بعد فشل الموافقة التلقائية (الطلب موجود لكن فشل التنفيذ)
+                            unset($_SESSION[$sessionTokenKey]);
                             productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                         }
                     } else {
+                        // المستخدم ليس مديراً - الطلب تم إنشاؤه بنجاح وتم إرساله للموافقة
                         $_SESSION[$sessionSuccessKey] = sprintf(
                             'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
                             $transferNumber
                         );
+                        // حذف token بعد نجاح الطلب لمنع إعادة الإرسال
+                        unset($_SESSION[$sessionTokenKey]);
                         productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                     }
                 } else {
-                    // التحقق مرة أخرى من أن الطلب لم يتم إنشاؤه بالفعل (في حالة وجود خطأ في العمليات الإضافية)
-                    if (!empty($result['transfer_id']) && !empty($result['transfer_number'])) {
-                        // الطلب تم إنشاؤه بالفعل - نعرض رسالة نجاح بدلاً من خطأ
-                        $_SESSION[$sessionSuccessKey] = sprintf(
-                            'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
-                            $result['transfer_number']
-                        );
-                        productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
-                        exit;
+                    // الطلب لم يتم إنشاؤه بنجاح - التحقق مرة أخرى من قاعدة البيانات للتأكد
+                    $verificationTransferId = $result['transfer_id'] ?? null;
+                    $verificationTransferNumber = $result['transfer_number'] ?? null;
+                    
+                    if (!empty($verificationTransferId) || !empty($verificationTransferNumber)) {
+                        // محاولة العثور على الطلب في قاعدة البيانات
+                        $verifyTransfer = null;
+                        if (!empty($verificationTransferId)) {
+                            $verifyTransfer = $db->queryOne(
+                                "SELECT id, transfer_number FROM warehouse_transfers WHERE id = ?",
+                                [$verificationTransferId]
+                            );
+                        }
+                        if (!$verifyTransfer && !empty($verificationTransferNumber)) {
+                            $verifyTransfer = $db->queryOne(
+                                "SELECT id, transfer_number FROM warehouse_transfers WHERE transfer_number = ?",
+                                [$verificationTransferNumber]
+                            );
+                        }
+                        
+                        if ($verifyTransfer) {
+                            // الطلب موجود بالفعل في قاعدة البيانات! كان هناك خطأ في الإرجاع من createWarehouseTransfer
+                            error_log("Warning: Transfer was created (ID: {$verifyTransfer['id']}, Number: {$verifyTransfer['transfer_number']}) but createWarehouseTransfer may have returned error. Details: " . json_encode($result));
+                            $_SESSION[$sessionSuccessKey] = sprintf(
+                                'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
+                                $verifyTransfer['transfer_number']
+                            );
+                            // حذف token
+                            unset($_SESSION[$sessionTokenKey]);
+                            productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+                        } else {
+                            // الطلب غير موجود - هناك خطأ حقيقي
+                            $errorMessage = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
+                            error_log("Failed to create warehouse transfer. Error: $errorMessage. Result: " . json_encode($result));
+                            $transferErrors[] = $errorMessage;
+                            // إعادة إنشاء token للسماح بإعادة المحاولة
+                            $_SESSION[$sessionTokenKey] = bin2hex(random_bytes(32));
+                        }
                     } else {
-                        // إضافة رسالة الخطأ فقط عند فشل إنشاء الطلب فعلياً
-                        $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
+                        // لا يوجد transfer_id أو transfer_number في النتيجة - خطأ حقيقي
+                        $errorMessage = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
+                        error_log("Failed to create warehouse transfer - no transfer ID or number. Error: $errorMessage. Result: " . json_encode($result));
+                        $transferErrors[] = $errorMessage;
+                        // إعادة إنشاء token للسماح بإعادة المحاولة
+                        $_SESSION[$sessionTokenKey] = bin2hex(random_bytes(32));
                     }
                 }
             }
