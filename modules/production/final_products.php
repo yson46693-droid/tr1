@@ -791,8 +791,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $priceValue = null;
         if ($manualPrice !== '' && $manualPrice !== null) {
             $priceValue = cleanFinancialValue($manualPrice);
-            if ($priceValue < 0 || $priceValue > 1000000) {
-                $_SESSION[$sessionErrorKey] = 'السعر المدخل غير صالح. يجب أن يكون بين 0 و 1,000,000.';
+            // السعر اليدوي هو السعر الإجمالي للتشغيلة، لذا الحد الأقصى أكبر
+            if ($priceValue < 0 || $priceValue > 10000000) {
+                $_SESSION[$sessionErrorKey] = 'السعر المدخل غير صالح. يجب أن يكون بين 0 و 10,000,000.';
                 productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
             }
         }
@@ -832,7 +833,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
             
-            $_SESSION[$sessionSuccessKey] = 'تم تحديث السعر اليدوي بنجاح.';
+            $_SESSION[$sessionSuccessKey] = 'تم تحديث السعر اليدوي الإجمالي للتشغيلة بنجاح.';
         } catch (Exception $e) {
             error_log('update_manual_price error: ' . $e->getMessage());
             $_SESSION[$sessionErrorKey] = 'تعذر تحديث السعر اليدوي.';
@@ -1222,46 +1223,53 @@ if ($isManager) {
                                 <?php if ($isManager): ?>
                                     <td>
                                         <?php 
-                                            // حساب السعر الإجمالي - الأولوية للسعر اليدوي ثم سعر القالب
-                                            $unitPrice = null;
+                                            // حساب السعر الإجمالي للتشغيلة
+                                            // السعر اليدوي (manager_unit_price) هو السعر الإجمالي للتشغيلة مباشرة
+                                            // إذا لم يكن موجود، احسب: الكمية × سعر القالب
+                                            $totalPrice = null;
                                             $priceSource = '';
+                                            $templateUnitPrice = null;
                                             
-                                            // التحقق من السعر اليدوي أولاً
+                                            $quantity = (float)($finishedRow['quantity_produced'] ?? 0);
+                                            
+                                            // التحقق من السعر اليدوي (السعر الإجمالي للتشغيلة)
                                             if (isset($finishedRow['manager_unit_price']) && $finishedRow['manager_unit_price'] !== null) {
                                                 $rawPrice = (string)$finishedRow['manager_unit_price'];
-                                                $unitPrice = cleanFinancialValue($rawPrice);
-                                                if ($unitPrice > 0 && $unitPrice <= 1000000) {
+                                                $totalPrice = cleanFinancialValue($rawPrice);
+                                                if ($totalPrice > 0 && $totalPrice <= 10000000) {
                                                     $priceSource = 'manual';
                                                 } else {
-                                                    $unitPrice = null;
+                                                    $totalPrice = null;
                                                 }
                                             }
                                             
-                                            // إذا لم يكن هناك سعر يدوي، استخدم سعر القالب
-                                            if ($unitPrice === null && isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
+                                            // إذا لم يكن هناك سعر يدوي، احسب من سعر القالب
+                                            if ($totalPrice === null && isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
                                                 $rawPrice = (string)$finishedRow['template_unit_price'];
                                                 $rawPrice = str_replace('262145', '', $rawPrice);
                                                 $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
                                                 $rawPrice = preg_replace('/\s*262145/', '', $rawPrice);
-                                                $unitPrice = cleanFinancialValue($rawPrice);
-                                                if (abs($unitPrice - 262145) < 0.01 || $unitPrice > 10000 || $unitPrice < 0) {
-                                                    $unitPrice = null;
+                                                $templateUnitPrice = cleanFinancialValue($rawPrice);
+                                                if (abs($templateUnitPrice - 262145) < 0.01 || $templateUnitPrice > 10000 || $templateUnitPrice < 0) {
+                                                    $templateUnitPrice = null;
                                                 } else {
                                                     $priceSource = 'template';
+                                                    if ($quantity > 0) {
+                                                        $totalPrice = $templateUnitPrice * $quantity;
+                                                    }
                                                 }
                                             }
                                             
-                                            $quantity = (float)($finishedRow['quantity_produced'] ?? 0);
-                                            if ($unitPrice !== null && $quantity > 0) {
-                                                $totalPrice = $unitPrice * $quantity;
+                                            if ($totalPrice !== null && $totalPrice > 0) {
                                                 echo '<span class="fw-bold text-success">' . htmlspecialchars(formatCurrency($totalPrice)) . '</span>';
-                                                echo '<br><small class="text-muted">(' . htmlspecialchars(formatCurrency($unitPrice)) . ' × ' . number_format($quantity, 2) . ')</small>';
-                                                if ($priceSource === 'manual') {
-                                                    echo '<br><small class="text-info"><i class="bi bi-pencil"></i> سعر يدوي</small>';
+                                                if ($priceSource === 'template' && $templateUnitPrice !== null && $quantity > 0) {
+                                                    echo '<br><small class="text-muted">(' . htmlspecialchars(formatCurrency($templateUnitPrice)) . ' × ' . number_format($quantity, 2) . ')</small>';
+                                                } elseif ($priceSource === 'manual') {
+                                                    echo '<br><small class="text-info"><i class="bi bi-pencil"></i> سعر يدوي للتشغيلة</small>';
                                                 }
                                             } else {
                                                 echo '<span class="text-muted">—</span>';
-                                                echo '<br><small class="text-muted">لم يتم تحديد سعر</small>';
+                                                echo '<br><small class="text-muted">لم يتم تحديد سعر في القالب</small>';
                                             }
                                         ?>
                                     </td>
@@ -1298,6 +1306,7 @@ if ($isManager) {
                                                 data-product-id="<?php echo intval($finishedRow['id'] ?? 0); ?>"
                                                 data-product-name="<?php echo htmlspecialchars($finishedRow['product_name'] ?? '', ENT_QUOTES); ?>"
                                                 data-batch-number="<?php echo htmlspecialchars($batchNumber ?: '', ENT_QUOTES); ?>"
+                                                data-quantity="<?php echo htmlspecialchars($finishedRow['quantity_produced'] ?? 0); ?>"
                                                 data-current-price="<?php echo htmlspecialchars($finishedRow['manager_unit_price'] ?? ''); ?>"
                                                 data-template-price="<?php echo htmlspecialchars($finishedRow['template_unit_price'] ?? ''); ?>">
                                             <i class="bi bi-pencil"></i>
@@ -1571,22 +1580,30 @@ if ($isManager) {
                     <div class="form-control-plaintext" id="manualPriceBatchNumber">—</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">السعر اليدوي (للحذف اتركه فارغاً)</label>
+                    <label class="form-label fw-bold">الكمية في التشغيلة</label>
+                    <div class="form-control-plaintext" id="manualPriceQuantity">—</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">سعر القالب (للحدة الواحدة)</label>
+                    <div class="form-control-plaintext small" id="manualPriceTemplatePrice">—</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">السعر المحسوب تلقائياً (الكمية × سعر القالب)</label>
+                    <div class="form-control-plaintext small text-primary fw-semibold" id="manualPriceCalculated">—</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">السعر اليدوي الإجمالي للتشغيلة <span class="text-danger">*</span></label>
                     <input type="number" 
                            name="manual_price" 
                            id="manualPriceInput" 
                            class="form-control" 
                            min="0" 
-                           max="1000000" 
+                           max="10000000" 
                            step="0.01" 
-                           placeholder="أدخل السعر أو اتركه فارغاً للحذف">
+                           placeholder="أدخل السعر الإجمالي للتشغيلة">
                     <small class="form-text text-muted">
-                        سيتم استخدام هذا السعر بدلاً من سعر القالب. اتركه فارغاً لإزالة السعر اليدوي والعودة لسعر القالب.
+                        هذا السعر هو السعر الإجمالي للتشغيلة (وليس للوحدة الواحدة). سيتم استخدامه بدلاً من الحساب التلقائي (الكمية × سعر القالب). اتركه فارغاً لإزالة السعر اليدوي والعودة للحساب التلقائي.
                     </small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label text-muted small">سعر القالب الحالي</label>
-                    <div class="form-control-plaintext small" id="manualPriceTemplatePrice">—</div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label text-muted small">السعر اليدوي الحالي</label>
@@ -2499,13 +2516,16 @@ document.addEventListener('DOMContentLoaded', function () {
             const productIdInput = form.querySelector('#manualPriceProductId');
             const productNameField = modal.querySelector('#manualPriceProductName');
             const batchNumberField = modal.querySelector('#manualPriceBatchNumber');
+            const quantityField = modal.querySelector('#manualPriceQuantity');
             const priceInput = form.querySelector('#manualPriceInput');
             const templatePriceField = modal.querySelector('#manualPriceTemplatePrice');
+            const calculatedPriceField = modal.querySelector('#manualPriceCalculated');
             const currentPriceField = modal.querySelector('#manualPriceCurrentPrice');
 
             const productId = manualPriceButton.dataset.productId || '';
             const productName = manualPriceButton.dataset.productName || '—';
             const batchNumber = manualPriceButton.dataset.batchNumber || '—';
+            const quantity = parseFloat(manualPriceButton.dataset.quantity || '0');
             const currentPrice = manualPriceButton.dataset.currentPrice || '';
             const templatePrice = manualPriceButton.dataset.templatePrice || '';
 
@@ -2518,9 +2538,16 @@ document.addEventListener('DOMContentLoaded', function () {
             if (batchNumberField) {
                 batchNumberField.textContent = batchNumber !== '—' ? batchNumber : '—';
             }
+            if (quantityField) {
+                quantityField.textContent = !isNaN(quantity) && quantity > 0 
+                    ? new Intl.NumberFormat('ar-EG', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(quantity)
+                    : '—';
+            }
             if (priceInput) {
                 priceInput.value = currentPrice || '';
             }
+            
+            // عرض سعر القالب (للحدة الواحدة)
             if (templatePriceField) {
                 if (templatePrice && templatePrice !== '' && templatePrice !== 'null') {
                     const templatePriceNum = parseFloat(templatePrice);
@@ -2536,6 +2563,22 @@ document.addEventListener('DOMContentLoaded', function () {
                     templatePriceField.textContent = 'غير محدد';
                 }
             }
+            
+            // حساب وعرض السعر المحسوب تلقائياً (الكمية × سعر القالب)
+            if (calculatedPriceField) {
+                const templatePriceNum = parseFloat(templatePrice);
+                if (!isNaN(templatePriceNum) && templatePriceNum > 0 && !isNaN(quantity) && quantity > 0) {
+                    const calculatedTotal = templatePriceNum * quantity;
+                    calculatedPriceField.textContent = new Intl.NumberFormat('ar-EG', {
+                        style: 'currency',
+                        currency: 'EGP'
+                    }).format(calculatedTotal);
+                } else {
+                    calculatedPriceField.textContent = 'غير محدد (يحتاج سعر قالب وكمية)';
+                }
+            }
+            
+            // عرض السعر اليدوي الحالي
             if (currentPriceField) {
                 if (currentPrice && currentPrice !== '' && currentPrice !== 'null') {
                     const currentPriceNum = parseFloat(currentPrice);
@@ -2553,5 +2596,30 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         }
     });
+
+    // إصلاح مشكلة فتح وإغلاق modal إضافة المنتج الخارجي
+    const addExternalProductBtn = document.querySelector('[data-bs-target="#addExternalProductModal"]');
+    const addExternalProductModal = document.getElementById('addExternalProductModal');
+    
+    if (addExternalProductBtn && addExternalProductModal) {
+        // إزالة data-bs-toggle من الزر لتجنب التعارض
+        addExternalProductBtn.removeAttribute('data-bs-toggle');
+        
+        // إضافة event listener جديد لفتح الـ modal بشكل صحيح
+        addExternalProductBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            
+            // التأكد من أن الـ modal موجود
+            if (!addExternalProductModal) {
+                return;
+            }
+            
+            // فتح الـ modal باستخدام Bootstrap API
+            const modalInstance = bootstrap.Modal.getOrCreateInstance(addExternalProductModal);
+            modalInstance.show();
+        });
+    }
 </script>
 
