@@ -90,6 +90,50 @@ if ($currentSection !== null && $currentSection !== '') {
 }
 $managerRedirectRole = 'manager';
 
+/**
+ * دالة البحث عن كمية تشغيلة فعلية من جدول batch_numbers
+ * @param string $batchNumber رقم التشغيلة
+ * @return float|null الكمية الفعلية أو null إذا لم يتم العثور على التشغيلة
+ */
+if (!function_exists('getBatchActualQuantity')) {
+    function getBatchActualQuantity($batchNumber) {
+        if (empty($batchNumber) || !is_string($batchNumber)) {
+            return null;
+        }
+        
+        try {
+            $db = db();
+            
+            // التحقق من وجود جدول batch_numbers
+            $tableExists = $db->queryOne("SHOW TABLES LIKE 'batch_numbers'");
+            if (empty($tableExists)) {
+                error_log('getBatchActualQuantity: batch_numbers table does not exist');
+                return null;
+            }
+            
+            // البحث عن الكمية الفعلية للتشغيلة
+            $batch = $db->queryOne(
+                "SELECT `quantity` 
+                 FROM `batch_numbers` 
+                 WHERE `batch_number` = ? 
+                 ORDER BY `batch_numbers`.`quantity` ASC 
+                 LIMIT 1",
+                [trim($batchNumber)]
+            );
+            
+            if ($batch && isset($batch['quantity'])) {
+                $quantity = floatval($batch['quantity']);
+                return $quantity > 0 ? $quantity : null;
+            }
+            
+            return null;
+        } catch (Exception $e) {
+            error_log('getBatchActualQuantity error: ' . $e->getMessage());
+            return null;
+        }
+    }
+}
+
 // معالجة تحديث السعر اليدوي للمنتجات النهائية
 
 // التحقق من وجود عمود date أو production_date
@@ -1794,15 +1838,18 @@ if ($isManager) {
 <?php endif; ?>
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const transferForm = document.getElementById('mainWarehouseTransferForm');
-    const itemsContainer = document.getElementById('mainWarehouseTransferItems');
-    const addItemButton = document.getElementById('addTransferItemBtn');
-    const destinationSelect = document.getElementById('transferToWarehouse');
+// منع تهيئة متعددة لـ DOMContentLoaded
+if (!window.transferFormInitialized) {
+    window.transferFormInitialized = true;
+    document.addEventListener('DOMContentLoaded', function () {
+        const transferForm = document.getElementById('mainWarehouseTransferForm');
+        const itemsContainer = document.getElementById('mainWarehouseTransferItems');
+        const addItemButton = document.getElementById('addTransferItemBtn');
+        const destinationSelect = document.getElementById('transferToWarehouse');
 
-    if (!transferForm || !itemsContainer) {
-        return;
-    }
+        if (!transferForm || !itemsContainer) {
+            return;
+        }
 
     let transferItemIndex = 1;
 
@@ -1974,7 +2021,8 @@ document.addEventListener('DOMContentLoaded', function () {
             alert('يرجى اختيار المخزن الوجهة قبل إرسال الطلب.');
         }
     });
-});
+    });
+}
 </script>
 
 <div class="modal fade" id="batchDetailsModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
@@ -2006,6 +2054,12 @@ document.addEventListener('DOMContentLoaded', function () {
 </div>
 
 <script>
+    // منع التهيئة المتعددة
+    if (window.finalProductsInitialized) {
+        console.warn('Final products script already initialized, skipping duplicate initialization');
+    } else {
+        window.finalProductsInitialized = true;
+        
     const batchDetailsEndpoint = <?php echo json_encode(getRelativeUrl('api/production/get_batch_details.php')); ?>;
     const supplierRoleLabels = {
         raw_material: 'مواد خام',
@@ -2017,6 +2071,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const batchDetailsRetryDelay = 2000;
     const batchDetailsMaxRetries = 3;
     let batchDetailsRetryTimeoutId = null;
+    let clickEventAttached = false;
 
     function getBatchDetailsModalBodyTemplate() {
         return `
@@ -2253,6 +2308,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function showBatchDetailsModal(batchNumber, productName) {
+        // منع الطلبات المتعددة المتزامنة
         if (batchDetailsIsLoading) {
             if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
                 const existingModal = document.getElementById('batchDetailsModal');
@@ -2263,6 +2319,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     }).show();
                 }
             }
+            return;
+        }
+        
+        // التحقق من صحة البيانات قبل المتابعة
+        if (!batchNumber || typeof batchNumber !== 'string' || batchNumber.trim() === '') {
+            console.error('Invalid batch number provided to showBatchDetailsModal');
             return;
         }
 
@@ -2323,7 +2385,22 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function fetchBatchDetailsData(batchNumber, attempt, elements) {
+        // منع الطلبات المتعددة المتزامنة لنفس رقم التشغيلة
+        const requestKey = `batch_${batchNumber}_${attempt}`;
+        if (window.activeBatchRequests && window.activeBatchRequests.has(requestKey)) {
+            console.warn('Duplicate batch details request prevented:', requestKey);
+            return;
+        }
+        
+        if (!window.activeBatchRequests) {
+            window.activeBatchRequests = new Set();
+        }
+        window.activeBatchRequests.add(requestKey);
+        
         const { loader, errorAlert, contentWrapper } = elements;
+
+        // حفظ requestKey في متغير يمكن الوصول إليه من callbacks
+        const currentRequestKey = requestKey;
 
         fetch(batchDetailsEndpoint, {
             method: 'POST',
@@ -2385,8 +2462,17 @@ document.addEventListener('DOMContentLoaded', function () {
             renderBatchDetails(payload.batch);
             batchDetailsIsLoading = false;
             batchDetailsRetryTimeoutId = null;
+            
+            // إزالة الطلب من قائمة الطلبات النشطة
+            if (window.activeBatchRequests) {
+                window.activeBatchRequests.delete(currentRequestKey);
+            }
         })
         .catch((error) => {
+            // إزالة الطلب من قائمة الطلبات النشطة حتى في حالة الخطأ
+            if (window.activeBatchRequests) {
+                window.activeBatchRequests.delete(currentRequestKey);
+            }
             const status = typeof error === 'object' && error !== null ? error.status : undefined;
             const isAuthError = status === 401 || status === 403 || status === 419;
             let displayMessage = (error && error.message) ? error.message : 'تعذر تحميل تفاصيل التشغيلة.';
@@ -2422,19 +2508,22 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    document.addEventListener('click', function (event) {
-        const detailsButton = event.target.closest('.js-batch-details');
-        if (detailsButton) {
-            const batchNumber = detailsButton.dataset.batch;
-            if (batchNumber) {
-                event.preventDefault();
-                event.stopPropagation();
-                event.stopImmediatePropagation();
-                const productName = detailsButton.dataset.product || '';
-                showBatchDetailsModal(batchNumber, productName);
+    // منع إرفاق مستمع الأحداث بشكل مكرر
+    if (!clickEventAttached) {
+        clickEventAttached = true;
+        document.addEventListener('click', function (event) {
+            const detailsButton = event.target.closest('.js-batch-details');
+            if (detailsButton) {
+                const batchNumber = detailsButton.dataset.batch;
+                if (batchNumber) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                    const productName = detailsButton.dataset.product || '';
+                    showBatchDetailsModal(batchNumber, productName);
+                }
+                return;
             }
-            return;
-        }
 
         const copyButton = event.target.closest('.js-copy-batch');
         if (copyButton) {
@@ -2484,11 +2573,18 @@ document.addEventListener('DOMContentLoaded', function () {
         if (adjustButton) {
             event.preventDefault();
             event.stopPropagation();
+            event.stopImmediatePropagation();
             
             const modal = document.getElementById('externalStockModal');
             if (!modal) {
                 return;
             }
+            
+            // منع فتح النموذج إذا كان مفتوحاً بالفعل
+            if (modal.classList.contains('show')) {
+                return;
+            }
+            
             const form = modal.querySelector('form');
             const productIdInput = form?.querySelector('input[name="product_id"]');
             const operationInput = form?.querySelector('input[name="operation"]');
@@ -2542,11 +2638,18 @@ document.addEventListener('DOMContentLoaded', function () {
         if (editButton) {
             event.preventDefault();
             event.stopPropagation();
+            event.stopImmediatePropagation();
             
             const modal = document.getElementById('editExternalProductModal');
             if (!modal) {
                 return;
             }
+            
+            // منع فتح النموذج إذا كان مفتوحاً بالفعل
+            if (modal.classList.contains('show')) {
+                return;
+            }
+            
             const form = modal.querySelector('form');
             if (!form) {
                 return;
@@ -2695,41 +2798,101 @@ document.addEventListener('DOMContentLoaded', function () {
                 modalInstance.show();
             }
         }
-    });
-
-    // إصلاح مشكلة وميض النماذج - إزالة event listeners المتضاربة
-    // جميع النماذج تستخدم data-bs-backdrop="static" لمنع الإغلاق عند النقر على backdrop
-    
-    // إصلاح مشكلة فتح وإغلاق modal تفاصيل التشغيلة فقط
-    const batchDetailsModal = document.getElementById('batchDetailsModal');
-    if (batchDetailsModal) {
-        // منع إغلاق الـ modal إلا عند النقر على زر الإغلاق
-        batchDetailsModal.addEventListener('hide.bs.modal', function(e) {
-            const relatedTarget = e.relatedTarget || document.activeElement;
-            const isCloseButton = relatedTarget && (
-                relatedTarget.matches('[data-bs-dismiss="modal"]') ||
-                relatedTarget.closest('[data-bs-dismiss="modal"]') !== null ||
-                relatedTarget.closest('.btn-close') !== null
-            );
-            
-            if (!isCloseButton) {
-                e.preventDefault();
-                e.stopPropagation();
-                return false;
-            }
         });
     }
+
+    // إصلاح مشكلة وميض النماذج - حماية شاملة لجميع النماذج
+    // منع إغلاق النماذج إلا عند النقر على زر الإغلاق فقط
+    
+    const protectedModals = [
+        'addExternalProductModal',
+        'externalStockModal',
+        'editExternalProductModal',
+        'setManualPriceModal',
+        'requestTransferModal',
+        'batchDetailsModal'
+    ];
+    
+    protectedModals.forEach(function(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            // منع إغلاق النموذج إلا عند النقر على زر الإغلاق
+            modal.addEventListener('hide.bs.modal', function(e) {
+                const relatedTarget = e.relatedTarget || document.activeElement;
+                const isCloseButton = relatedTarget && (
+                    relatedTarget.matches('[data-bs-dismiss="modal"]') ||
+                    relatedTarget.closest('[data-bs-dismiss="modal"]') !== null ||
+                    relatedTarget.closest('.btn-close') !== null
+                );
+                
+                if (!isCloseButton) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    return false;
+                }
+            }, true);
+            
+            // منع أي محاولة لإغلاق النموذج من خلال backdrop
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal && !e.target.closest('.modal-dialog')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    return false;
+                }
+            }, true);
+            
+            // التأكد من أن النموذج يبقى مفتوحاً بعد فتحه
+            modal.addEventListener('shown.bs.modal', function() {
+                // منع أي تفاعل مع backdrop
+                const backdrop = document.querySelector('.modal-backdrop');
+                if (backdrop) {
+                    backdrop.style.pointerEvents = 'none';
+                    backdrop.style.cursor = 'default';
+                    backdrop.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                    }, true);
+                    backdrop.addEventListener('mousedown', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                    }, true);
+                    backdrop.addEventListener('mouseup', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+                        return false;
+                    }, true);
+                }
+                
+                // التأكد من أن النموذج نفسه لا يغلق عند النقر عليه
+                modal.style.pointerEvents = 'auto';
+                const modalDialog = modal.querySelector('.modal-dialog');
+                if (modalDialog) {
+                    modalDialog.style.pointerEvents = 'auto';
+                }
+            });
+        }
+    });
     
     // تنظيف أي عناصر modal-backdrop عالقة عند تحميل الصفحة
-    document.addEventListener('DOMContentLoaded', function() {
-        const stuckBackdrops = document.querySelectorAll('.modal-backdrop');
-        stuckBackdrops.forEach(function(backdrop) {
-            backdrop.remove();
+    if (!window.modalBackdropCleanupInitialized) {
+        window.modalBackdropCleanupInitialized = true;
+        document.addEventListener('DOMContentLoaded', function() {
+            const stuckBackdrops = document.querySelectorAll('.modal-backdrop');
+            stuckBackdrops.forEach(function(backdrop) {
+                backdrop.remove();
+            });
+            document.body.classList.remove('modal-open');
+            document.body.style.overflow = '';
+            document.body.style.paddingRight = '';
         });
-        document.body.classList.remove('modal-open');
-        document.body.style.overflow = '';
-        document.body.style.paddingRight = '';
-    });
+    }
     
     // تنظيف backdrop عند إغلاق أي modal
     document.addEventListener('hidden.bs.modal', function(e) {
@@ -2744,5 +2907,6 @@ document.addEventListener('DOMContentLoaded', function () {
             document.body.style.paddingRight = '';
         }
     });
+    }
 </script>
 
