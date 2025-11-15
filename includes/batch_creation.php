@@ -884,12 +884,22 @@ function batchCreationCreate(int $templateId, int $units, array $rawUsage = [], 
         $materialsForStockDeduction = [];
 
         if ($templateMaterialsTable === 'product_template_raw_materials' || $templateMaterialsTable === 'product_template_materials') {
-            // استخدام نفس SQL لكل من product_template_raw_materials و product_template_materials
-            $materialsStmt = $pdo->prepare("
-                SELECT id, material_type, material_name, material_id, quantity_per_unit, unit, notes
-                FROM {$templateMaterialsTable}
-                WHERE template_id = ?
-            ");
+            // بناء SQL بناءً على الجدول المستخدم
+            // product_template_raw_materials لا يحتوي على material_type, material_id, notes
+            if ($templateMaterialsTable === 'product_template_raw_materials') {
+                $materialsStmt = $pdo->prepare("
+                    SELECT id, NULL as material_type, material_name, NULL as material_id, quantity_per_unit, unit, NULL as notes
+                    FROM {$templateMaterialsTable}
+                    WHERE template_id = ?
+                ");
+            } else {
+                // product_template_materials يحتوي على جميع الأعمدة
+                $materialsStmt = $pdo->prepare("
+                    SELECT id, material_type, material_name, material_id, quantity_per_unit, unit, notes
+                    FROM {$templateMaterialsTable}
+                    WHERE template_id = ?
+                ");
+            }
             $materialsStmt->execute([$templateId]);
             $productTemplateMaterials = $materialsStmt->fetchAll(PDO::FETCH_ASSOC);
 

@@ -2032,7 +2032,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('القالب غير موجود');
                 }
 
-                $materialsCheck = checkMaterialsAvailability($db, $templateId, $quantity, $materialSuppliers);
+                // الحصول على المواد الخام للتحقق من العسل واستخراج مورد العسل
+                $rawMaterialsForCheck = $db->query(
+                    "SELECT id, material_name, quantity_per_unit, unit
+                     FROM product_template_raw_materials
+                     WHERE template_id = ?",
+                    [$templateId]
+                );
+                
+                // استخراج مورد العسل من $materialSuppliers إذا كانت المادة عسل
+                $honeySupplierIdForCheck = null;
+                if (!empty($rawMaterialsForCheck) && !empty($template['details_json'])) {
+                    try {
+                        $decodedTemplateDetails = json_decode((string) $template['details_json'], true);
+                        if (json_last_error() === JSON_ERROR_NONE && is_array($decodedTemplateDetails)) {
+                            $rawDetailsList = $decodedTemplateDetails['raw_materials'] ?? [];
+                            if (is_array($rawDetailsList)) {
+                                foreach ($rawMaterialsForCheck as $rawMaterial) {
+                                    $rawId = (int)($rawMaterial['id'] ?? 0);
+                                    $rawKey = 'raw_' . $rawId;
+                                    $materialName = trim((string)($rawMaterial['material_name'] ?? ''));
+                                    
+                                    // البحث في تفاصيل القالب
+                                    foreach ($rawDetailsList as $rawDetail) {
+                                        if (!is_array($rawDetail)) {
+                                            continue;
+                                        }
+                                        $detailMaterialId = isset($rawDetail['template_item_id']) ? (int)$rawDetail['template_item_id'] : (isset($rawDetail['id']) ? (int)$rawDetail['id'] : 0);
+                                        $detailMaterialName = trim((string)($rawDetail['name'] ?? $rawDetail['material_name'] ?? ''));
+                                        
+                                        // التحقق إذا كانت المادة مطابقة وكانت عسل
+                                        if (($detailMaterialId === $rawId || mb_strtolower($detailMaterialName, 'UTF-8') === mb_strtolower($materialName, 'UTF-8')) &&
+                                            (mb_stripos($materialName, 'عسل') !== false || stripos($materialName, 'honey') !== false ||
+                                             in_array(mb_strtolower($rawDetail['type'] ?? '', 'UTF-8'), ['honey_raw', 'honey_filtered', 'honey'], true))) {
+                                            // إذا كانت المادة عسل، استخدم المورد المحدد في النموذج
+                                            if (isset($materialSuppliers[$rawKey]) && (int)$materialSuppliers[$rawKey] > 0) {
+                                                $honeySupplierIdForCheck = (int)$materialSuppliers[$rawKey];
+                                                break 2; // خروج من كلا الحلقات
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (Throwable $e) {
+                        error_log('Error extracting honey supplier for check: ' . $e->getMessage());
+                    }
+                }
+
+                $materialsCheck = checkMaterialsAvailability($db, $templateId, $quantity, $materialSuppliers, $honeySupplierIdForCheck);
                 if (!$materialsCheck['available']) {
                     throw new Exception('المكونات غير متوفرة: ' . $materialsCheck['message']);
                 }
