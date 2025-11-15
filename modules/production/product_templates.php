@@ -1277,7 +1277,7 @@ $lang = isset($translations) ? $translations : [];
                     if ($encodedDetails !== false && $encodedDetails !== '' && $encodedDetails !== 'null') {
                         // استخدام base64 مع UTF-8 encoding صحيح للتشغيل في JavaScript
                         // في PHP: base64_encode يعمل بشكل صحيح مع UTF-8
-                        // في JavaScript: نحتاج decodeURIComponent(escape(atob()))
+                        // في JavaScript: نحتاج استخدام TextDecoder لفك تشفير UTF-8 بشكل صحيح بعد atob()
                         $templateDetailsJsonBase64 = base64_encode($encodedDetails);
                         $templateDetailsJson = $encodedDetails; // للاستخدام المباشر في JavaScript
                     } else {
@@ -2418,7 +2418,16 @@ function showTemplateDetails(triggerButton) {
     // إذا كانت البيانات في base64، قم بفك التشفير أولاً
     if (isBase64) {
         try {
-            jsonString = atob(payloadRaw);
+            // فك تشفير base64 مع دعم UTF-8 بشكل صحيح
+            const binaryString = atob(payloadRaw);
+            // تحويل binary string إلى UTF-8 string
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            // استخدام TextDecoder لفك تشفير UTF-8 بشكل صحيح
+            const decoder = new TextDecoder('utf-8');
+            jsonString = decoder.decode(bytes);
         } catch (base64Error) {
             console.error('Error decoding base64:', base64Error);
             alert('تعذر قراءة بيانات القالب.');

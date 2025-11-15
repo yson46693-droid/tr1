@@ -90,7 +90,7 @@ if ($currentSection !== null && $currentSection !== '') {
 }
 $managerRedirectRole = 'manager';
 
-// تم إزالة معالجة تحديث السعر اليدوي - الاعتماد فقط على سعر القالب
+// معالجة تحديث السعر اليدوي للمنتجات النهائية
 
 // التحقق من وجود عمود date أو production_date
 $dateColumnCheck = $db->queryOne("SHOW COLUMNS FROM production LIKE 'date'");
@@ -779,6 +779,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
+    } elseif ($isManager && $postAction === 'update_manual_price') {
+        $finishedProductId = intval($_POST['finished_product_id'] ?? 0);
+        $manualPrice = isset($_POST['manual_price']) ? trim((string)$_POST['manual_price']) : '';
+        
+        if ($finishedProductId <= 0) {
+            $_SESSION[$sessionErrorKey] = 'يرجى اختيار منتج صالح.';
+            productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
+        }
+        
+        $priceValue = null;
+        if ($manualPrice !== '' && $manualPrice !== null) {
+            $priceValue = cleanFinancialValue($manualPrice);
+            if ($priceValue < 0 || $priceValue > 1000000) {
+                $_SESSION[$sessionErrorKey] = 'السعر المدخل غير صالح. يجب أن يكون بين 0 و 1,000,000.';
+                productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
+            }
+        }
+        
+        try {
+            $existing = $db->queryOne(
+                "SELECT id, product_id, batch_number, quantity_produced, manager_unit_price, template_unit_price
+                 FROM finished_products WHERE id = ? LIMIT 1",
+                [$finishedProductId]
+            );
+            
+            if (!$existing) {
+                $_SESSION[$sessionErrorKey] = 'المنتج المطلوب غير موجود.';
+                productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
+            }
+            
+            $db->execute(
+                "UPDATE finished_products SET manager_unit_price = ? WHERE id = ?",
+                [$priceValue, $finishedProductId]
+            );
+            
+            if (!empty($currentUser['id'])) {
+                logAudit(
+                    $currentUser['id'],
+                    'update_manual_price',
+                    'finished_product',
+                    $finishedProductId,
+                    [
+                        'old_manual_price' => $existing['manager_unit_price'] ?? null,
+                        'template_price' => $existing['template_unit_price'] ?? null,
+                    ],
+                    [
+                        'new_manual_price' => $priceValue,
+                        'batch_number' => $existing['batch_number'] ?? null,
+                        'quantity' => $existing['quantity_produced'] ?? null,
+                    ]
+                );
+            }
+            
+            $_SESSION[$sessionSuccessKey] = 'تم تحديث السعر اليدوي بنجاح.';
+        } catch (Exception $e) {
+            error_log('update_manual_price error: ' . $e->getMessage());
+            $_SESSION[$sessionErrorKey] = 'تعذر تحديث السعر اليدوي.';
+        }
+        
+        productionSafeRedirect($managerInventoryUrl, $managerRedirectParams, $managerRedirectRole);
     }
 }
 
@@ -938,6 +998,7 @@ if (!empty($finishedProductsTableExists)) {
                 COALESCE(pr.name, fp.product_name) AS product_name,
                 fp.production_date,
                 fp.quantity_produced,
+                fp.manager_unit_price,
                 COALESCE(pt.unit_price, NULL) AS template_unit_price,
                 GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
             FROM finished_products fp
@@ -1161,9 +1222,23 @@ if ($isManager) {
                                 <?php if ($isManager): ?>
                                     <td>
                                         <?php 
-                                            // حساب السعر الإجمالي بناءً على سعر القالب فقط
+                                            // حساب السعر الإجمالي - الأولوية للسعر اليدوي ثم سعر القالب
                                             $unitPrice = null;
-                                            if (isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
+                                            $priceSource = '';
+                                            
+                                            // التحقق من السعر اليدوي أولاً
+                                            if (isset($finishedRow['manager_unit_price']) && $finishedRow['manager_unit_price'] !== null) {
+                                                $rawPrice = (string)$finishedRow['manager_unit_price'];
+                                                $unitPrice = cleanFinancialValue($rawPrice);
+                                                if ($unitPrice > 0 && $unitPrice <= 1000000) {
+                                                    $priceSource = 'manual';
+                                                } else {
+                                                    $unitPrice = null;
+                                                }
+                                            }
+                                            
+                                            // إذا لم يكن هناك سعر يدوي، استخدم سعر القالب
+                                            if ($unitPrice === null && isset($finishedRow['template_unit_price']) && $finishedRow['template_unit_price'] !== null) {
                                                 $rawPrice = (string)$finishedRow['template_unit_price'];
                                                 $rawPrice = str_replace('262145', '', $rawPrice);
                                                 $rawPrice = preg_replace('/262145\s*/', '', $rawPrice);
@@ -1171,16 +1246,22 @@ if ($isManager) {
                                                 $unitPrice = cleanFinancialValue($rawPrice);
                                                 if (abs($unitPrice - 262145) < 0.01 || $unitPrice > 10000 || $unitPrice < 0) {
                                                     $unitPrice = null;
+                                                } else {
+                                                    $priceSource = 'template';
                                                 }
                                             }
+                                            
                                             $quantity = (float)($finishedRow['quantity_produced'] ?? 0);
                                             if ($unitPrice !== null && $quantity > 0) {
                                                 $totalPrice = $unitPrice * $quantity;
                                                 echo '<span class="fw-bold text-success">' . htmlspecialchars(formatCurrency($totalPrice)) . '</span>';
                                                 echo '<br><small class="text-muted">(' . htmlspecialchars(formatCurrency($unitPrice)) . ' × ' . number_format($quantity, 2) . ')</small>';
+                                                if ($priceSource === 'manual') {
+                                                    echo '<br><small class="text-info"><i class="bi bi-pencil"></i> سعر يدوي</small>';
+                                                }
                                             } else {
                                                 echo '<span class="text-muted">—</span>';
-                                                echo '<br><small class="text-muted">لم يتم تحديد سعر في القالب</small>';
+                                                echo '<br><small class="text-muted">لم يتم تحديد سعر</small>';
                                             }
                                         ?>
                                     </td>
@@ -1209,7 +1290,21 @@ if ($isManager) {
                                             <span class="d-none d-sm-inline">نسخ الرقم</span>
                                         </button>
                                         <?php endif; ?>
-                                        <?php if (!$viewUrl && !$batchNumber): ?>
+                                        <?php if ($isManager): ?>
+                                        <button type="button"
+                                                class="btn btn-outline-info js-set-manual-price"
+                                                data-bs-toggle="modal"
+                                                data-bs-target="#setManualPriceModal"
+                                                data-product-id="<?php echo intval($finishedRow['id'] ?? 0); ?>"
+                                                data-product-name="<?php echo htmlspecialchars($finishedRow['product_name'] ?? '', ENT_QUOTES); ?>"
+                                                data-batch-number="<?php echo htmlspecialchars($batchNumber ?: '', ENT_QUOTES); ?>"
+                                                data-current-price="<?php echo htmlspecialchars($finishedRow['manager_unit_price'] ?? ''); ?>"
+                                                data-template-price="<?php echo htmlspecialchars($finishedRow['template_unit_price'] ?? ''); ?>">
+                                            <i class="bi bi-pencil"></i>
+                                            <span class="d-none d-sm-inline">تحديد السعر</span>
+                                        </button>
+                                        <?php endif; ?>
+                                        <?php if (!$viewUrl && !$batchNumber && !$isManager): ?>
                                             <span class="text-muted small">—</span>
                                         <?php endif; ?>
                                     </div>
@@ -1452,6 +1547,55 @@ if ($isManager) {
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
                 <button type="submit" class="btn btn-primary">حفظ التعديلات</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="setManualPriceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <form class="modal-content" method="POST">
+            <input type="hidden" name="action" value="update_manual_price">
+            <input type="hidden" name="finished_product_id" id="manualPriceProductId" value="">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>تحديد السعر اليدوي</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">المنتج</label>
+                    <div class="form-control-plaintext" id="manualPriceProductName">—</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">رقم التشغيلة</label>
+                    <div class="form-control-plaintext" id="manualPriceBatchNumber">—</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">السعر اليدوي (للحذف اتركه فارغاً)</label>
+                    <input type="number" 
+                           name="manual_price" 
+                           id="manualPriceInput" 
+                           class="form-control" 
+                           min="0" 
+                           max="1000000" 
+                           step="0.01" 
+                           placeholder="أدخل السعر أو اتركه فارغاً للحذف">
+                    <small class="form-text text-muted">
+                        سيتم استخدام هذا السعر بدلاً من سعر القالب. اتركه فارغاً لإزالة السعر اليدوي والعودة لسعر القالب.
+                    </small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">سعر القالب الحالي</label>
+                    <div class="form-control-plaintext small" id="manualPriceTemplatePrice">—</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label text-muted small">السعر اليدوي الحالي</label>
+                    <div class="form-control-plaintext small" id="manualPriceCurrentPrice">—</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                <button type="submit" class="btn btn-info">حفظ السعر</button>
             </div>
         </form>
     </div>
@@ -2337,6 +2481,75 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             if (descriptionInput) {
                 descriptionInput.value = editButton.dataset.description || '';
+            }
+            return;
+        }
+
+        const manualPriceButton = event.target.closest('.js-set-manual-price');
+        if (manualPriceButton) {
+            const modal = document.getElementById('setManualPriceModal');
+            if (!modal) {
+                return;
+            }
+            const form = modal.querySelector('form');
+            if (!form) {
+                return;
+            }
+
+            const productIdInput = form.querySelector('#manualPriceProductId');
+            const productNameField = modal.querySelector('#manualPriceProductName');
+            const batchNumberField = modal.querySelector('#manualPriceBatchNumber');
+            const priceInput = form.querySelector('#manualPriceInput');
+            const templatePriceField = modal.querySelector('#manualPriceTemplatePrice');
+            const currentPriceField = modal.querySelector('#manualPriceCurrentPrice');
+
+            const productId = manualPriceButton.dataset.productId || '';
+            const productName = manualPriceButton.dataset.productName || '—';
+            const batchNumber = manualPriceButton.dataset.batchNumber || '—';
+            const currentPrice = manualPriceButton.dataset.currentPrice || '';
+            const templatePrice = manualPriceButton.dataset.templatePrice || '';
+
+            if (productIdInput) {
+                productIdInput.value = productId;
+            }
+            if (productNameField) {
+                productNameField.textContent = productName;
+            }
+            if (batchNumberField) {
+                batchNumberField.textContent = batchNumber !== '—' ? batchNumber : '—';
+            }
+            if (priceInput) {
+                priceInput.value = currentPrice || '';
+            }
+            if (templatePriceField) {
+                if (templatePrice && templatePrice !== '' && templatePrice !== 'null') {
+                    const templatePriceNum = parseFloat(templatePrice);
+                    if (!isNaN(templatePriceNum) && templatePriceNum > 0) {
+                        templatePriceField.textContent = new Intl.NumberFormat('ar-EG', {
+                            style: 'currency',
+                            currency: 'EGP'
+                        }).format(templatePriceNum);
+                    } else {
+                        templatePriceField.textContent = 'غير محدد';
+                    }
+                } else {
+                    templatePriceField.textContent = 'غير محدد';
+                }
+            }
+            if (currentPriceField) {
+                if (currentPrice && currentPrice !== '' && currentPrice !== 'null') {
+                    const currentPriceNum = parseFloat(currentPrice);
+                    if (!isNaN(currentPriceNum) && currentPriceNum > 0) {
+                        currentPriceField.textContent = new Intl.NumberFormat('ar-EG', {
+                            style: 'currency',
+                            currency: 'EGP'
+                        }).format(currentPriceNum);
+                    } else {
+                        currentPriceField.textContent = 'غير محدد';
+                    }
+                } else {
+                    currentPriceField.textContent = 'غير محدد';
+                }
             }
         }
     });
