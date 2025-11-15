@@ -196,6 +196,7 @@ try {
                   `id` int(11) NOT NULL AUTO_INCREMENT,
                   `template_id` int(11) NOT NULL,
                   `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة (مثل: مكسرات، لوز، إلخ)',
+                  `material_type` varchar(100) DEFAULT NULL COMMENT 'نوع المادة (مثل: honey_raw, honey_filtered)',
                   `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالجرام',
                   `unit` varchar(50) DEFAULT 'جرام',
                   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -208,6 +209,16 @@ try {
                 $db->execute("ALTER TABLE `product_template_raw_materials` ADD CONSTRAINT `product_template_raw_materials_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `product_templates` (`id`) ON DELETE CASCADE");
             } catch (Exception $fkError) {
                 error_log("Foreign key creation error (non-critical): " . $fkError->getMessage());
+            }
+        } else {
+            // إضافة عمود material_type إذا كان الجدول موجوداً ولكن العمود غير موجود
+            try {
+                $columnCheck = $db->queryOne("SHOW COLUMNS FROM `product_template_raw_materials` LIKE 'material_type'");
+                if (empty($columnCheck)) {
+                    $db->execute("ALTER TABLE `product_template_raw_materials` ADD COLUMN `material_type` varchar(100) DEFAULT NULL COMMENT 'نوع المادة (مثل: honey_raw, honey_filtered)' AFTER `material_name`");
+                }
+            } catch (Exception $colError) {
+                error_log("Column addition error (non-critical): " . $colError->getMessage());
             }
         }
     } else {
@@ -247,6 +258,7 @@ try {
                   `id` int(11) NOT NULL AUTO_INCREMENT,
                   `template_id` int(11) NOT NULL,
                   `material_name` varchar(255) NOT NULL COMMENT 'اسم المادة (مثل: مكسرات، لوز، إلخ)',
+                  `material_type` varchar(100) DEFAULT NULL COMMENT 'نوع المادة (مثل: honey_raw, honey_filtered)',
                   `quantity_per_unit` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالجرام',
                   `unit` varchar(50) DEFAULT 'جرام',
                   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -259,6 +271,16 @@ try {
                 $db->execute("ALTER TABLE `product_template_raw_materials` ADD CONSTRAINT `product_template_raw_materials_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `product_templates` (`id`) ON DELETE CASCADE");
             } catch (Exception $fkError) {
                 error_log("Foreign key creation error (non-critical): " . $fkError->getMessage());
+            }
+        } else {
+            // إضافة عمود material_type إذا كان الجدول موجوداً ولكن العمود غير موجود
+            try {
+                $columnCheck = $db->queryOne("SHOW COLUMNS FROM `product_template_raw_materials` LIKE 'material_type'");
+                if (empty($columnCheck)) {
+                    $db->execute("ALTER TABLE `product_template_raw_materials` ADD COLUMN `material_type` varchar(100) DEFAULT NULL COMMENT 'نوع المادة (مثل: honey_raw, honey_filtered)' AFTER `material_name`");
+                }
+            } catch (Exception $colError) {
+                error_log("Column addition error (non-critical): " . $colError->getMessage());
             }
         }
     }
@@ -353,14 +375,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fullMaterialName = $materialName . ' - ' . $materialType;
                 }
                 
+                // الحصول على حالة العسل (خام/مصفى) إذا كانت المادة عسل
+                $honeyState = '';
+                $isHoneyMaterial = (mb_stripos($materialName, 'عسل') !== false || stripos($materialName, 'honey') !== false);
+                if ($isHoneyMaterial) {
+                    $honeyState = trim($material['honey_state'] ?? '');
+                }
+                
                 if (!empty($materialName) && isset($material['quantity']) && $material['quantity'] > 0) {
-                    $rawMaterials[] = [
+                    $materialData = [
                         'name' => $fullMaterialName,
                         'material_name' => $materialName,
                         'material_type' => $materialType,
                         'quantity' => floatval($material['quantity']),
                         'unit' => trim($material['unit'] ?? 'كيلوجرام')
                     ];
+                    
+                    // إضافة حالة العسل إذا كانت محددة
+                    if ($honeyState !== '') {
+                        $materialData['honey_state'] = $honeyState;
+                        // تحديث material_type بناءً على حالة العسل
+                        if ($honeyState === 'raw') {
+                            $materialData['material_type'] = 'honey_raw';
+                        } elseif ($honeyState === 'filtered') {
+                            $materialData['material_type'] = 'honey_filtered';
+                        }
+                    }
+                    
+                    $rawMaterials[] = $materialData;
                 }
             }
         }
@@ -453,10 +495,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // إضافة المواد الخام الأخرى
                 foreach ($rawMaterials as $material) {
+                    $materialType = $material['material_type'] ?? null;
                     $db->execute(
-                        "INSERT INTO product_template_raw_materials (template_id, material_name, quantity_per_unit, unit) 
-                         VALUES (?, ?, ?, ?)",
-                        [$templateId, $material['name'], $material['quantity'], $material['unit']]
+                        "INSERT INTO product_template_raw_materials (template_id, material_name, material_type, quantity_per_unit, unit) 
+                         VALUES (?, ?, ?, ?, ?)",
+                        [$templateId, $material['name'], $materialType, $material['quantity'], $material['unit']]
                     );
                 }
                 
@@ -695,10 +738,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 // إضافة المواد الخام الجديدة
                 foreach ($rawMaterials as $material) {
+                    $materialType = $material['material_type'] ?? null;
                     $db->execute(
-                        "INSERT INTO product_template_raw_materials (template_id, material_name, quantity_per_unit, unit) 
-                         VALUES (?, ?, ?, ?)",
-                        [$templateId, $material['name'], $material['quantity'], $material['unit']]
+                        "INSERT INTO product_template_raw_materials (template_id, material_name, material_type, quantity_per_unit, unit) 
+                         VALUES (?, ?, ?, ?, ?)",
+                        [$templateId, $material['name'], $materialType, $material['quantity'], $material['unit']]
                     );
                 }
                 
@@ -804,7 +848,7 @@ foreach ($templates as &$template) {
 
     // المواد الخام
     $rawMaterialsRows = $db->query(
-        "SELECT material_name, quantity_per_unit, unit 
+        "SELECT material_name, material_type, quantity_per_unit, unit 
          FROM product_template_raw_materials 
          WHERE template_id = ?",
         [$templateId]
@@ -814,6 +858,7 @@ foreach ($templates as &$template) {
     foreach ($rawMaterialsRows as $raw) {
         $materialDetails[] = [
             'material_name' => $raw['material_name'],
+            'material_type' => $raw['material_type'] ?? '',
             'quantity_per_unit' => (float)($raw['quantity_per_unit'] ?? 0),
             'unit' => $raw['unit'] ?? 'وحدة'
         ];
@@ -2642,10 +2687,12 @@ function editTemplate(templateId, templateDataJson, isBase64 = false) {
                 
                 addEditRawMaterial({
                     name: fullName,
+                    material_name: materialName,
+                    material_type: materialType,
                     quantity: material.quantity_per_unit || material.quantity || '',
                     unit: material.unit || 'كيلوجرام',
                     honey_state: honeyState,
-                    material_type: material.material_type || ''
+                    material_type_saved: material.material_type || ''
                 });
             });
         } else {
@@ -2670,38 +2717,52 @@ function addEditRawMaterial(defaults = {}) {
     const defaultUnit = typeof defaults.unit === 'string' ? defaults.unit : 'كيلوجرام';
     let defaultHoneyState = defaults.honey_state || '';
     
-    // بناء خيارات القائمة المنسدلة
-    const materialOptions = commonMaterials.map(material => {
-        const selected = material === defaultName ? 'selected' : '';
-        return `<option value="${material}" ${selected}>${material}</option>`;
-    }).join('');
+    // استخدام material_name إذا كان موجوداً، وإلا استخدام الاسم الكامل
+    let defaultMaterialName = defaults.material_name || '';
+    let defaultMaterialType = defaults.material_type || '';
     
-    // تقسيم اسم المادة الافتراضية إذا كان يحتوي على " - "
-    let defaultMaterialName = defaultName;
-    let defaultMaterialType = '';
-    if (defaultName && defaultName.includes(' - ')) {
-        const parts = defaultName.split(' - ', 2);
-        if (parts.length === 2) {
-            defaultMaterialName = parts[0].trim(); // "عسل"
-            defaultMaterialType = parts[1].trim(); // "حبة البركة" مثلاً
-        }
-    } else if (defaultName && defaultName.startsWith('عسل ') && defaultName.length > 5) {
-        const parts = defaultName.split(' ', 2);
-        if (parts.length === 2) {
-            defaultMaterialName = parts[0]; // "عسل"
-            defaultMaterialType = parts[1]; // "حبة البركة" مثلاً
+    // إذا لم يتم تحديد material_name، استخرجها من الاسم الكامل
+    if (!defaultMaterialName && defaultName) {
+        if (defaultName.includes(' - ')) {
+            const parts = defaultName.split(' - ', 2);
+            if (parts.length === 2) {
+                defaultMaterialName = parts[0].trim(); // "عسل"
+                if (!defaultMaterialType) {
+                    defaultMaterialType = parts[1].trim(); // "حبة البركة" مثلاً
+                }
+            } else {
+                defaultMaterialName = defaultName;
+            }
+        } else if (defaultName.startsWith('عسل ') && defaultName.length > 5) {
+            const parts = defaultName.split(' ', 2);
+            if (parts.length === 2) {
+                defaultMaterialName = parts[0]; // "عسل"
+                if (!defaultMaterialType) {
+                    defaultMaterialType = parts[1]; // "حبة البركة" مثلاً
+                }
+            } else {
+                defaultMaterialName = defaultName;
+            }
+        } else {
+            defaultMaterialName = defaultName;
         }
     }
     
-    // استخراج حالة العسل من material_type إذا كان موجوداً
-    if (!defaultHoneyState && defaults.material_type) {
-        const matType = String(defaults.material_type).toLowerCase();
+    // استخراج حالة العسل من material_type_saved إذا كان موجوداً
+    if (!defaultHoneyState && defaults.material_type_saved) {
+        const matType = String(defaults.material_type_saved).toLowerCase();
         if (matType === 'honey_raw') {
             defaultHoneyState = 'raw';
         } else if (matType === 'honey_filtered') {
             defaultHoneyState = 'filtered';
         }
     }
+    
+    // بناء خيارات القائمة المنسدلة
+    const materialOptions = commonMaterials.map(material => {
+        const selected = material === defaultMaterialName ? 'selected' : '';
+        return `<option value="${material}" ${selected}>${material}</option>`;
+    }).join('');
     
     const materialHtml = `
         <div class="raw-material-item mb-2 border p-2 rounded bg-light">
@@ -2784,8 +2845,11 @@ function addEditRawMaterial(defaults = {}) {
             materialTypeSelect.classList.add('d-none');
             customTypeInput.classList.add('d-none');
             
-            // إخفاء حقل حالة العسل افتراضياً
-            if (honeyStateSelect) {
+            // التحقق من وجود قيمة حالة عسل محملة بالفعل
+            const hasHoneyStateValue = honeyStateSelect && honeyStateSelect.value && honeyStateSelect.value !== '';
+            
+            // إخفاء حقل حالة العسل افتراضياً (ما لم يكن لدينا قيمة محملة)
+            if (honeyStateSelect && !hasHoneyStateValue) {
                 honeyStateSelect.classList.add('d-none');
             }
             
@@ -2811,9 +2875,9 @@ function addEditRawMaterial(defaults = {}) {
                     materialTypeSelect.appendChild(option);
                 });
                 
-                // إذا كانت المادة عسل ونوع المادة محدد، أظهر حقل حالة العسل
+                // إذا كانت المادة عسل ونوع المادة محدد أو لدينا حالة عسل محملة، أظهر حقل حالة العسل
                 const finalMaterialType = selectedMaterialType || materialTypeSelect.value;
-                if (isHoneyMaterial && finalMaterialType && finalMaterialType !== '') {
+                if (isHoneyMaterial && (finalMaterialType && finalMaterialType !== '' || hasHoneyStateValue)) {
                     if (honeyStateSelect) {
                         honeyStateSelect.classList.remove('d-none');
                     }
@@ -2857,7 +2921,23 @@ function addEditRawMaterial(defaults = {}) {
             
             // تحديث قائمة الأنواع عند التحميل
             if (defaultMaterialName && commonMaterials.includes(defaultMaterialName)) {
-                updateMaterialTypes(defaultMaterialName);
+                updateMaterialTypes(defaultMaterialName, defaultMaterialType);
+                
+                // إذا كانت المادة عسل ولدينا حالة عسل محددة، أظهر الحقل
+                const isHoneyMaterial = defaultMaterialName.includes('عسل') || defaultMaterialName.toLowerCase().includes('honey');
+                if (isHoneyMaterial && defaultHoneyState) {
+                    if (honeyStateSelect) {
+                        honeyStateSelect.classList.remove('d-none');
+                    }
+                }
+            } else if (defaultMaterialName) {
+                // إذا كانت المادة عسل حتى لو لم تكن في القائمة، أظهر حقل حالة العسل
+                const isHoneyMaterial = defaultMaterialName.includes('عسل') || defaultMaterialName.toLowerCase().includes('honey');
+                if (isHoneyMaterial && defaultHoneyState) {
+                    if (honeyStateSelect) {
+                        honeyStateSelect.classList.remove('d-none');
+                    }
+                }
             }
         }
         
@@ -2871,7 +2951,15 @@ function addEditRawMaterial(defaults = {}) {
                 materialSelect.value = '__custom__';
                 materialSelect.dispatchEvent(new Event('change'));
                 if (customMaterialInput) {
-                    customMaterialInput.value = defaultName;
+                    customMaterialInput.value = defaultMaterialName || defaultName;
+                }
+                
+                // إذا كانت المادة عسل، أظهر حقل حالة العسل
+                const isHoneyMaterial = (defaultMaterialName || defaultName).includes('عسل') || (defaultMaterialName || defaultName).toLowerCase().includes('honey');
+                if (isHoneyMaterial && defaultHoneyState) {
+                    if (honeyStateSelect) {
+                        honeyStateSelect.classList.remove('d-none');
+                    }
                 }
             }
         }
