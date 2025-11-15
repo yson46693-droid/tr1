@@ -1461,39 +1461,81 @@ if ($isManager) {
                                                     $productNameForCheck = $finishedRow['product_name'] ?? '';
                                                     
                                                     $templateCheck = null;
+                                                    
+                                                    // البحث بالـ product_id أولاً (الأكثر دقة)
                                                     if ($productIdForCheck && $productIdForCheck > 0) {
                                                         $templateCheck = $db->queryOne(
-                                                            "SELECT id, unit_price FROM product_templates 
+                                                            "SELECT id, unit_price, product_id, product_name FROM product_templates 
                                                              WHERE status = 'active' 
                                                                AND product_id = ? 
                                                                AND unit_price IS NOT NULL 
                                                                AND unit_price > 0 
                                                                AND unit_price <= 10000 
+                                                             ORDER BY unit_price ASC, id DESC
                                                              LIMIT 1",
                                                             [$productIdForCheck]
                                                         );
                                                     }
                                                     
+                                                    // إذا لم يتم العثور عليه بالـ product_id، جرب البحث بالاسم
                                                     if (!$templateCheck && !empty($productNameForCheck)) {
+                                                        $trimmedName = trim($productNameForCheck);
                                                         $templateCheck = $db->queryOne(
-                                                            "SELECT id, unit_price FROM product_templates 
+                                                            "SELECT id, unit_price, product_id, product_name FROM product_templates 
                                                              WHERE status = 'active' 
                                                                AND product_name IS NOT NULL 
                                                                AND product_name != ''
                                                                AND (
-                                                                   LOWER(TRIM(product_name)) = LOWER(TRIM(?))
-                                                                   OR LOWER(TRIM(product_name)) LIKE CONCAT('%', LOWER(TRIM(?)), '%')
+                                                                   LOWER(TRIM(product_name)) = LOWER(?)
+                                                                   OR LOWER(TRIM(product_name)) LIKE CONCAT('%', LOWER(?), '%')
+                                                                   OR LOWER(?) LIKE CONCAT('%', LOWER(TRIM(product_name)), '%')
                                                                )
                                                                AND unit_price IS NOT NULL 
                                                                AND unit_price > 0 
                                                                AND unit_price <= 10000 
+                                                             ORDER BY 
+                                                               CASE 
+                                                                   WHEN LOWER(TRIM(product_name)) = LOWER(?) THEN 1
+                                                                   WHEN LOWER(TRIM(product_name)) LIKE CONCAT('%', LOWER(?), '%') THEN 2
+                                                                   ELSE 3
+                                                               END,
+                                                               unit_price ASC, id DESC
                                                              LIMIT 1",
-                                                            [trim($productNameForCheck), trim($productNameForCheck)]
+                                                            [$trimmedName, $trimmedName, $trimmedName, $trimmedName, $trimmedName]
+                                                        );
+                                                    }
+                                                    
+                                                    // إذا لم يتم العثور عليه، جرب البحث حتى لو كان product_id في القالب null أو 0
+                                                    if (!$templateCheck && !empty($productNameForCheck)) {
+                                                        $trimmedName = trim($productNameForCheck);
+                                                        $templateCheck = $db->queryOne(
+                                                            "SELECT id, unit_price, product_id, product_name FROM product_templates 
+                                                             WHERE status = 'active' 
+                                                               AND (product_id IS NULL OR product_id = 0)
+                                                               AND product_name IS NOT NULL 
+                                                               AND product_name != ''
+                                                               AND (
+                                                                   LOWER(TRIM(product_name)) = LOWER(?)
+                                                                   OR LOWER(TRIM(product_name)) LIKE CONCAT('%', LOWER(?), '%')
+                                                                   OR LOWER(?) LIKE CONCAT('%', LOWER(TRIM(product_name)), '%')
+                                                               )
+                                                               AND unit_price IS NOT NULL 
+                                                               AND unit_price > 0 
+                                                               AND unit_price <= 10000 
+                                                             ORDER BY 
+                                                               CASE 
+                                                                   WHEN LOWER(TRIM(product_name)) = LOWER(?) THEN 1
+                                                                   WHEN LOWER(TRIM(product_name)) LIKE CONCAT('%', LOWER(?), '%') THEN 2
+                                                                   ELSE 3
+                                                               END,
+                                                               unit_price ASC, id DESC
+                                                             LIMIT 1",
+                                                            [$trimmedName, $trimmedName, $trimmedName, $trimmedName, $trimmedName]
                                                         );
                                                     }
                                                     
                                                     if ($templateCheck) {
-                                                        echo '<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> يوجد قالب لكن لم يتم ربطه بشكل صحيح</small>';
+                                                        echo '<br><small class="text-warning"><i class="bi bi-exclamation-triangle"></i> يوجد قالب نشط لكن لم يتم ربطه بشكل صحيح في الاستعلام الرئيسي</small>';
                                                     } else {
                                                         echo '<br><small class="text-muted"><i class="bi bi-info-circle"></i> لا يوجد قالب نشط للمنتج</small>';
                                                     }
