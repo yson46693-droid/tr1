@@ -3042,84 +3042,6 @@ if (!window.transferFormInitialized) {
         });
     }
 
-    // إصلاح مشكلة وميض النماذج - حماية شاملة لجميع النماذج
-    // منع إغلاق النماذج إلا عند النقر على زر الإغلاق فقط
-    
-    const protectedModals = [
-        'addExternalProductModal',
-        'externalStockModal',
-        'editExternalProductModal',
-        'requestTransferModal',
-        'batchDetailsModal'
-    ];
-    
-    protectedModals.forEach(function(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            // منع إغلاق النموذج إلا عند النقر على زر الإغلاق
-            modal.addEventListener('hide.bs.modal', function(e) {
-                const relatedTarget = e.relatedTarget || document.activeElement;
-                const isCloseButton = relatedTarget && (
-                    relatedTarget.matches('[data-bs-dismiss="modal"]') ||
-                    relatedTarget.closest('[data-bs-dismiss="modal"]') !== null ||
-                    relatedTarget.closest('.btn-close') !== null
-                );
-                
-                if (!isCloseButton) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    return false;
-                }
-            }, true);
-            
-            // منع أي محاولة لإغلاق النموذج من خلال backdrop
-            modal.addEventListener('click', function(e) {
-                if (e.target === modal && !e.target.closest('.modal-dialog')) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    return false;
-                }
-            }, true);
-            
-            // التأكد من أن النموذج يبقى مفتوحاً بعد فتحه
-            modal.addEventListener('shown.bs.modal', function() {
-                // منع أي تفاعل مع backdrop
-                const backdrop = document.querySelector('.modal-backdrop');
-                if (backdrop) {
-                    backdrop.style.pointerEvents = 'none';
-                    backdrop.style.cursor = 'default';
-                    backdrop.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.stopImmediatePropagation();
-                        return false;
-                    }, true);
-                    backdrop.addEventListener('mousedown', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.stopImmediatePropagation();
-                        return false;
-                    }, true);
-                    backdrop.addEventListener('mouseup', function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        e.stopImmediatePropagation();
-                        return false;
-                    }, true);
-                }
-                
-                // التأكد من أن النموذج نفسه لا يغلق عند النقر عليه
-                modal.style.pointerEvents = 'auto';
-                const modalDialog = modal.querySelector('.modal-dialog');
-                if (modalDialog) {
-                    modalDialog.style.pointerEvents = 'auto';
-                }
-            });
-        }
-    });
-    
     // تنظيف أي عناصر modal-backdrop عالقة عند تحميل الصفحة
     if (!window.modalBackdropCleanupInitialized) {
         window.modalBackdropCleanupInitialized = true;
@@ -3151,8 +3073,7 @@ if (!window.transferFormInitialized) {
 </script>
 
 <style>
-    /* إصلاح مشكلة استقرار النماذج - منع الحركة والوميض */
-    /* إصلاح ترتيب Z-Index - التأكد من أن النماذج أعلى من جميع العناصر */
+    /* إصلاح مشكلة استقرار النماذج - تبسيط CSS */
     
     /* إخفاء pageLoader عند فتح النماذج */
     #pageLoader {
@@ -3162,75 +3083,38 @@ if (!window.transferFormInitialized) {
     #pageLoader.hidden {
         z-index: -1 !important;
         display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
     }
     
     /* النماذج يجب أن تكون أعلى من أي overlay */
     .modal {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        z-index: 10000 !important;
-        width: 100% !important;
-        height: 100% !important;
-        overflow: hidden !important;
-        outline: 0 !important;
+        z-index: 1050 !important;
     }
     
     .modal.show {
         display: block !important;
-        z-index: 10000 !important;
     }
     
     .modal-dialog {
-        position: relative !important;
-        width: auto !important;
-        margin: 1.75rem auto !important;
-        max-width: 500px !important;
-        pointer-events: auto !important;
         transform: none !important;
         transition: none !important;
-        z-index: 10001 !important;
-    }
-    
-    .modal-dialog-centered {
-        display: flex !important;
-        align-items: center !important;
-        min-height: calc(100% - 3.5rem) !important;
     }
     
     .modal-content {
-        position: relative !important;
-        display: flex !important;
-        flex-direction: column !important;
-        width: 100% !important;
-        pointer-events: auto !important;
-        background-color: #fff !important;
-        background-clip: padding-box !important;
-        border: 1px solid rgba(0, 0, 0, 0.2) !important;
-        border-radius: 0.3rem !important;
-        outline: 0 !important;
-        box-shadow: 0 0.25rem 0.5rem rgba(0, 0, 0, 0.5) !important;
-        z-index: 10002 !important;
+        transform: none !important;
     }
     
     .modal-backdrop {
-        position: fixed !important;
-        top: 0 !important;
-        left: 0 !important;
-        z-index: 9999 !important;
-        width: 100vw !important;
-        height: 100vh !important;
-        background-color: #000 !important;
-        opacity: 0.5 !important;
-        pointer-events: none !important;
-        transition: none !important;
+        z-index: 1040 !important;
+        pointer-events: auto !important;
     }
     
     .modal-backdrop.show {
         opacity: 0.5 !important;
-        z-index: 9999 !important;
     }
     
+    /* منع أي حركة أو تحريك للنماذج */
     .modal.fade .modal-dialog {
         transition: none !important;
         transform: none !important;
@@ -3240,40 +3124,9 @@ if (!window.transferFormInitialized) {
         transform: none !important;
     }
     
-    /* منع أي حركة أو تحريك للنماذج */
-    .modal,
-    .modal-dialog,
-    .modal-content {
-        will-change: auto !important;
-        transform: none !important;
-        animation: none !important;
-    }
-    
     /* التأكد من أن النماذج ثابتة */
     body.modal-open {
         overflow: hidden !important;
-        padding-right: 0 !important;
-    }
-    
-    /* منع أي تأثيرات hover على النماذج */
-    .modal * {
-        pointer-events: auto !important;
-    }
-    
-    .modal-backdrop * {
-        pointer-events: none !important;
-    }
-    
-    /* التأكد من أن أي overlay آخر لا يغطي النماذج */
-    /* إزالة أي z-index عالي من عناصر أخرى */
-    [style*="z-index"]:not(.modal):not(.modal-backdrop):not(.modal-dialog):not(.modal-content) {
-        z-index: auto !important;
-    }
-    
-    /* التأكد من أن النماذج ثابتة */
-    .modal,
-    .modal-backdrop {
-        position: fixed !important;
     }
 </style>
 

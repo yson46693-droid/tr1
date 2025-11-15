@@ -58,6 +58,42 @@ if ($page === 'packaging_warehouse' && isset($_GET['ajax']) && isset($_GET['mate
     }
 }
 
+// معالجة AJAX قبل أي إخراج HTML - خاصة لصفحة مخازن المناديب (نقل المنتجات)
+if ($page === 'final_products' && isset($_GET['section']) && $_GET['section'] === 'delegates' && isset($_GET['ajax']) && $_GET['ajax'] === 'load_products') {
+    // تنظيف أي output buffer سابق
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    
+    // تحميل الملفات الأساسية فقط
+    require_once __DIR__ . '/../includes/config.php';
+    require_once __DIR__ . '/../includes/db.php';
+    require_once __DIR__ . '/../includes/auth.php';
+    require_once __DIR__ . '/../includes/vehicle_inventory.php';
+    
+    requireRole(['sales', 'accountant', 'production', 'manager']);
+    
+    // إرسال headers JSON
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-cache, must-revalidate');
+    
+    $warehouseId = isset($_GET['warehouse_id']) ? intval($_GET['warehouse_id']) : null;
+    
+    try {
+        $products = getFinishedProductBatchOptions(true, $warehouseId);
+        echo json_encode([
+            'success' => true,
+            'products' => $products
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => $e->getMessage()
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    exit; // إيقاف التنفيذ بعد معالجة AJAX
+}
+
 // تحميل باقي الملفات المطلوبة للصفحة العادية
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
