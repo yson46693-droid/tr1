@@ -1000,11 +1000,17 @@ if (!empty($finishedProductsTableExists)) {
                 fp.production_date,
                 fp.quantity_produced,
                 fp.manager_unit_price,
-                COALESCE(pt.unit_price, NULL) AS template_unit_price,
+                (SELECT pt.unit_price 
+                 FROM product_templates pt 
+                 WHERE pt.product_id = fp.product_id 
+                   AND pt.status = 'active' 
+                   AND pt.unit_price IS NOT NULL 
+                   AND pt.unit_price > 0
+                 ORDER BY pt.id DESC 
+                 LIMIT 1) AS template_unit_price,
                 GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers
             FROM finished_products fp
             LEFT JOIN products pr ON fp.product_id = pr.id
-            LEFT JOIN product_templates pt ON pt.product_id = fp.product_id
             LEFT JOIN batch_workers bw ON fp.batch_id = bw.batch_id
             LEFT JOIN users u ON bw.employee_id = u.id
             GROUP BY fp.id
