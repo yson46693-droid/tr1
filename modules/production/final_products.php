@@ -2740,6 +2740,18 @@ if (!window.transferFormInitialized) {
         }
 
         const { modalElement, loader, errorAlert, contentWrapper } = structure;
+        
+        // إغلاق أي نماذج مفتوحة أخرى أولاً
+        const existingModals = document.querySelectorAll('.modal.show');
+        existingModals.forEach(existingModal => {
+            if (existingModal !== modalElement && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                const otherInstance = bootstrap.Modal.getInstance(existingModal);
+                if (otherInstance) {
+                    otherInstance.hide();
+                }
+            }
+        });
+        
         const modalInstance = bootstrap.Modal.getOrCreateInstance(modalElement, {
             backdrop: 'static',
             keyboard: false
@@ -2907,16 +2919,19 @@ if (!window.transferFormInitialized) {
     if (!clickEventAttached) {
         clickEventAttached = true;
         document.addEventListener('click', function (event) {
-            // التحقق من أن النقر ليس داخل أي modal مفتوح
-            const openModal = document.querySelector('.modal.show');
-            if (openModal && openModal.contains(event.target)) {
-                // النقر داخل modal - لا نتعامل معه
-                return;
-            }
-            
             // التحقق من أن النقر ليس على backdrop
             if (event.target.classList.contains('modal-backdrop')) {
                 return;
+            }
+            
+            // التحقق من أن النقر ليس داخل أي modal مفتوح (إلا إذا كان على زر يفتح modal آخر)
+            const openModal = document.querySelector('.modal.show');
+            if (openModal && openModal.contains(event.target)) {
+                // السماح فقط للأزرار التي تفتح نماذج أخرى
+                const isModalTrigger = event.target.closest('[data-bs-toggle="modal"], [data-bs-target], .js-open-add-external-modal, .js-external-adjust, .js-external-edit, .js-batch-details');
+                if (!isModalTrigger) {
+                    return;
+                }
             }
             
             // فتح نموذج إضافة منتج خارجي
@@ -2927,15 +2942,39 @@ if (!window.transferFormInitialized) {
                 
                 const modal = document.getElementById('addExternalProductModal');
                 if (modal) {
-                    // منع فتح النموذج إذا كان مفتوحاً بالفعل
-                    if (modal.classList.contains('show')) {
+                    // التحقق من حالة النموذج باستخدام Bootstrap instance
+                    let isAlreadyOpen = false;
+                    if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                        const existingInstance = bootstrap.Modal.getInstance(modal);
+                        if (existingInstance && existingInstance._isShown) {
+                            isAlreadyOpen = true;
+                        }
+                    } else if (modal.classList.contains('show')) {
+                        isAlreadyOpen = true;
+                    }
+                    
+                    if (isAlreadyOpen) {
                         return;
                     }
                     
-                    if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                        const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
-                        modalInstance.show();
-                    }
+                    // إغلاق أي نماذج مفتوحة أخرى أولاً
+                    const otherModals = document.querySelectorAll('.modal.show');
+                    otherModals.forEach(otherModal => {
+                        if (otherModal !== modal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                            const otherInstance = bootstrap.Modal.getInstance(otherModal);
+                            if (otherInstance) {
+                                otherInstance.hide();
+                            }
+                        }
+                    });
+                    
+                    // انتظار قليل ثم فتح النموذج
+                    setTimeout(() => {
+                        if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                            const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
+                            modalInstance.show();
+                        }
+                    }, 150);
                 }
                 return;
             }
@@ -3006,10 +3045,31 @@ if (!window.transferFormInitialized) {
                 return;
             }
             
-            // منع فتح النموذج إذا كان مفتوحاً بالفعل
-            if (modal.classList.contains('show')) {
+            // التحقق من حالة النموذج
+            let isAlreadyOpen = false;
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                const existingInstance = bootstrap.Modal.getInstance(modal);
+                if (existingInstance && existingInstance._isShown) {
+                    isAlreadyOpen = true;
+                }
+            } else if (modal.classList.contains('show')) {
+                isAlreadyOpen = true;
+            }
+            
+            if (isAlreadyOpen) {
                 return;
             }
+            
+            // إغلاق أي نماذج مفتوحة أخرى أولاً
+            const otherModals = document.querySelectorAll('.modal.show');
+            otherModals.forEach(otherModal => {
+                if (otherModal !== modal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                    const otherInstance = bootstrap.Modal.getInstance(otherModal);
+                    if (otherInstance) {
+                        otherInstance.hide();
+                    }
+                }
+            });
             
             const form = modal.querySelector('form');
             const productIdInput = form?.querySelector('input[name="product_id"]');
@@ -3049,11 +3109,13 @@ if (!window.transferFormInitialized) {
                     : 'btn btn-primary js-external-stock-submit';
             }
             
-            // فتح النموذج
-            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
-                modalInstance.show();
-            }
+            // فتح النموذج بعد قليل
+            setTimeout(() => {
+                if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                    const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
+                    modalInstance.show();
+                }
+            }, 150);
             return;
         }
 
@@ -3067,10 +3129,31 @@ if (!window.transferFormInitialized) {
                 return;
             }
             
-            // منع فتح النموذج إذا كان مفتوحاً بالفعل
-            if (modal.classList.contains('show')) {
+            // التحقق من حالة النموذج
+            let isAlreadyOpen = false;
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                const existingInstance = bootstrap.Modal.getInstance(modal);
+                if (existingInstance && existingInstance._isShown) {
+                    isAlreadyOpen = true;
+                }
+            } else if (modal.classList.contains('show')) {
+                isAlreadyOpen = true;
+            }
+            
+            if (isAlreadyOpen) {
                 return;
             }
+            
+            // إغلاق أي نماذج مفتوحة أخرى أولاً
+            const otherModals = document.querySelectorAll('.modal.show');
+            otherModals.forEach(otherModal => {
+                if (otherModal !== modal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                    const otherInstance = bootstrap.Modal.getInstance(otherModal);
+                    if (otherInstance) {
+                        otherInstance.hide();
+                    }
+                }
+            });
             
             const form = modal.querySelector('form');
             if (!form) {
@@ -3104,11 +3187,13 @@ if (!window.transferFormInitialized) {
                 descriptionInput.value = editButton.dataset.description || '';
             }
             
-            // فتح النموذج
-            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
-                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
-                modalInstance.show();
-            }
+            // فتح النموذج بعد قليل
+            setTimeout(() => {
+                if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                    const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
+                    modalInstance.show();
+                }
+            }, 150);
             return;
         }
 
@@ -3126,6 +3211,46 @@ if (!window.transferFormInitialized) {
             document.body.classList.remove('modal-open');
             document.body.style.overflow = '';
             document.body.style.paddingRight = '';
+            
+            // إصلاح زر requestTransferModal
+            const requestTransferBtn = document.querySelector('[data-bs-target="#requestTransferModal"]');
+            if (requestTransferBtn) {
+                requestTransferBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    
+                    const modal = document.getElementById('requestTransferModal');
+                    if (modal && typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+                        // التحقق من حالة النموذج
+                        let isAlreadyOpen = false;
+                        const existingInstance = bootstrap.Modal.getInstance(modal);
+                        if (existingInstance && existingInstance._isShown) {
+                            isAlreadyOpen = true;
+                        }
+                        
+                        if (isAlreadyOpen) {
+                            return;
+                        }
+                        
+                        // إغلاق أي نماذج مفتوحة أخرى أولاً
+                        const existingModals = document.querySelectorAll('.modal.show');
+                        existingModals.forEach(existingModal => {
+                            if (existingModal !== modal) {
+                                const otherInstance = bootstrap.Modal.getInstance(existingModal);
+                                if (otherInstance) {
+                                    otherInstance.hide();
+                                }
+                            }
+                        });
+                        
+                        // انتظار قليل ثم فتح النموذج
+                        setTimeout(() => {
+                            const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
+                            modalInstance.show();
+                        }, 150);
+                    }
+                }, true); // استخدام capture phase لمنع Bootstrap من التعامل معه أولاً
+            }
         });
     }
     
