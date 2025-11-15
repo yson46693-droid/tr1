@@ -1589,27 +1589,27 @@ if ($isManager) {
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label fw-bold">المنتج</label>
+                    <div class="form-label fw-bold">المنتج</div>
                     <div class="form-control-plaintext" id="manualPriceProductName">—</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label fw-bold">رقم التشغيلة</label>
+                    <div class="form-label fw-bold">رقم التشغيلة</div>
                     <div class="form-control-plaintext" id="manualPriceBatchNumber">—</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label fw-bold">الكمية في التشغيلة</label>
+                    <div class="form-label fw-bold">الكمية في التشغيلة</div>
                     <div class="form-control-plaintext" id="manualPriceQuantity">—</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label text-muted small">سعر القالب (للحدة الواحدة)</label>
+                    <div class="form-label text-muted small">سعر القالب (للحدة الواحدة)</div>
                     <div class="form-control-plaintext small" id="manualPriceTemplatePrice">—</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label text-muted small">السعر المحسوب تلقائياً (الكمية × سعر القالب)</label>
+                    <div class="form-label text-muted small">السعر المحسوب تلقائياً (الكمية × سعر القالب)</div>
                     <div class="form-control-plaintext small text-primary fw-semibold" id="manualPriceCalculated">—</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">السعر اليدوي الإجمالي للتشغيلة <span class="text-danger">*</span></label>
+                    <label class="form-label" for="manualPriceInput">السعر اليدوي الإجمالي للتشغيلة <span class="text-danger">*</span></label>
                     <input type="number" 
                            name="manual_price" 
                            id="manualPriceInput" 
@@ -1623,7 +1623,7 @@ if ($isManager) {
                     </small>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label text-muted small">السعر اليدوي الحالي</label>
+                    <div class="form-label text-muted small">السعر اليدوي الحالي</div>
                     <div class="form-control-plaintext small" id="manualPriceCurrentPrice">—</div>
                 </div>
             </div>
@@ -1667,7 +1667,7 @@ if ($isManager) {
                     <?php else: ?>
                         <div class="row g-3 mb-3">
                             <div class="col-md-6">
-                                <label class="form-label" for="transferFromWarehouse">من المخزن</label>
+                                <label class="form-label">من المخزن</label>
                                 <div class="form-control-plaintext fw-semibold" id="transferFromWarehouse">
                                     <?php echo htmlspecialchars($primaryWarehouse['name']); ?> (مخزن رئيسي)
                                 </div>
@@ -1698,7 +1698,7 @@ if ($isManager) {
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label">عناصر النقل <span class="text-danger">*</span></label>
+                            <div class="form-label">عناصر النقل <span class="text-danger">*</span></div>
                             <div id="mainWarehouseTransferItems">
                                 <div class="transfer-item row g-2 align-items-end mb-2">
                                     <div class="col-md-5">
