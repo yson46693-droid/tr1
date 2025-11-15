@@ -212,11 +212,29 @@ function approveRequest($approvalId, $approvedBy, $notes = null) {
         // تحديث حالة الكيان
         updateEntityStatus($approval['type'], $entityIdentifier, 'approved', $approvedBy);
         
+        // بناء رسالة الإشعار مع تفاصيل المنتجات المنقولة
+        $notificationMessage = "تمت الموافقة على طلبك من نوع {$approval['type']}";
+        
+        // إذا كان الطلب نقل منتجات، أضف تفاصيل المنتجات المنقولة
+        if ($approval['type'] === 'warehouse_transfer' && !empty($_SESSION['warehouse_transfer_products'])) {
+            $products = $_SESSION['warehouse_transfer_products'];
+            unset($_SESSION['warehouse_transfer_products']); // حذف بعد الاستخدام
+            
+            if (!empty($products)) {
+                $notificationMessage .= "\n\nالمنتجات المنقولة:\n";
+                foreach ($products as $product) {
+                    $batchInfo = !empty($product['batch_number']) ? " - تشغيلة {$product['batch_number']}" : '';
+                    $notificationMessage .= "• {$product['name']}{$batchInfo}: " . number_format($product['quantity'], 2) . "\n";
+                }
+            }
+        }
+        
         // إرسال إشعار للمستخدم الذي طلب الموافقة
+        require_once __DIR__ . '/notifications.php';
         createNotification(
             $approval['requested_by'],
             'تمت الموافقة',
-            "تمت الموافقة على طلبك من نوع {$approval['type']}",
+            $notificationMessage,
             'success',
             getEntityLink($approval['type'], $entityIdentifier)
         );
@@ -403,6 +421,8 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
                 if (!($result['success'] ?? false)) {
                     throw new Exception($result['message'] ?? 'تعذر الموافقة على طلب النقل.');
                 }
+                // حفظ معلومات المنتجات المنقولة للاستخدام في الإشعار
+                $_SESSION['warehouse_transfer_products'] = $result['transferred_products'] ?? [];
             } elseif ($status === 'rejected') {
                 $entityColumnName = getApprovalsEntityColumn();
                 $approvalRow = $db->queryOne(

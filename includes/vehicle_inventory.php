@@ -918,23 +918,35 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
             );
         }
         
+        // النقل تم إنشاؤه بنجاح، الآن نقوم بعمليات إضافية (لا يجب أن تؤثر على نجاح العملية)
         // إرسال إشعار للمديرين للموافقة
-        require_once __DIR__ . '/approval_system.php';
-        $approvalNotes = sprintf(
-            "طلب نقل منتجات من المخزن %s إلى المخزن %s بتاريخ %s",
-            $fromWarehouse['name'] ?? ('#' . $fromWarehouseId),
-            $toWarehouse['name'] ?? ('#' . $toWarehouseId),
-            $transferDate
-        );
-        $approvalResult = requestApproval('warehouse_transfer', $transferId, $requestedBy, $approvalNotes);
-        if (!($approvalResult['success'] ?? false)) {
-            error_log('Warehouse transfer approval request warning: ' . ($approvalResult['message'] ?? 'Unknown error'));
+        try {
+            require_once __DIR__ . '/approval_system.php';
+            $approvalNotes = sprintf(
+                "طلب نقل منتجات من المخزن %s إلى المخزن %s بتاريخ %s",
+                $fromWarehouse['name'] ?? ('#' . $fromWarehouseId),
+                $toWarehouse['name'] ?? ('#' . $toWarehouseId),
+                $transferDate
+            );
+            $approvalResult = requestApproval('warehouse_transfer', $transferId, $requestedBy, $approvalNotes);
+            if (!($approvalResult['success'] ?? false)) {
+                error_log('Warehouse transfer approval request warning: ' . ($approvalResult['message'] ?? 'Unknown error'));
+            }
+        } catch (Exception $approvalException) {
+            // لا نسمح لفشل طلب الموافقة بإلغاء نجاح إنشاء النقل
+            error_log('Warehouse transfer approval request exception: ' . $approvalException->getMessage());
         }
         
-        logAudit($requestedBy, 'create_transfer', 'warehouse_transfer', $transferId, null, [
-            'transfer_number' => $transferNumber,
-            'transfer_type' => $transferType
-        ]);
+        // تسجيل عملية التدقيق
+        try {
+            logAudit($requestedBy, 'create_transfer', 'warehouse_transfer', $transferId, null, [
+                'transfer_number' => $transferNumber,
+                'transfer_type' => $transferType
+            ]);
+        } catch (Exception $auditException) {
+            // لا نسمح لفشل تسجيل التدقيق بإلغاء نجاح إنشاء النقل
+            error_log('Warehouse transfer audit log exception: ' . $auditException->getMessage());
+        }
         
         return ['success' => true, 'transfer_id' => $transferId, 'transfer_number' => $transferNumber];
         
@@ -983,6 +995,12 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
             "SELECT * FROM warehouse_transfer_items WHERE transfer_id = ?",
             [$transferId]
         );
+        
+        if (empty($items)) {
+            throw new Exception('لا توجد عناصر في طلب النقل هذا.');
+        }
+        
+        error_log("Approving warehouse transfer ID: $transferId with " . count($items) . " items");
         
         // معلومات المخازن
         $fromWarehouse = $db->queryOne(
@@ -1341,11 +1359,38 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
         
         $db->getConnection()->commit();
         
+        // جمع معلومات المنتجات المنقولة للرسالة
+        $transferredProducts = [];
+        foreach ($items as $item) {
+            $productId = isset($item['product_id']) ? (int)$item['product_id'] : 0;
+            $quantity = (float)($item['quantity'] ?? 0);
+            $batchNumber = $item['batch_number'] ?? null;
+            
+            if ($productId > 0) {
+                $productInfo = $db->queryOne(
+                    "SELECT name FROM products WHERE id = ?",
+                    [$productId]
+                );
+                $productName = $productInfo['name'] ?? 'منتج غير معروف';
+                
+                $batchInfo = $batchNumber ? " - تشغيلة {$batchNumber}" : '';
+                $transferredProducts[] = [
+                    'name' => $productName,
+                    'quantity' => $quantity,
+                    'batch_number' => $batchNumber
+                ];
+            }
+        }
+        
         logAudit($approvedBy, 'approve_transfer', 'warehouse_transfer', $transferId, 
                  ['old_status' => $transfer['status']], 
                  ['new_status' => 'approved']);
         
-        return ['success' => true, 'message' => 'تمت الموافقة على النقل بنجاح'];
+        return [
+            'success' => true, 
+            'message' => 'تمت الموافقة على النقل بنجاح',
+            'transferred_products' => $transferredProducts
+        ];
         
     } catch (Exception $e) {
         $db->getConnection()->rollback();

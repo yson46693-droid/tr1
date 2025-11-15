@@ -729,11 +729,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $currentUser['id'] ?? null
                 );
 
-                if (!empty($result['success'])) {
+                // التحقق من نجاح العملية - حتى لو كانت النتيجة success => false، نتحقق من وجود transfer_id
+                $transferId = $result['transfer_id'] ?? null;
+                $transferNumber = $result['transfer_number'] ?? null;
+                $isSuccess = !empty($result['success']) || (!empty($transferId) && !empty($transferNumber));
+                
+                if ($isSuccess && !empty($transferId) && !empty($transferNumber)) {
                     $isManagerInitiator = isset($currentUser['role']) && $currentUser['role'] === 'manager';
-                    $transferNumber = $result['transfer_number'] ?? '#';
 
-                    if ($isManagerInitiator && !empty($result['transfer_id'])) {
+                    if ($isManagerInitiator && !empty($transferId)) {
                         try {
                             ensureWarehouseTransferBatchColumns();
                             
@@ -769,7 +773,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 }
 
                                 $transferItemParams = [
-                                    $result['transfer_id'],
+                                    $transferId,
                                     $productId,
                                     $batchIdValue ?: null,
                                     $item['batch_number'] ?? null,
@@ -791,22 +795,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                      approved_at = NOW(),
                                      notes = CONCAT(IFNULL(notes, ''), '\\n(الموافقة من نفس المدير المُنشئ)')
                                  WHERE id = ?",
-                                [$currentUser['id'] ?? null, $result['transfer_id']]
+                                [$currentUser['id'] ?? null, $transferId]
                             );
 
                             if (!empty($currentUser['id'])) {
-                                logAudit(
-                                    $currentUser['id'],
-                                    'warehouse_transfer_auto_approved',
-                                    'warehouse_transfer',
-                                    $result['transfer_id'],
-                                    null,
-                                    [
-                                        'transfer_number' => $transferNumber,
-                                        'auto_approved' => true,
-                                        'initiator_role' => $currentUser['role'] ?? null,
-                                    ]
-                                );
+                                try {
+                                    logAudit(
+                                        $currentUser['id'],
+                                        'warehouse_transfer_auto_approved',
+                                        'warehouse_transfer',
+                                        $transferId,
+                                        null,
+                                        [
+                                            'transfer_number' => $transferNumber,
+                                            'auto_approved' => true,
+                                            'initiator_role' => $currentUser['role'] ?? null,
+                                        ]
+                                    );
+                                } catch (Exception $auditException) {
+                                    // لا نسمح لفشل تسجيل التدقيق بإلغاء نجاح العملية
+                                    error_log('final_products audit log exception: ' . $auditException->getMessage());
+                                }
                             }
 
                             $_SESSION[$sessionSuccessKey] = sprintf(
@@ -830,8 +839,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
                     }
                 } else {
-                    // إضافة رسالة الخطأ فقط عند فشل إنشاء الطلب
-                    $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
+                    // التحقق مرة أخرى من أن الطلب لم يتم إنشاؤه بالفعل (في حالة وجود خطأ في العمليات الإضافية)
+                    if (!empty($result['transfer_id']) && !empty($result['transfer_number'])) {
+                        // الطلب تم إنشاؤه بالفعل - نعرض رسالة نجاح بدلاً من خطأ
+                        $_SESSION[$sessionSuccessKey] = sprintf(
+                            'تم إرسال طلب النقل رقم %s إلى المدير للموافقة عليه.',
+                            $result['transfer_number']
+                        );
+                        productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+                        exit;
+                    } else {
+                        // إضافة رسالة الخطأ فقط عند فشل إنشاء الطلب فعلياً
+                        $transferErrors[] = $result['message'] ?? 'تعذر إنشاء طلب النقل.';
+                    }
                 }
             }
         }

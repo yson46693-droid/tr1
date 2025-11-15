@@ -75,14 +75,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($approval) {
                 $result = approveRequest($approval['id'], $currentUser['id'], 'الموافقة على طلب نقل المنتجات.');
                 if ($result['success']) {
-                    $_SESSION['warehouse_transfer_success'] = 'تمت الموافقة على طلب النقل وسيتم تنفيذه تلقائياً.';
+                    // بناء رسالة النجاح مع تفاصيل المنتجات
+                    $successMessage = 'تمت الموافقة على طلب النقل وسيتم تنفيذه تلقائياً.';
+                    
+                    // إضافة تفاصيل المنتجات إذا كانت موجودة في session
+                    if (!empty($_SESSION['warehouse_transfer_products'])) {
+                        $products = $_SESSION['warehouse_transfer_products'];
+                        unset($_SESSION['warehouse_transfer_products']);
+                        
+                        if (!empty($products)) {
+                            $successMessage .= "\n\nالمنتجات المنقولة:\n";
+                            foreach ($products as $product) {
+                                $batchInfo = !empty($product['batch_number']) ? " - تشغيلة {$product['batch_number']}" : '';
+                                $successMessage .= "• {$product['name']}{$batchInfo}: " . number_format($product['quantity'], 2) . "\n";
+                            }
+                        }
+                    }
+                    
+                    $_SESSION['warehouse_transfer_success'] = $successMessage;
                 } else {
                     $_SESSION['warehouse_transfer_error'] = $result['message'] ?? 'تعذر الموافقة على طلب النقل.';
                 }
             } else {
                 $result = approveWarehouseTransfer($transferId, $currentUser['id']);
                 if ($result['success']) {
-                    $_SESSION['warehouse_transfer_success'] = $result['message'];
+                    // بناء رسالة النجاح مع تفاصيل المنتجات
+                    $successMessage = $result['message'] ?? 'تمت الموافقة على النقل بنجاح';
+                    
+                    if (!empty($result['transferred_products'])) {
+                        $products = $result['transferred_products'];
+                        $successMessage .= "\n\nالمنتجات المنقولة:\n";
+                        foreach ($products as $product) {
+                            $batchInfo = !empty($product['batch_number']) ? " - تشغيلة {$product['batch_number']}" : '';
+                            $successMessage .= "• {$product['name']}{$batchInfo}: " . number_format($product['quantity'], 2) . "\n";
+                        }
+                    }
+                    
+                    $_SESSION['warehouse_transfer_success'] = $successMessage;
                 } else {
                     $_SESSION['warehouse_transfer_error'] = $result['message'];
                 }
@@ -188,21 +217,31 @@ if (isset($_GET['id'])) {
     );
     
     if ($selectedTransfer) {
+        // جلب العناصر مع جميع التفاصيل المطلوبة
         $selectedTransfer['items'] = $db->query(
             "SELECT 
-                wti.*, 
-                p.name as product_name, 
-                fp.batch_number as finished_batch_number,
+                wti.id as item_id,
+                wti.transfer_id,
+                wti.product_id,
+                wti.batch_id,
+                wti.batch_number,
+                wti.quantity,
+                wti.notes,
+                COALESCE(p.name, 'منتج غير معروف') as product_name,
+                COALESCE(fp.batch_number, wti.batch_number) as finished_batch_number,
                 fp.quantity_produced as batch_quantity_produced,
-                (
-                    fp.quantity_produced - COALESCE((
-                        SELECT SUM(wti2.quantity)
-                        FROM warehouse_transfer_items wti2
-                        INNER JOIN warehouse_transfers wt2 ON wt2.id = wti2.transfer_id
-                        WHERE wti2.batch_id = wti.batch_id
-                          AND wt2.status IN ('approved', 'completed')
-                    ), 0)
-                ) AS batch_quantity_available
+                CASE 
+                    WHEN wti.batch_id IS NOT NULL THEN
+                        COALESCE(fp.quantity_produced, 0) - COALESCE((
+                            SELECT SUM(wti2.quantity)
+                            FROM warehouse_transfer_items wti2
+                            INNER JOIN warehouse_transfers wt2 ON wt2.id = wti2.transfer_id
+                            WHERE wti2.batch_id = wti.batch_id
+                              AND wt2.status IN ('approved', 'completed')
+                              AND wti2.id != wti.id
+                        ), 0)
+                    ELSE NULL
+                END AS batch_quantity_available
              FROM warehouse_transfer_items wti
              LEFT JOIN products p ON wti.product_id = p.id
              LEFT JOIN finished_products fp ON wti.batch_id = fp.id
@@ -210,6 +249,18 @@ if (isset($_GET['id'])) {
              ORDER BY wti.id",
             [$transferId]
         );
+        
+        // للتحقق من وجود العناصر
+        if (empty($selectedTransfer['items'])) {
+            // محاولة جلب بدون JOIN للتحقق من وجود البيانات
+            $itemsCheck = $db->query(
+                "SELECT * FROM warehouse_transfer_items WHERE transfer_id = ?",
+                [$transferId]
+            );
+            if (!empty($itemsCheck)) {
+                error_log("Warning: Items exist for transfer ID $transferId but JOIN query returned empty. Items: " . json_encode($itemsCheck));
+            }
+        }
     }
 }
 ?>
@@ -230,7 +281,7 @@ if (isset($_GET['id'])) {
 <?php if ($success): ?>
     <div class="alert alert-success alert-dismissible fade show">
         <i class="bi bi-check-circle-fill me-2"></i>
-        <?php echo htmlspecialchars($success); ?>
+        <div style="white-space: pre-line;"><?php echo htmlspecialchars($success); ?></div>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     </div>
 <?php endif; ?>
@@ -348,32 +399,90 @@ if (isset($_GET['id'])) {
                         <tbody>
                             <?php foreach ($selectedTransfer['items'] as $item): ?>
                                 <?php
-                                    $availableBatch = $item['batch_quantity_available'] ?? null;
-                                    $badgeClass = ($availableBatch !== null && $availableBatch < $item['quantity']) ? 'table-warning' : '';
+                                    $availableBatch = isset($item['batch_quantity_available']) && $item['batch_quantity_available'] !== null ? (float)$item['batch_quantity_available'] : null;
+                                    $quantity = (float)($item['quantity'] ?? 0);
+                                    $badgeClass = ($availableBatch !== null && $availableBatch < $quantity) ? 'table-warning' : '';
+                                    
+                                    // تحديد رقم التشغيلة للعرض
+                                    $displayBatchNumber = $item['batch_number'] ?? $item['finished_batch_number'] ?? '-';
+                                    
+                                    // تحديد اسم المنتج للعرض
+                                    $displayProductName = $item['product_name'] ?? 'منتج غير معروف';
                                 ?>
                                 <tr class="<?php echo $badgeClass; ?>">
-                                    <td><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
-                                    <td><?php echo htmlspecialchars($item['batch_number'] ?? $item['finished_batch_number'] ?? '-'); ?></td>
-                                    <td><strong><?php echo number_format($item['quantity'], 2); ?></strong></td>
+                                    <td>
+                                        <?php echo htmlspecialchars($displayProductName); ?>
+                                        <?php if (empty($item['product_id'])): ?>
+                                            <br><small class="text-muted">(معرف المنتج: غير محدد)</small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php echo htmlspecialchars($displayBatchNumber); ?>
+                                        <?php if (!empty($item['batch_id']) && $displayBatchNumber === '-'): ?>
+                                            <br><small class="text-muted">(ID: <?php echo $item['batch_id']; ?>)</small>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><strong><?php echo number_format($quantity, 2); ?></strong></td>
                                     <td>
                                         <?php 
                                             if ($availableBatch === null) {
                                                 echo '<span class="text-muted">غير متاح</span>';
+                                                if (!empty($item['batch_id'])) {
+                                                    echo '<br><small class="text-muted">(لا توجد بيانات تشغيلة)</small>';
+                                                }
                                             } else {
                                                 echo number_format(max(0, $availableBatch), 2);
                                             }
                                         ?>
                                     </td>
                                     <td>
-                                        <?php if ($availableBatch !== null && $availableBatch < $item['quantity']): ?>
-                                            <span class="badge bg-warning">كمية غير متوفرة</span>
+                                        <?php if ($availableBatch !== null && $availableBatch < $quantity): ?>
+                                            <span class="badge bg-warning mb-1 d-block">كمية غير متوفرة</span>
                                         <?php endif; ?>
-                                        <?php echo htmlspecialchars($item['notes'] ?? ''); ?>
+                                        <?php if (!empty($item['notes'])): ?>
+                                            <?php echo htmlspecialchars($item['notes']); ?>
+                                        <?php else: ?>
+                                            <span class="text-muted">-</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                </div>
+            <?php else: ?>
+                <div class="alert alert-warning mt-3">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong>تحذير:</strong> لم يتم العثور على عناصر في طلب النقل هذا.
+                    <?php
+                    // التحقق من وجود العناصر في قاعدة البيانات
+                    $itemsCheck = $db->query(
+                        "SELECT COUNT(*) as count FROM warehouse_transfer_items WHERE transfer_id = ?",
+                        [$transferId]
+                    );
+                    if (!empty($itemsCheck) && ($itemsCheck[0]['count'] ?? 0) > 0) {
+                        echo '<br><small class="text-muted">ملاحظة: يوجد ' . ($itemsCheck[0]['count'] ?? 0) . ' عنصر في قاعدة البيانات، لكن لا تظهر التفاصيل. قد تكون هناك مشكلة في ربط البيانات أو اسم المنتج.</small>';
+                        
+                        // محاولة عرض البيانات الخام للمساعدة في التصحيح
+                        $rawItems = $db->query(
+                            "SELECT wti.*, p.name as product_name, p.id as product_exists 
+                             FROM warehouse_transfer_items wti
+                             LEFT JOIN products p ON wti.product_id = p.id
+                             WHERE wti.transfer_id = ?",
+                            [$transferId]
+                        );
+                        if (!empty($rawItems)) {
+                            echo '<br><small class="text-muted">البيانات الخام:</small><pre class="small">';
+                            foreach ($rawItems as $rawItem) {
+                                echo "Product ID: " . ($rawItem['product_id'] ?? 'NULL') . ", ";
+                                echo "Product Name: " . ($rawItem['product_name'] ?? 'NULL') . ", ";
+                                echo "Batch ID: " . ($rawItem['batch_id'] ?? 'NULL') . ", ";
+                                echo "Quantity: " . ($rawItem['quantity'] ?? '0') . "\n";
+                            }
+                            echo '</pre>';
+                        }
+                    }
+                    ?>
                 </div>
             <?php endif; ?>
             
