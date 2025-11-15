@@ -1430,7 +1430,7 @@ if ($isManager) {
     </div>
 <?php endif; ?>
 <?php if ($isManager): ?>
-<div class="modal fade" id="addExternalProductModal" tabindex="-1" aria-hidden="true">
+<div class="modal fade" id="addExternalProductModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog">
         <form class="modal-content" method="POST">
             <input type="hidden" name="action" value="create_external_product">
@@ -2616,9 +2616,44 @@ document.addEventListener('DOMContentLoaded', function () {
                 return;
             }
             
-            // فتح الـ modal باستخدام Bootstrap API
-            const modalInstance = bootstrap.Modal.getOrCreateInstance(addExternalProductModal);
+            // فتح الـ modal باستخدام Bootstrap API مع إعدادات لمنع الإغلاق التلقائي
+            const modalInstance = bootstrap.Modal.getOrCreateInstance(addExternalProductModal, {
+                backdrop: 'static',
+                keyboard: false
+            });
+            
             modalInstance.show();
+        });
+        
+        // متغير لتتبع العنصر الذي تم النقر عليه
+        let clickedElement = null;
+        
+        // تتبع العنصر الذي تم النقر عليه
+        document.addEventListener('mousedown', function(e) {
+            if (addExternalProductModal.classList.contains('show')) {
+                clickedElement = e.target;
+            }
+        }, true);
+        
+        // منع إغلاق الـ modal إلا عند النقر على زر الإغلاق أو الإلغاء
+        addExternalProductModal.addEventListener('hide.bs.modal', function(e) {
+            // التحقق من أن العنصر الذي تم النقر عليه هو زر الإغلاق
+            const isCloseButton = clickedElement && (
+                clickedElement.closest('[data-bs-dismiss="modal"]') !== null || 
+                clickedElement.closest('.btn-close') !== null ||
+                clickedElement.classList.contains('btn-close')
+            );
+            
+            // إعادة تعيين المتغير
+            clickedElement = null;
+            
+            // إذا لم يكن العنصر زر إغلاق، منع الإغلاق
+            if (!isCloseButton) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }
         });
     }
 </script>
