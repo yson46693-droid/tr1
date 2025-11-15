@@ -937,25 +937,38 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
             $productId = isset($item['product_id']) ? (int)$item['product_id'] : 0;
 
             // حساب الكمية المتاحة الفعلية من المخزن المصدر
-            // أولوية: إذا كان هناك batch_id، نفحص الكمية من finished_products
+            // أولوية: إذا كان هناك batch_id، نفحص الكمية من المخزن الفعلي (مثل صفحة المنتجات النهائية)
             if ($batchId) {
-                // إذا كان هناك batch_id، نفحص الكمية من finished_products أولاً
-                $batchRow = $db->queryOne(
-                    "SELECT quantity_produced FROM finished_products WHERE id = ?",
-                    [$batchId]
-                );
-                
-                if ($batchRow) {
-                    // حساب الكمية المنقولة بالفعل (approved أو completed)
-                    $transferred = $db->queryOne(
-                        "SELECT COALESCE(SUM(wti.quantity), 0) AS total_transferred
-                         FROM warehouse_transfer_items wti
-                         INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
-                         WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND (wt.status = 'approved' OR wt.status = 'completed')",
-                        [$batchId, $transfer['from_warehouse_id']]
+                // الحصول على product_id من finished_products إذا لم يكن متوفراً
+                if ($productId <= 0) {
+                    $batchInfo = $db->queryOne(
+                        "SELECT product_id FROM finished_products WHERE id = ?",
+                        [$batchId]
                     );
+                    if ($batchInfo && !empty($batchInfo['product_id'])) {
+                        $productId = (int)$batchInfo['product_id'];
+                    }
+                }
+                
+                // إذا كان هناك product_id، نفحص الكمية من المخزن الفعلي (مثل getFinishedProductBatchOptions)
+                if ($productId > 0 && $fromWarehouse) {
+                    // إذا كان المخزن المصدر سيارة، نفحص مخزون السيارة
+                    if (($fromWarehouse['warehouse_type'] ?? '') === 'vehicle' && !empty($fromWarehouse['vehicle_id'])) {
+                        $vehicleStock = $db->queryOne(
+                            "SELECT quantity FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ?",
+                            [$fromWarehouse['vehicle_id'], $productId]
+                        );
+                        $availableQuantity = (float)($vehicleStock['quantity'] ?? 0);
+                    } else {
+                        // إذا كان المخزن المصدر رئيسي، نفحص مخزون المنتج من جدول products
+                        $productStock = $db->queryOne(
+                            "SELECT quantity FROM products WHERE id = ?",
+                            [$productId]
+                        );
+                        $availableQuantity = (float)($productStock['quantity'] ?? 0);
+                    }
                     
-                    // حساب الكمية المحجوزة في طلبات النقل المعلقة (pending) من نفس المخزن
+                    // خصم الكمية المحجوزة في طلبات النقل المعلقة (pending) من نفس المخزن
                     // نستبعد النقل الحالي من الحساب
                     $pendingTransfers = $db->queryOne(
                         "SELECT COALESCE(SUM(wti.quantity), 0) AS pending_quantity
@@ -964,10 +977,38 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
                          WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND wt.status = 'pending' AND wt.id != ?",
                         [$batchId, $transfer['from_warehouse_id'], $transferId]
                     );
+                    $availableQuantity -= (float)($pendingTransfers['pending_quantity'] ?? 0);
+                } else {
+                    // إذا لم يكن هناك product_id، نستخدم الطريقة القديمة كبديل
+                    $batchRow = $db->queryOne(
+                        "SELECT quantity_produced FROM finished_products WHERE id = ?",
+                        [$batchId]
+                    );
                     
-                    $availableQuantity = (float)$batchRow['quantity_produced'] 
-                                      - (float)($transferred['total_transferred'] ?? 0)
-                                      - (float)($pendingTransfers['pending_quantity'] ?? 0);
+                    if ($batchRow) {
+                        // حساب الكمية المنقولة بالفعل (approved أو completed)
+                        $transferred = $db->queryOne(
+                            "SELECT COALESCE(SUM(wti.quantity), 0) AS total_transferred
+                             FROM warehouse_transfer_items wti
+                             INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                             WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND (wt.status = 'approved' OR wt.status = 'completed')",
+                            [$batchId, $transfer['from_warehouse_id']]
+                        );
+                        
+                        // حساب الكمية المحجوزة في طلبات النقل المعلقة (pending) من نفس المخزن
+                        // نستبعد النقل الحالي من الحساب
+                        $pendingTransfers = $db->queryOne(
+                            "SELECT COALESCE(SUM(wti.quantity), 0) AS pending_quantity
+                             FROM warehouse_transfer_items wti
+                             INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                             WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND wt.status = 'pending' AND wt.id != ?",
+                            [$batchId, $transfer['from_warehouse_id'], $transferId]
+                        );
+                        
+                        $availableQuantity = (float)$batchRow['quantity_produced'] 
+                                          - (float)($transferred['total_transferred'] ?? 0)
+                                          - (float)($pendingTransfers['pending_quantity'] ?? 0);
+                    }
                 }
             } else if ($productId > 0) {
                 // إذا كان المخزن المصدر سيارة، نفحص مخزون السيارة

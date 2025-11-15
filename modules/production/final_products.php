@@ -1349,8 +1349,6 @@ if ($isManager) {
                                         <?php if ($isManager): ?>
                                         <button type="button"
                                                 class="btn btn-outline-info js-set-manual-price"
-                                                data-bs-toggle="modal"
-                                                data-bs-target="#setManualPriceModal"
                                                 data-product-id="<?php echo intval($finishedRow['id'] ?? 0); ?>"
                                                 data-product-name="<?php echo htmlspecialchars($finishedRow['product_name'] ?? '', ENT_QUOTES); ?>"
                                                 data-batch-number="<?php echo htmlspecialchars($batchNumber ?: '', ENT_QUOTES); ?>"
@@ -1426,8 +1424,6 @@ if ($isManager) {
                                 <button
                                     type="button"
                                     class="btn btn-outline-success js-external-adjust"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#externalStockModal"
                                     data-mode="add"
                                     data-product="<?php echo intval($externalProduct['id']); ?>"
                                     data-name="<?php echo htmlspecialchars($externalProduct['name'] ?? '', ENT_QUOTES); ?>"
@@ -1438,8 +1434,6 @@ if ($isManager) {
                                 <button
                                     type="button"
                                     class="btn btn-outline-danger js-external-adjust"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#externalStockModal"
                                     data-mode="discard"
                                     data-product="<?php echo intval($externalProduct['id']); ?>"
                                     data-name="<?php echo htmlspecialchars($externalProduct['name'] ?? '', ENT_QUOTES); ?>"
@@ -1450,8 +1444,6 @@ if ($isManager) {
                                 <button
                                     type="button"
                                     class="btn btn-outline-primary js-external-edit"
-                                    data-bs-toggle="modal"
-                                    data-bs-target="#editExternalProductModal"
                                     data-product="<?php echo intval($externalProduct['id']); ?>"
                                     data-name="<?php echo htmlspecialchars($externalProduct['name'] ?? '', ENT_QUOTES); ?>"
                                     data-channel="<?php echo htmlspecialchars($externalProduct['external_channel'] ?? '', ENT_QUOTES); ?>"
@@ -2490,6 +2482,9 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const adjustButton = event.target.closest('.js-external-adjust');
         if (adjustButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            
             const modal = document.getElementById('externalStockModal');
             if (!modal) {
                 return;
@@ -2531,11 +2526,23 @@ document.addEventListener('DOMContentLoaded', function () {
                     ? 'btn btn-danger js-external-stock-submit'
                     : 'btn btn-primary js-external-stock-submit';
             }
+            
+            // فتح النموذج يدوياً
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
+                    backdrop: 'static',
+                    keyboard: false
+                });
+                modalInstance.show();
+            }
             return;
         }
 
         const editButton = event.target.closest('.js-external-edit');
         if (editButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            
             const modal = document.getElementById('editExternalProductModal');
             if (!modal) {
                 return;
@@ -2571,11 +2578,23 @@ document.addEventListener('DOMContentLoaded', function () {
             if (descriptionInput) {
                 descriptionInput.value = editButton.dataset.description || '';
             }
+            
+            // فتح النموذج يدوياً
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
+                    backdrop: 'static',
+                    keyboard: false
+                });
+                modalInstance.show();
+            }
             return;
         }
 
         const manualPriceButton = event.target.closest('.js-set-manual-price');
         if (manualPriceButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            
             const modal = document.getElementById('setManualPriceModal');
             if (!modal) {
                 return;
@@ -2665,6 +2684,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     currentPriceField.textContent = 'غير محدد';
                 }
+            }
+            
+            // فتح النموذج يدوياً
+            if (typeof bootstrap !== 'undefined' && typeof bootstrap.Modal !== 'undefined') {
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
+                    backdrop: 'static',
+                    keyboard: false
+                });
+                modalInstance.show();
             }
         }
     });
