@@ -360,42 +360,30 @@ $lines[] = '';
 $lines[] = '🔖 رقم التشغيلة: <code>' . $escape($batchNumber) . '</code>';
 
 if ($productName !== '') {
-    $lines[] = '📦 المنتج: ' . $escape($productName);
+    $lines[] = '\n📦 المنتج: ' . $escape($productName);
 }
 
 $formattedQuantity = $formatQuantity($quantityValue);
 if ($formattedQuantity !== null) {
-    $quantityLine = '📊 كمية الإنتاج: ' . $escape($formattedQuantity);
+    $quantityLine = '\n📊 كمية الإنتاج: ' . $escape($formattedQuantity);
     if ($unitLabel) {
         $quantityLine .= ' ' . $escape($unitLabel);
     }
     $lines[] = $quantityLine;
 }
 
-$lines[] = '🏷️ عدد الملصقات المطلوبة: ' . $escape($labels);
+$lines[] = '\n🏷️ عدد الملصقات المطلوبة: ' . $escape($labels);
 
 if ($productionDate) {
-    $lines[] = '🗓️ تاريخ الإنتاج: ' . $escape($productionDate);
+    $lines[] = '\n🗓️ تاريخ الإنتاج: ' . $escape($productionDate);
 }
 
 if ($createdByName !== '') {
-    $lines[] = '👤 أنشأها: ' . $escape($createdByName);
+    $lines[] = '\n👤 أنشأها: ' . $escape($createdByName);
 }
 
 if (!empty($workers)) {
-    $lines[] = '👷‍♀️ طاقم الإنتاج: ' . $escape(implode('، ', $workers));
-}
-
-if ($honeySupplierName) {
-    $lines[] = '🍯 مورد العسل: ' . $escape($honeySupplierName);
-}
-
-if ($packagingSupplierName) {
-    $lines[] = '📦 مورد التغليف: ' . $escape($packagingSupplierName);
-}
-
-if (!empty($extraSuppliers)) {
-    $lines[] = '🤝 موردون إضافيون: ' . $escape(implode('، ', array_values(array_unique($extraSuppliers))));
+    $lines[] = '\n👷‍♀️ طاقم الإنتاج: ' . $escape(implode('، ', $workers));
 }
 
 $buildMaterialsSection = static function ($items, $title, $escape, $formatQuantity) {
@@ -436,18 +424,9 @@ $buildMaterialsSection = static function ($items, $title, $escape, $formatQuanti
     return $rows;
 };
 
-$rawSection = $buildMaterialsSection($rawMaterialsSummary, '🧴 المواد الخام المستخدمة:', $escape, $formatQuantity);
-if (!empty($rawSection)) {
-    $lines = array_merge($lines, $rawSection);
-}
-
-$packagingSection = $buildMaterialsSection($packagingSummary, '🪡 مواد التغليف المستخدمة:', $escape, $formatQuantity);
-if (!empty($packagingSection)) {
-    $lines = array_merge($lines, $packagingSection);
-}
 
 if ($notes) {
-    $lines[] = '📝 ملاحظات التشغيلة: ' . $escape($notes);
+    $lines[] = '\n📝 ملاحظات التشغيلة: ' . $escape($notes);
 }
 
 $lines[] = '';

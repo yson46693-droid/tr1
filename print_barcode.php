@@ -106,9 +106,9 @@ $encodedBatchNumber = json_encode($batchNumber, JSON_UNESCAPED_UNICODE);
         }
 
         .barcode-number {
-            font-size: 16pt;
+            font-size: 20pt;
             font-weight: 700;
-            letter-spacing: 1px;
+            letter-spacing: 1.5px;
             text-align: center;
             margin-top: 4px;
             margin-bottom: 0;

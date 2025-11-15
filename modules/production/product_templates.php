@@ -977,11 +977,16 @@ try {
 // جلب المكسرات وأنواعها من مخزن المكسرات (من الموردين)
 try {
     $nutsStockExists = $db->queryOne("SHOW TABLES LIKE 'nuts_stock'");
+    $mixedNutsExists = $db->queryOne("SHOW TABLES LIKE 'mixed_nuts'");
+    
+    $nutVarieties = [];
+    
+    // جلب المكسرات المنفردة المتاحة في المخزن
     if (!empty($nutsStockExists)) {
-        // جلب أنواع المكسرات الموجودة فعلياً عند الموردين في المخزن
         $nutsTypes = $db->query("
             SELECT DISTINCT ns.nut_type,
-                   COUNT(DISTINCT ns.supplier_id) as suppliers_count
+                   COUNT(DISTINCT ns.supplier_id) as suppliers_count,
+                   SUM(ns.quantity) as total_quantity
             FROM nuts_stock ns
             INNER JOIN suppliers s ON ns.supplier_id = s.id
             WHERE ns.nut_type IS NOT NULL 
@@ -989,24 +994,49 @@ try {
             AND ns.quantity > 0
             AND s.status = 'active'
             GROUP BY ns.nut_type
+            HAVING total_quantity > 0
             ORDER BY ns.nut_type
         ");
-        $nutVarieties = [];
+        
         foreach ($nutsTypes as $nut) {
             $nutName = trim($nut['nut_type']);
             if ($nutName !== '' && !in_array($nutName, $nutVarieties)) {
                 $nutVarieties[] = $nutName;
             }
         }
+    }
+    
+    // جلب المكسرات المشكلة (الخلطات) المتاحة في المخزن
+    if (!empty($mixedNutsExists)) {
+        $mixedNuts = $db->query("
+            SELECT DISTINCT mn.id,
+                   mn.name,
+                   mn.total_quantity
+            FROM mixed_nuts mn
+            INNER JOIN suppliers s ON mn.supplier_id = s.id
+            WHERE mn.name IS NOT NULL 
+            AND mn.name != '' 
+            AND mn.total_quantity > 0
+            AND s.status = 'active'
+            ORDER BY mn.name
+        ");
         
-        if (!empty($nutVarieties)) {
-            // المكسرات لها أنواع (لوز، جوز، إلخ) - نضيف "مكسرات" كاسم مادة وأنواعها
-            $rawMaterialsData['مكسرات'] = [
-                'material_type' => 'nuts',
-                'has_types' => true,
-                'types' => $nutVarieties
-            ];
+        foreach ($mixedNuts as $mixed) {
+            $mixedName = trim($mixed['name']);
+            if ($mixedName !== '' && !in_array($mixedName, $nutVarieties)) {
+                // إضافة "مكسرات مشكلة:" كبادئة للتمييز
+                $nutVarieties[] = $mixedName;
+            }
         }
+    }
+    
+    if (!empty($nutVarieties)) {
+        // المكسرات لها أنواع (لوز، جوز، مكسرات مشكلة، إلخ) - نضيف "مكسرات" كاسم مادة وأنواعها
+        $rawMaterialsData['مكسرات'] = [
+            'material_type' => 'nuts',
+            'has_types' => true,
+            'types' => $nutVarieties
+        ];
     }
 } catch (Exception $e) {
     error_log('Failed to load nuts from suppliers: ' . $e->getMessage());
@@ -1058,7 +1088,8 @@ try {
         // جلب أنواع المشتقات الموجودة فعلياً عند الموردين في المخزن
         $derivativesTypes = $db->query("
             SELECT DISTINCT ds.derivative_type,
-                   COUNT(DISTINCT ds.supplier_id) as suppliers_count
+                   COUNT(DISTINCT ds.supplier_id) as suppliers_count,
+                   SUM(ds.weight) as total_weight
             FROM derivatives_stock ds
             INNER JOIN suppliers s ON ds.supplier_id = s.id
             WHERE ds.derivative_type IS NOT NULL 
@@ -1066,34 +1097,28 @@ try {
             AND ds.weight > 0
             AND s.status = 'active'
             GROUP BY ds.derivative_type
+            HAVING total_weight > 0
             ORDER BY ds.derivative_type
         ");
         $derivativeVarieties = [];
         foreach ($derivativesTypes as $derivative) {
             $derivativeName = trim($derivative['derivative_type']);
-            if ($derivativeName !== '' && !in_array($derivativeName, $derivativeVarieties)) {
+            // استبعاد "غذاء الملكات" أو "غذاء ملكات النحل" من القائمة
+            if ($derivativeName !== '' && 
+                !in_array($derivativeName, $derivativeVarieties) &&
+                stripos($derivativeName, 'غذاء') === false &&
+                stripos($derivativeName, 'royal') === false) {
                 $derivativeVarieties[] = $derivativeName;
             }
         }
         
+        // إضافة "مشتقات" كاسم مادة دائماً مع أنواعها (حتى لو كان نوع واحد فقط)
         if (!empty($derivativeVarieties)) {
-            // إذا كان هناك أنواع مختلفة من المشتقات، نضيف "مشتقات" كاسم مادة
-            if (count($derivativeVarieties) > 1) {
-                $rawMaterialsData['مشتقات'] = [
-                    'material_type' => 'derivatives',
-                    'has_types' => true,
-                    'types' => $derivativeVarieties
-                ];
-            } else {
-                // إذا كان نوع واحد فقط، نضيفه كمادة بدون أنواع
-                foreach ($derivativeVarieties as $derivativeName) {
-                    $rawMaterialsData[$derivativeName] = [
-                        'material_type' => 'derivatives',
-                        'has_types' => false,
-                        'types' => []
-                    ];
-                }
-            }
+            $rawMaterialsData['مشتقات'] = [
+                'material_type' => 'derivatives',
+                'has_types' => true,
+                'types' => $derivativeVarieties
+            ];
         }
     }
 } catch (Exception $e) {
@@ -1102,6 +1127,14 @@ try {
 
 // إنشاء قائمة بأسماء المواد فقط للعرض في القائمة المنسدلة
 $rawMaterialsForTemplate = array_keys($rawMaterialsData);
+
+// حذف "غذاء الملكات" أو "غذاء ملكات النحل" من القائمة إذا كان موجوداً
+$rawMaterialsForTemplate = array_filter($rawMaterialsForTemplate, function($material) {
+    $materialLower = mb_strtolower($material, 'UTF-8');
+    return stripos($materialLower, 'غذاء') === false && 
+           stripos($materialLower, 'royal') === false;
+});
+
 sort($rawMaterialsForTemplate);
 
 require_once __DIR__ . '/../../includes/lang/' . getCurrentLanguage() . '.php';
@@ -2053,7 +2086,9 @@ function addRawMaterial(defaults = {}) {
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">الوحدة</label>
-                    <input type="text" class="form-control form-control-sm" name="raw_materials[${rawMaterialIndex}][unit]" 
+                    <input type="text" class="form-control form-control-sm material-unit-input" 
+                           name="raw_materials[${rawMaterialIndex}][unit]" 
+                           id="material_unit_${rawMaterialIndex}"
                            value="كيلوجرام" readonly style="background-color: #e9ecef;">
                 </div>
                 <div class="col-md-2">
@@ -2097,6 +2132,20 @@ function addRawMaterial(defaults = {}) {
             const isHoneyMaterial = selectedMaterialName.includes('عسل') || selectedMaterialName.toLowerCase().includes('honey');
             
             const materialData = rawMaterialsData[selectedMaterialName];
+            
+            // التحقق من أن المادة هي مشتقات وتحديث الوحدة
+            const isDerivativesMaterial = selectedMaterialName === 'مشتقات' || 
+                                         (materialData && materialData.material_type === 'derivatives');
+            
+            // تحديث الوحدة للمشتقات لتكون "كيلوجرام" (الوزن)
+            const unitInput = newItem.querySelector(`#material_unit_${rawMaterialIndex}`);
+            if (unitInput) {
+                if (isDerivativesMaterial) {
+                    unitInput.value = 'كيلوجرام';
+                } else {
+                    unitInput.value = defaultUnit || 'كيلوجرام';
+                }
+            }
             if (materialData && materialData.has_types && materialData.types && materialData.types.length > 0) {
                 // إظهار القائمة المنسدلة للأنواع
                 materialTypeSelect.classList.remove('d-none');
@@ -2907,6 +2956,20 @@ function addEditRawMaterial(defaults = {}) {
             const isHoneyMaterial = selectedMaterialName.includes('عسل') || selectedMaterialName.toLowerCase().includes('honey');
             
             const materialData = rawMaterialsData[selectedMaterialName];
+            
+            // التحقق من أن المادة هي مشتقات وتحديث الوحدة
+            const isDerivativesMaterial = selectedMaterialName === 'مشتقات' || 
+                                         (materialData && materialData.material_type === 'derivatives');
+            
+            // تحديث الوحدة للمشتقات لتكون "كيلوجرام" (الوزن)
+            const unitInput = newItem.querySelector(`input[name="raw_materials[${editMaterialIndex}][unit]"]`);
+            if (unitInput) {
+                if (isDerivativesMaterial) {
+                    unitInput.value = 'كيلوجرام';
+                } else {
+                    unitInput.value = defaultUnit || 'كيلوجرام';
+                }
+            }
             if (materialData && materialData.has_types && materialData.types && materialData.types.length > 0) {
                 // إظهار القائمة المنسدلة للأنواع
                 materialTypeSelect.classList.remove('d-none');
