@@ -1018,17 +1018,6 @@ if (isset($_GET['id'])) {
                         <label class="form-label">تاريخ النقل <span class="text-danger">*</span></label>
                         <input type="date" class="form-control" name="transfer_date" value="<?php echo date('Y-m-d'); ?>" required>
                     </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">السبب (اختياري)</label>
-                        <textarea class="form-control" name="reason" rows="2"></textarea>
-                    </div>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">ملاحظات (اختياري)</label>
-                        <textarea class="form-control" name="notes" rows="2"></textarea>
-                    </div>
-                    
                     <hr>
                     <h6 class="mb-3">المنتجات المراد نقلها:</h6>
                     
@@ -1045,7 +1034,6 @@ if (isset($_GET['id'])) {
                                         <th>اسم المنتج</th>
                                         <th>المتاح</th>
                                         <th>الكمية</th>
-                                        <th>ملاحظات</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -1109,7 +1097,6 @@ if (isset($_GET['id'])) {
                                         <th>اسم المنتج</th>
                                         <th>المتاح</th>
                                         <th>الكمية</th>
-                                        <th>ملاحظات</th>
                                     </tr>
                                 </thead>
                                 <tbody>
