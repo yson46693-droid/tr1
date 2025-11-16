@@ -149,11 +149,9 @@ try {
 }
 
 /**
- * تحميل بيانات المستخدمين والمنتجات
+ * تحميل بيانات المستخدمين
  */
 $productionUsers = [];
-$products = [];
-$allowedProductIds = [];
 
 try {
     $productionUsers = $db->query("
@@ -164,22 +162,6 @@ try {
     ");
 } catch (Exception $e) {
     error_log('Manager task page users query error: ' . $e->getMessage());
-}
-
-try {
-    $products = $db->query("
-        SELECT id, name
-        FROM products
-        ORDER BY name ASC
-    ");
-    $allowedProductIds = array_map(static function ($row) {
-        return isset($row['id']) ? (int)$row['id'] : 0;
-    }, $products);
-    $allowedProductIds = array_filter($allowedProductIds);
-} catch (Exception $e) {
-    error_log('Manager task page products query error: ' . $e->getMessage());
-    $products = [];
-    $allowedProductIds = [];
 }
 
 $allowedTypes = ['general', 'production', 'quality', 'maintenance'];
@@ -198,8 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $priority = in_array($priority, $allowedPriorities, true) ? $priority : 'normal';
         $dueDate = $_POST['due_date'] ?? '';
         $assignees = $_POST['assigned_to'] ?? [];
-        $selectedProductId = intval($_POST['product_id'] ?? 0);
-        $selectedProductId = ($selectedProductId > 0 && in_array($selectedProductId, $allowedProductIds, true)) ? $selectedProductId : 0;
+        $productName = trim($_POST['product_name'] ?? '');
 
         $productQuantityInput = isset($_POST['product_quantity']) ? trim((string)$_POST['product_quantity']) : '';
         $productQuantity = null;
@@ -264,9 +245,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $placeholders[] = '?';
                     }
 
-                    if ($selectedProductId > 0) {
-                        $columns[] = 'product_id';
-                        $values[] = $selectedProductId;
+                    // حفظ اسم المنتج في notes إذا كان موجوداً
+                    $notesValue = $details ?: null;
+                    if ($productName !== '') {
+                        $productInfo = 'المنتج: ' . $productName;
+                        if ($productQuantity !== null) {
+                            $productInfo .= ' - الكمية: ' . $productQuantity;
+                        }
+                        $notesValue = $notesValue ? ($notesValue . "\n\n" . $productInfo) : $productInfo;
+                    }
+                    
+                    // تحديث description إذا كان notes يحتوي على معلومات المنتج
+                    if ($notesValue && $notesValue !== $details) {
+                        $columns[] = 'notes';
+                        $values[] = $notesValue;
                         $placeholders[] = '?';
                     }
 
@@ -297,7 +289,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'assigned_to' => $assignedId,
                             'priority' => $priority,
                             'due_date' => $dueDate,
-                            'product_id' => $selectedProductId ?: null,
+                            'product_name' => $productName ?: null,
                             'quantity' => $productQuantity
                         ]
                     );
@@ -453,11 +445,10 @@ $priorityStyles = [
 
 try {
     $recentTasks = $db->query("
-        SELECT t.id, t.title, t.status, t.priority, t.due_date, t.created_at, t.product_id,
-               t.quantity, t.notes, u.full_name AS assigned_name, p.name AS product_name
+        SELECT t.id, t.title, t.status, t.priority, t.due_date, t.created_at,
+               t.quantity, t.notes, u.full_name AS assigned_name
         FROM tasks t
         LEFT JOIN users u ON t.assigned_to = u.id
-        LEFT JOIN products p ON t.product_id = p.id
         WHERE t.created_by = ?
         ORDER BY t.created_at DESC
         LIMIT 10
@@ -628,18 +619,10 @@ try {
                             <label class="form-label">وصف وتفاصيل المهمة</label>
                             <textarea class="form-control" name="details" rows="4" placeholder="أدخل التفاصيل والتعليمات اللازمة للعمال."></textarea>
                         </div>
-                        <?php if (!empty($products)): ?>
                         <div class="col-md-6" id="productFieldWrapper">
                             <label class="form-label">المنتج (اختياري)</label>
-                            <select class="form-select" name="product_id" id="productSelect">
-                                <option value="">اختر المنتج</option>
-                                <?php foreach ($products as $product): ?>
-                                    <option value="<?php echo (int)$product['id']; ?>">
-                                        <?php echo htmlspecialchars($product['name'] ?? 'منتج بدون اسم'); ?>
-                                    </option>
-                                <?php endforeach; ?>
-                            </select>
-                            <div class="form-text">اختياري: اختر المنتج المرتبط بالمهمة.</div>
+                            <input type="text" class="form-control" name="product_name" id="productNameInput" placeholder="أدخل اسم المنتج">
+                            <div class="form-text">اختياري: أدخل اسم المنتج المرتبط بالمهمة.</div>
                         </div>
                         <div class="col-md-6" id="quantityFieldWrapper">
                             <label class="form-label">الكمية (اختياري)</label>
@@ -649,10 +632,6 @@ try {
                             </div>
                             <div class="form-text">اختياري: أدخل الكمية المرتبطة بالمهمة.</div>
                         </div>
-                        <?php else: ?>
-                        <input type="hidden" name="product_id" value="">
-                        <input type="hidden" name="product_quantity" value="">
-                        <?php endif; ?>
                     </div>
                     <div class="d-flex justify-content-end mt-4 gap-2">
                         <button type="reset" class="btn btn-secondary"><i class="bi bi-arrow-counterclockwise me-1"></i>إعادة تعيين</button>
@@ -692,9 +671,16 @@ try {
                                 <tr>
                                     <td>
                                         <strong><?php echo htmlspecialchars($task['title']); ?></strong>
-                                        <?php if (!empty($task['product_name'])): ?>
-                                            <div class="text-muted small">المنتج: <?php echo htmlspecialchars($task['product_name']); ?></div>
-                                        <?php endif; ?>
+                                        <?php 
+                                        // استخراج معلومات المنتج من notes إذا كانت موجودة
+                                        $notes = $task['notes'] ?? '';
+                                        if ($notes && preg_match('/المنتج:\s*(.+?)(?:\s*-\s*الكمية:|$)/i', $notes, $matches)) {
+                                            $extractedProductName = trim($matches[1] ?? '');
+                                            if ($extractedProductName) {
+                                                echo '<div class="text-muted small">المنتج: ' . htmlspecialchars($extractedProductName) . '</div>';
+                                            }
+                                        }
+                                        ?>
                                         <?php if ((float)($task['quantity'] ?? 0) > 0): ?>
                                             <div class="text-muted small">الكمية: <?php echo number_format((float)$task['quantity'], 2); ?></div>
                                         <?php endif; ?>
@@ -749,7 +735,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const titleInput = document.querySelector('input[name="title"]');
     const productWrapper = document.getElementById('productFieldWrapper');
     const quantityWrapper = document.getElementById('quantityFieldWrapper');
-    const productSelect = document.getElementById('productSelect');
+    const productNameInput = document.getElementById('productNameInput');
     const quantityInput = document.getElementById('productQuantityInput');
 
     function updateTaskTypeUI() {
