@@ -78,6 +78,9 @@ $db = db();
 
 $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
 $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts : [];
+if ($page === 'final_products' && !in_array('assets/css/production-page.css', $pageStylesheets, true)) {
+    $pageStylesheets[] = 'assets/css/production-page.css';
+}
 if ($page === 'reports' && !in_array('assets/css/production-page.css', $pageStylesheets, true)) {
     $pageStylesheets[] = 'assets/css/production-page.css';
 }
@@ -99,6 +102,11 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                         'label' => 'مهام الإنتاج',
                         'icon' => 'bi-list-task',
                         'url' => getRelativeUrl('dashboard/manager.php?page=production_tasks')
+                    ],
+                    [
+                        'label' => 'مخزن المنتجات',
+                        'icon' => 'bi-boxes',
+                        'url' => getRelativeUrl('dashboard/manager.php?page=final_products')
                     ],
                     [
                         'label' => 'قوالب المنتجات',
@@ -787,6 +795,17 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                     include $modulePath;
                 } else {
                     echo '<div class="alert alert-warning">صفحة قوالب المنتجات غير متاحة حالياً</div>';
+                }
+                ?>
+                
+            <?php elseif ($page === 'final_products'): ?>
+                <!-- صفحة مخزن المنتجات - المدير -->
+                <?php 
+                $modulePath = __DIR__ . '/../modules/manager/final_products.php';
+                if (file_exists($modulePath)) {
+                    include $modulePath;
+                } else {
+                    echo '<div class="alert alert-warning">صفحة مخزن المنتجات غير متاحة حالياً</div>';
                 }
                 ?>
                 
