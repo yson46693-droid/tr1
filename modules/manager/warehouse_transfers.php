@@ -538,6 +538,12 @@ if (isset($_GET['id'])) {
         <i class="bi bi-box-arrow-right me-2"></i>نقل من منتجات الشركة
     </button>
 </div>
+<?php else: ?>
+<div class="d-flex justify-content-end mb-3">
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#transferFromCompanyModal">
+        <i class="bi bi-box-arrow-right me-2"></i>نقل من منتجات الشركة
+    </button>
+</div>
 <?php endif; ?>
 
 <?php if ($error): ?>
@@ -979,12 +985,368 @@ if (isset($_GET['id'])) {
     </div>
 </div>
 
+<!-- Modal نقل من منتجات الشركة -->
+<div class="modal fade" id="transferFromCompanyModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="bi bi-box-arrow-right me-2"></i>نقل منتجات من مخزن الشركة إلى مخزن السيارة</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="transferFromCompanyForm">
+                <input type="hidden" name="action" value="create_transfer_from_company">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">إلى مخزن السيارة <span class="text-danger">*</span></label>
+                        <select class="form-select" name="to_warehouse_id" id="to_warehouse_id" required>
+                            <option value="">-- اختر مخزن السيارة --</option>
+                            <?php foreach ($vehicleWarehouses as $vWarehouse): ?>
+                                <option value="<?php echo $vWarehouse['id']; ?>">
+                                    <?php echo htmlspecialchars($vWarehouse['name']); ?>
+                                    <?php if (!empty($vWarehouse['vehicle_number'])): ?>
+                                        (<?php echo htmlspecialchars($vWarehouse['vehicle_number']); ?>)
+                                    <?php endif; ?>
+                                    <?php if (!empty($vWarehouse['driver_name'])): ?>
+                                        - <?php echo htmlspecialchars($vWarehouse['driver_name']); ?>
+                                    <?php endif; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">تاريخ النقل <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" name="transfer_date" value="<?php echo date('Y-m-d'); ?>" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">السبب (اختياري)</label>
+                        <textarea class="form-control" name="reason" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">ملاحظات (اختياري)</label>
+                        <textarea class="form-control" name="notes" rows="2"></textarea>
+                    </div>
+                    
+                    <hr>
+                    <h6 class="mb-3">المنتجات المراد نقلها:</h6>
+                    
+                    <!-- منتجات المصنع -->
+                    <?php if (!empty($companyFactoryProducts)): ?>
+                    <div class="mb-4">
+                        <h6 class="text-primary mb-2"><i class="bi bi-building me-2"></i>منتجات المصنع</h6>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th width="30px"></th>
+                                        <th>رقم التشغيلة</th>
+                                        <th>اسم المنتج</th>
+                                        <th>المتاح</th>
+                                        <th>الكمية</th>
+                                        <th>ملاحظات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($companyFactoryProducts as $product): ?>
+                                        <?php
+                                        $availableQty = floatval($product['quantity_produced'] ?? 0);
+                                        // حساب الكمية المحجوزة في طلبات النقل المعلقة
+                                        $pendingTransfers = $db->queryOne(
+                                            "SELECT COALESCE(SUM(wti.quantity), 0) AS pending_quantity
+                                             FROM warehouse_transfer_items wti
+                                             INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                                             WHERE wti.batch_id = ? AND wt.status = 'pending'",
+                                            [$product['batch_id']]
+                                        );
+                                        $availableQty -= (float)($pendingTransfers['pending_quantity'] ?? 0);
+                                        $availableQty = max(0, $availableQty);
+                                        ?>
+                                        <tr>
+                                            <td>
+                                                <input type="checkbox" class="form-check-input product-checkbox" 
+                                                       data-type="factory" 
+                                                       data-product-id="<?php echo $product['product_id'] ?? 0; ?>"
+                                                       data-batch-id="<?php echo $product['batch_id']; ?>"
+                                                       data-batch-number="<?php echo htmlspecialchars($product['batch_number'] ?? ''); ?>"
+                                                       data-product-name="<?php echo htmlspecialchars($product['product_name'] ?? ''); ?>"
+                                                       data-available="<?php echo $availableQty; ?>">
+                                            </td>
+                                            <td><?php echo htmlspecialchars($product['batch_number'] ?? '-'); ?></td>
+                                            <td><?php echo htmlspecialchars($product['product_name'] ?? 'غير محدد'); ?></td>
+                                            <td><?php echo number_format($availableQty, 2); ?> <?php echo htmlspecialchars($product['unit'] ?? 'قطعة'); ?></td>
+                                            <td>
+                                                <input type="number" step="0.01" min="0" max="<?php echo $availableQty; ?>" 
+                                                       class="form-control form-control-sm quantity-input" 
+                                                       data-type="factory"
+                                                       data-batch-id="<?php echo $product['batch_id']; ?>"
+                                                       disabled>
+                                            </td>
+                                            <td>
+                                                <input type="text" class="form-control form-control-sm item-notes-input" 
+                                                       data-type="factory"
+                                                       data-batch-id="<?php echo $product['batch_id']; ?>"
+                                                       disabled>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <!-- المنتجات الخارجية -->
+                    <?php if (!empty($companyExternalProducts)): ?>
+                    <div class="mb-3">
+                        <h6 class="text-success mb-2"><i class="bi bi-cart4 me-2"></i>المنتجات الخارجية</h6>
+                        <div class="table-responsive" style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th width="30px"></th>
+                                        <th>اسم المنتج</th>
+                                        <th>المتاح</th>
+                                        <th>الكمية</th>
+                                        <th>ملاحظات</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($companyExternalProducts as $product): ?>
+                                        <?php
+                                        $availableQty = floatval($product['quantity'] ?? 0);
+                                        // حساب الكمية المحجوزة في طلبات النقل المعلقة
+                                        $pendingTransfers = $db->queryOne(
+                                            "SELECT COALESCE(SUM(wti.quantity), 0) AS pending_quantity
+                                             FROM warehouse_transfer_items wti
+                                             INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
+                                             WHERE wti.product_id = ? AND wt.status = 'pending'",
+                                            [$product['id']]
+                                        );
+                                        $availableQty -= (float)($pendingTransfers['pending_quantity'] ?? 0);
+                                        $availableQty = max(0, $availableQty);
+                                        ?>
+                                        <tr>
+                                            <td>
+                                                <input type="checkbox" class="form-check-input product-checkbox" 
+                                                       data-type="external" 
+                                                       data-product-id="<?php echo $product['id']; ?>"
+                                                       data-product-name="<?php echo htmlspecialchars($product['name'] ?? ''); ?>"
+                                                       data-available="<?php echo $availableQty; ?>">
+                                            </td>
+                                            <td><?php echo htmlspecialchars($product['name'] ?? ''); ?></td>
+                                            <td><?php echo number_format($availableQty, 2); ?> <?php echo htmlspecialchars($product['unit'] ?? 'قطعة'); ?></td>
+                                            <td>
+                                                <input type="number" step="0.01" min="0" max="<?php echo $availableQty; ?>" 
+                                                       class="form-control form-control-sm quantity-input" 
+                                                       data-type="external"
+                                                       data-product-id="<?php echo $product['id']; ?>"
+                                                       disabled>
+                                            </td>
+                                            <td>
+                                                <input type="text" class="form-control form-control-sm item-notes-input" 
+                                                       data-type="external"
+                                                       data-product-id="<?php echo $product['id']; ?>"
+                                                       disabled>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+                    
+                    <?php if (empty($companyFactoryProducts) && empty($companyExternalProducts)): ?>
+                        <div class="alert alert-warning">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            لا توجد منتجات متاحة للنقل حالياً.
+                        </div>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary" id="submitTransferBtn" disabled>
+                        <i class="bi bi-check-circle me-2"></i>إنشاء طلب النقل
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <script>
 function showRejectModal(transferId) {
     document.getElementById('rejectTransferId').value = transferId;
     const modal = new bootstrap.Modal(document.getElementById('rejectModal'));
     modal.show();
 }
+
+// إدارة نموذج نقل المنتجات من الشركة
+document.addEventListener('DOMContentLoaded', function() {
+    const transferModal = document.getElementById('transferFromCompanyModal');
+    if (!transferModal) return;
+    
+    const checkboxes = transferModal.querySelectorAll('.product-checkbox');
+    const quantityInputs = transferModal.querySelectorAll('.quantity-input');
+    const notesInputs = transferModal.querySelectorAll('.item-notes-input');
+    const submitBtn = document.getElementById('submitTransferBtn');
+    const form = document.getElementById('transferFromCompanyForm');
+    
+    // تفعيل/تعطيل حقول الكمية عند اختيار المنتج
+    checkboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const type = this.dataset.type;
+            const identifier = type === 'factory' ? this.dataset.batchId : this.dataset.productId;
+            const available = parseFloat(this.dataset.available || 0);
+            
+            // إيجاد حقول الكمية والملاحظات المرتبطة
+            quantityInputs.forEach(input => {
+                if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
+                    input.disabled = !this.checked;
+                    if (this.checked) {
+                        input.max = available;
+                        input.focus();
+                    } else {
+                        input.value = '';
+                    }
+                }
+            });
+            
+            notesInputs.forEach(input => {
+                if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
+                    input.disabled = !this.checked;
+                    if (!this.checked) {
+                        input.value = '';
+                    }
+                }
+            });
+            
+            updateSubmitButton();
+        });
+    });
+    
+    // التحقق من صحة الكمية
+    quantityInputs.forEach(input => {
+        input.addEventListener('input', function() {
+            const max = parseFloat(this.max || 0);
+            const value = parseFloat(this.value || 0);
+            if (value > max) {
+                this.value = max;
+                alert('الكمية المحددة تتجاوز الكمية المتاحة');
+            }
+            updateSubmitButton();
+        });
+    });
+    
+    // تحديث حالة زر الإرسال
+    function updateSubmitButton() {
+        let hasSelectedProducts = false;
+        let allQuantitiesValid = true;
+        
+        checkboxes.forEach(checkbox => {
+            if (checkbox.checked) {
+                hasSelectedProducts = true;
+                const type = checkbox.dataset.type;
+                const identifier = type === 'factory' ? checkbox.dataset.batchId : checkbox.dataset.productId;
+                const available = parseFloat(checkbox.dataset.available || 0);
+                
+                // التحقق من وجود كمية صحيحة
+                let quantityFound = false;
+                quantityInputs.forEach(input => {
+                    if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
+                        const qty = parseFloat(input.value || 0);
+                        if (qty > 0 && qty <= available) {
+                            quantityFound = true;
+                        } else if (qty > available) {
+                            allQuantitiesValid = false;
+                        }
+                    }
+                });
+                
+                if (!quantityFound) {
+                    allQuantitiesValid = false;
+                }
+            }
+        });
+        
+        if (submitBtn) {
+            submitBtn.disabled = !hasSelectedProducts || !allQuantitiesValid;
+        }
+    }
+    
+    // إعداد البيانات عند الإرسال
+    form.addEventListener('submit', function(e) {
+        const items = [];
+        
+        checkboxes.forEach(checkbox => {
+            if (checkbox.checked) {
+                const type = checkbox.dataset.type;
+                const identifier = type === 'factory' ? checkbox.dataset.batchId : checkbox.dataset.productId;
+                let quantity = 0;
+                let notes = '';
+                
+                quantityInputs.forEach(input => {
+                    if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
+                        quantity = parseFloat(input.value || 0);
+                    }
+                });
+                
+                notesInputs.forEach(input => {
+                    if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
+                        notes = input.value.trim();
+                    }
+                });
+                
+                if (quantity > 0) {
+                    const item = {
+                        quantity: quantity,
+                        notes: notes || ''
+                    };
+                    
+                    if (type === 'factory') {
+                        item.batch_id = checkbox.dataset.batchId;
+                        item.batch_number = checkbox.dataset.batchNumber;
+                        if (checkbox.dataset.productId && checkbox.dataset.productId != '0') {
+                            item.product_id = checkbox.dataset.productId;
+                        }
+                    } else {
+                        item.product_id = checkbox.dataset.productId;
+                    }
+                    
+                    items.push(item);
+                }
+            }
+        });
+        
+        if (items.length === 0) {
+            e.preventDefault();
+            alert('يرجى اختيار منتج واحد على الأقل وإدخال الكمية');
+            return false;
+        }
+        
+        // إضافة العناصر كحقول مخفية
+        items.forEach((item, index) => {
+            Object.keys(item).forEach(key => {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = `items[${index}][${key}]`;
+                input.value = item[key];
+                form.appendChild(input);
+            });
+        });
+    });
+    
+    // إعادة تعيين النموذج عند إغلاق الـ modal
+    transferModal.addEventListener('hidden.bs.modal', function() {
+        checkboxes.forEach(cb => {
+            cb.checked = false;
+            cb.dispatchEvent(new Event('change'));
+        });
+        form.querySelectorAll('input[type="hidden"][name^="items"]').forEach(input => input.remove());
+    });
+});
 </script>
 
 
