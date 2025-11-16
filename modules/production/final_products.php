@@ -2411,89 +2411,20 @@ if (!window.transferFormInitialized) {
             }
         });
 
-        // إدارة نموذج طلب النقل
+        // إدارة نموذج طلب النقل من المخزن الرئيسي
         const requestTransferModal = document.getElementById('requestTransferModal');
-        const requestTransferBtn = document.querySelector('[data-bs-target="#requestTransferModal"]');
-        
-        // التأكد من وجود النموذج في الصفحة قبل إضافة event listeners
-        if (requestTransferModal && requestTransferBtn) {
-            // منع إضافة event listener أكثر من مرة
-            if (requestTransferBtn.dataset.listenerAttached === 'true') {
-                return;
-            }
-            requestTransferBtn.dataset.listenerAttached = 'true';
-            
-            // إزالة أي event listeners موجودة مسبقاً من Bootstrap
-            const newBtn = requestTransferBtn.cloneNode(true);
-            requestTransferBtn.parentNode.replaceChild(newBtn, requestTransferBtn);
-            const cleanBtn = document.querySelector('[data-bs-target="#requestTransferModal"]');
-            
-            // إضافة event listener يدوي لمنع فتح النموذج في أماكن أخرى
-            cleanBtn.addEventListener('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                e.stopImmediatePropagation();
-                
-                // التأكد من وجود Bootstrap
-                if (typeof bootstrap === 'undefined' || typeof bootstrap.Modal === 'undefined') {
-                    alert('تعذر فتح النموذج. يرجى تحديث الصفحة.');
-                    return false;
-                }
-                
-                // التحقق من أن النموذج موجود في نفس الصفحة
-                const modal = document.getElementById('requestTransferModal');
-                if (!modal) {
-                    console.error('requestTransferModal not found');
-                    return false;
-                }
-                
-                // إزالة أي backdrops متعددة
-                const backdrops = document.querySelectorAll('.modal-backdrop');
-                backdrops.forEach(backdrop => {
-                    if (backdrop !== backdrops[0]) {
-                        backdrop.remove();
-                    }
-                });
-                
-                // التأكد من أن النموذج ليس مفتوحاً بالفعل
-                const existingInstance = bootstrap.Modal.getInstance(modal);
-                if (existingInstance && existingInstance._isShown) {
-                    return false; // النموذج مفتوح بالفعل
-                }
-                
-                // إغلاق أي modals أخرى مفتوحة
-                const allModals = document.querySelectorAll('.modal.show');
-                allModals.forEach(otherModal => {
-                    if (otherModal !== modal) {
-                        const otherInstance = bootstrap.Modal.getInstance(otherModal);
-                        if (otherInstance) {
-                            otherInstance.hide();
-                        }
-                    }
-                });
-                
-                // فتح النموذج
-                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal, {
-                    backdrop: true,
-                    keyboard: true,
-                    focus: true
-                });
-                modalInstance.show();
-                
-                return false;
-            }, true); // استخدام capture phase لمنع Bootstrap من التعامل معه أولاً
-            
-            // تحميل المنتجات عند فتح النموذج - مرة واحدة فقط
+        if (requestTransferModal) {
+            // تحميل المنتجات من المخزن الرئيسي عند فتح النموذج لأول مرة (مثل صفحة مخزون السيارات)
             if (allFinishedProductOptions.length === 0 && <?php echo $primaryWarehouse ? 'true' : 'false'; ?>) {
                 const loadProductsOnce = function() {
                     if (allFinishedProductOptions.length > 0) {
                         return; // تم التحميل بالفعل
                     }
-                    
+
                     const currentUrl = new URL(window.location.href);
                     currentUrl.searchParams.set('ajax', 'load_products');
                     currentUrl.searchParams.set('warehouse_id', <?php echo $primaryWarehouse['id'] ?? 'null'; ?>);
-                    
+
                     fetch(currentUrl.toString())
                         .then(response => {
                             const contentType = response.headers.get('content-type');
@@ -2533,50 +2464,20 @@ if (!window.transferFormInitialized) {
                             console.error('Error loading products:', error);
                         });
                 };
-                
+
                 // استدعاء التحميل عند فتح النموذج مرة واحدة فقط
-                requestTransferModal.addEventListener('shown.bs.modal', loadProductsOnce, { once: true });
+                requestTransferModal.addEventListener('show.bs.modal', loadProductsOnce, { once: true });
             }
 
             // تحديث token عند فتح النموذج
             const transferTokenInput = document.getElementById('transferToken');
             if (transferTokenInput) {
-                requestTransferModal.addEventListener('shown.bs.modal', function() {
+                requestTransferModal.addEventListener('show.bs.modal', function() {
                     if (transferTokenInput.value === '') {
                         transferTokenInput.value = '<?php echo htmlspecialchars($_SESSION['transfer_submission_token'] ?? '', ENT_QUOTES); ?>';
                     }
-                    
-                    // التأكد من وجود backdrop واحد فقط
-                    const backdrops = document.querySelectorAll('.modal-backdrop');
-                    if (backdrops.length > 1) {
-                        for (let i = 1; i < backdrops.length; i++) {
-                            backdrops[i].remove();
-                        }
-                    }
-                    
-                    // التأكد من أن الـ modal في الموضع الصحيح
-                    const modalDialog = requestTransferModal.querySelector('.modal-dialog');
-                    if (modalDialog) {
-                        modalDialog.style.position = 'relative';
-                        modalDialog.style.zIndex = '1055';
-                    }
                 });
             }
-            
-            // تنظيف عند إغلاق النموذج
-            requestTransferModal.addEventListener('hidden.bs.modal', function() {
-                // إزالة أي backdrops متبقية
-                const backdrops = document.querySelectorAll('.modal-backdrop');
-                backdrops.forEach(backdrop => backdrop.remove());
-                
-                // إزالة class modal-open من body إذا لم تكن هناك modals أخرى
-                const otherModals = document.querySelectorAll('.modal.show');
-                if (otherModals.length === 0) {
-                    document.body.classList.remove('modal-open');
-                    document.body.style.overflow = '';
-                    document.body.style.paddingRight = '';
-                }
-            });
         }
 
         // تعطيل زر الإرسال بعد النقر لمنع double-click
