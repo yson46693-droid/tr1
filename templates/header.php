@@ -261,7 +261,7 @@ if (ob_get_level() > 0) {
         
         /* التأكد من أن الـ Modal قابل للنقر */
         .modal {
-            z-index: 1050 !important;
+            z-index: 400 !important;
         }
         
         .modal-backdrop {
