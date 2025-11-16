@@ -104,9 +104,9 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                         'url' => getRelativeUrl('dashboard/manager.php?page=production_tasks')
                     ],
                     [
-                        'label' => 'مخزن المنتجات',
-                        'icon' => 'bi-boxes',
-                        'url' => getRelativeUrl('dashboard/manager.php?page=final_products')
+                        'label' => 'منتجات الشركة',
+                        'icon' => 'bi-box-seam',
+                        'url' => getRelativeUrl('dashboard/manager.php?page=company_products')
                     ],
                     [
                         'label' => 'قوالب المنتجات',
@@ -798,14 +798,14 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 }
                 ?>
                 
-            <?php elseif ($page === 'final_products'): ?>
-                <!-- صفحة مخزن المنتجات - المدير -->
+            <?php elseif ($page === 'company_products'): ?>
+                <!-- صفحة منتجات الشركة -->
                 <?php 
-                $modulePath = __DIR__ . '/../modules/production/final_products.php';
+                $modulePath = __DIR__ . '/../modules/manager/company_products.php';
                 if (file_exists($modulePath)) {
                     include $modulePath;
                 } else {
-                    echo '<div class="alert alert-warning">صفحة مخزن المنتجات غير متاحة حالياً</div>';
+                    echo '<div class="alert alert-warning">صفحة منتجات الشركة غير متاحة حالياً</div>';
                 }
                 ?>
                 
