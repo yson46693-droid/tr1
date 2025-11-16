@@ -93,15 +93,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $productId = !empty($item['product_id']) ? intval($item['product_id']) : 0;
                 $batchId = !empty($item['batch_id']) ? intval($item['batch_id']) : 0;
                 $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0;
-                $itemNotes = trim($item['notes'] ?? '');
                 
                 if (($productId > 0 || $batchId > 0) && $quantity > 0) {
                     $items[] = [
                         'product_id' => $productId > 0 ? $productId : null,
                         'batch_id' => $batchId > 0 ? $batchId : null,
                         'batch_number' => !empty($item['batch_number']) ? trim($item['batch_number']) : null,
-                        'quantity' => $quantity,
-                        'notes' => $itemNotes ?: null
+                        'quantity' => $quantity
                     ];
                 }
             }
@@ -1071,12 +1069,6 @@ if (isset($_GET['id'])) {
                                                        data-batch-id="<?php echo $product['batch_id']; ?>"
                                                        disabled>
                                             </td>
-                                            <td>
-                                                <input type="text" class="form-control form-control-sm item-notes-input" 
-                                                       data-type="factory"
-                                                       data-batch-id="<?php echo $product['batch_id']; ?>"
-                                                       disabled>
-                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -1131,12 +1123,6 @@ if (isset($_GET['id'])) {
                                                        data-product-id="<?php echo $product['id']; ?>"
                                                        disabled>
                                             </td>
-                                            <td>
-                                                <input type="text" class="form-control form-control-sm item-notes-input" 
-                                                       data-type="external"
-                                                       data-product-id="<?php echo $product['id']; ?>"
-                                                       disabled>
-                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -1177,7 +1163,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     const checkboxes = transferModal.querySelectorAll('.product-checkbox');
     const quantityInputs = transferModal.querySelectorAll('.quantity-input');
-    const notesInputs = transferModal.querySelectorAll('.item-notes-input');
     const submitBtn = document.getElementById('submitTransferBtn');
     const form = document.getElementById('transferFromCompanyForm');
     
@@ -1188,7 +1173,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const identifier = type === 'factory' ? this.dataset.batchId : this.dataset.productId;
             const available = parseFloat(this.dataset.available || 0);
             
-            // إيجاد حقول الكمية والملاحظات المرتبطة
+            // إيجاد حقول الكمية المرتبطة
             quantityInputs.forEach(input => {
                 if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
                     input.disabled = !this.checked;
@@ -1196,15 +1181,6 @@ document.addEventListener('DOMContentLoaded', function() {
                         input.max = available;
                         input.focus();
                     } else {
-                        input.value = '';
-                    }
-                }
-            });
-            
-            notesInputs.forEach(input => {
-                if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
-                    input.disabled = !this.checked;
-                    if (!this.checked) {
                         input.value = '';
                     }
                 }
@@ -1272,7 +1248,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 const type = checkbox.dataset.type;
                 const identifier = type === 'factory' ? checkbox.dataset.batchId : checkbox.dataset.productId;
                 let quantity = 0;
-                let notes = '';
                 
                 quantityInputs.forEach(input => {
                     if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
@@ -1280,16 +1255,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 });
                 
-                notesInputs.forEach(input => {
-                    if (input.dataset.type === type && input.dataset[type === 'factory' ? 'batchId' : 'productId'] == identifier) {
-                        notes = input.value.trim();
-                    }
-                });
-                
                 if (quantity > 0) {
                     const item = {
-                        quantity: quantity,
-                        notes: notes || ''
+                        quantity: quantity
                     };
                     
                     if (type === 'factory') {

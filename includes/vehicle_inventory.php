@@ -1454,6 +1454,14 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
                  ['old_status' => $transfer['status']], 
                  ['new_status' => 'approved']);
         
+        // إرسال فاتورة النقل إلى تليجرام
+        try {
+            sendTransferInvoiceToTelegram($transferId, $transfer, null, $transferredProducts);
+        } catch (Exception $telegramException) {
+            // لا نوقف العملية إذا فشل إرسال التليجرام
+            error_log('Failed to send transfer invoice to Telegram: ' . $telegramException->getMessage());
+        }
+        
         return [
             'success' => true, 
             'message' => 'تمت الموافقة على النقل بنجاح',
@@ -1645,5 +1653,189 @@ function getVehicles($filters = []) {
     $sql .= " ORDER BY v.vehicle_number ASC";
     
     return $db->query($sql, $params);
+}
+
+/**
+ * إرسال فاتورة نقل المنتجات إلى تليجرام
+ */
+function sendTransferInvoiceToTelegram($transferId, $transfer = null, $transferItems = null, $transferredProducts = null) {
+    if (!isTelegramConfigured()) {
+        return false;
+    }
+    
+    require_once __DIR__ . '/simple_telegram.php';
+    require_once __DIR__ . '/path_helper.php';
+    
+    $db = db();
+    
+    // جلب بيانات النقل إذا لم تكن موجودة
+    if (!$transfer) {
+        $transfer = $db->queryOne(
+            "SELECT wt.*, 
+                    w1.name as from_warehouse_name, w1.warehouse_type as from_warehouse_type,
+                    w2.name as to_warehouse_name, w2.warehouse_type as to_warehouse_type,
+                    u1.full_name as requested_by_name, u2.full_name as approved_by_name
+             FROM warehouse_transfers wt
+             LEFT JOIN warehouses w1 ON wt.from_warehouse_id = w1.id
+             LEFT JOIN warehouses w2 ON wt.to_warehouse_id = w2.id
+             LEFT JOIN users u1 ON wt.requested_by = u1.id
+             LEFT JOIN users u2 ON wt.approved_by = u2.id
+             WHERE wt.id = ?",
+            [$transferId]
+        );
+    }
+    
+    if (!$transfer) {
+        return false;
+    }
+    
+    // جلب عناصر النقل إذا لم تكن موجودة
+    if (!$transferItems) {
+        $transferItems = $db->query(
+            "SELECT wti.*, p.name as product_name, p.unit,
+                    fp.batch_number as finished_batch_number
+             FROM warehouse_transfer_items wti
+             LEFT JOIN products p ON wti.product_id = p.id
+             LEFT JOIN finished_products fp ON wti.batch_id = fp.id
+             WHERE wti.transfer_id = ?
+             ORDER BY wti.id",
+            [$transferId]
+        );
+    }
+    
+    // جمع معلومات المنتجات المنقولة
+    if (!$transferredProducts && !empty($transferItems)) {
+        $transferredProducts = [];
+        foreach ($transferItems as $item) {
+            $productName = $item['product_name'] ?? 'منتج غير معروف';
+            $quantity = floatval($item['quantity'] ?? 0);
+            $batchNumber = $item['batch_number'] ?? $item['finished_batch_number'] ?? null;
+            
+            $transferredProducts[] = [
+                'name' => $productName,
+                'quantity' => $quantity,
+                'unit' => $item['unit'] ?? 'قطعة',
+                'batch_number' => $batchNumber
+            ];
+        }
+    }
+    
+    // معلومات الشركة
+    $companyName = COMPANY_NAME ?? 'شركة';
+    
+    // بناء رابط الطباعة
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $basePath = getBasePath();
+    $baseUrl = $protocol . $host . $basePath;
+    $printUrl = $baseUrl . '/print_transfer_invoice.php?id=' . $transferId . '&print=1';
+    
+    // تنسيق النوع والحالة
+    $transferTypeLabels = [
+        'to_vehicle' => 'إلى مخزن سيارة',
+        'from_vehicle' => 'من مخزن سيارة',
+        'between_warehouses' => 'بين مخازن'
+    ];
+    
+    $statusLabels = [
+        'pending' => 'معلق',
+        'approved' => 'موافق عليه',
+        'completed' => 'مكتمل',
+        'rejected' => 'مرفوض'
+    ];
+    
+    $transferType = $transferTypeLabels[$transfer['transfer_type']] ?? $transfer['transfer_type'];
+    $status = $statusLabels[$transfer['status']] ?? $transfer['status'];
+    $transferDate = formatDate($transfer['transfer_date']);
+    $transferTime = formatDateTime($transfer['approved_at'] ?? $transfer['created_at']);
+    
+    // بناء رسالة الفاتورة بتنسيق HTML جميل
+    $message = "📦 <b>فاتورة نقل المنتجات</b>\n\n";
+    $message .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    $message .= "🏢 <b>الشركة:</b> {$companyName}\n";
+    $message .= "📋 <b>رقم الفاتورة:</b> {$transfer['transfer_number']}\n";
+    $message .= "📅 <b>تاريخ النقل:</b> {$transferDate}\n";
+    $message .= "⏰ <b>وقت المعالجة:</b> {$transferTime}\n";
+    $message .= "📊 <b>الحالة:</b> {$status}\n";
+    $message .= "🔄 <b>نوع النقل:</b> {$transferType}\n\n";
+    $message .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+    
+    $message .= "📤 <b>من المخزن:</b>\n";
+    $fromType = $transfer['from_warehouse_type'] === 'main' ? '🏛️ مخزن رئيسي' : '🚗 مخزن سيارة';
+    $message .= "   {$fromType}\n";
+    $message .= "   {$transfer['from_warehouse_name']}\n\n";
+    
+    $message .= "📥 <b>إلى المخزن:</b>\n";
+    $toType = $transfer['to_warehouse_type'] === 'main' ? '🏛️ مخزن رئيسي' : '🚗 مخزن سيارة';
+    $message .= "   {$toType}\n";
+    $message .= "   {$transfer['to_warehouse_name']}\n\n";
+    
+    $message .= "👤 <b>طلب بواسطة:</b> {$transfer['requested_by_name']}\n";
+    if (!empty($transfer['approved_by_name'])) {
+        $message .= "✅ <b>تمت الموافقة بواسطة:</b> {$transfer['approved_by_name']}\n";
+    }
+    $message .= "\n━━━━━━━━━━━━━━━━━━━━\n\n";
+    
+    $message .= "📦 <b>المنتجات المنقولة:</b>\n\n";
+    
+    if (!empty($transferredProducts)) {
+        $totalQuantity = 0;
+        $index = 1;
+        
+        foreach ($transferredProducts as $product) {
+            $productName = htmlspecialchars($product['name'] ?? 'منتج غير معروف');
+            $quantity = floatval($product['quantity'] ?? 0);
+            $unit = htmlspecialchars($product['unit'] ?? 'قطعة');
+            $batchNumber = $product['batch_number'] ?? null;
+            $totalQuantity += $quantity;
+            
+            $message .= "{$index}. <b>{$productName}</b>\n";
+            $message .= "   الكمية: <b>{$quantity}</b> {$unit}\n";
+            
+            if ($batchNumber) {
+                $message .= "   📌 تشغيلة: <code>{$batchNumber}</code>\n";
+            }
+            $message .= "\n";
+            $index++;
+        }
+        
+        $message .= "━━━━━━━━━━━━━━━━━━━━\n\n";
+        $message .= "📊 <b>إجمالي الكمية:</b> <b>{$totalQuantity}</b>\n";
+        $message .= "📦 <b>عدد المنتجات:</b> " . count($transferredProducts) . "\n";
+    } else {
+        $message .= "⚠️ لا توجد منتجات\n";
+    }
+    
+    if (!empty($transfer['reason'])) {
+        $message .= "\n━━━━━━━━━━━━━━━━━━━━\n\n";
+        $message .= "📝 <b>السبب / الملاحظات:</b>\n";
+        $message .= htmlspecialchars($transfer['reason']) . "\n";
+    }
+    
+    $message .= "\n━━━━━━━━━━━━━━━━━━━━\n\n";
+    $message .= "✅ تم إتمام عملية النقل بنجاح\n";
+    $message .= "📄 يمكنك طباعة الفاتورة من الرابط أدناه\n";
+    
+    // إنشاء أزرار Markdown
+    $buttons = [
+        [
+            [
+                'text' => '🖨️ طباعة الفاتورة',
+                'url' => $printUrl
+            ]
+        ]
+    ];
+    
+    // إرسال الرسالة مع الأزرار
+    $result = sendTelegramMessageWithButtons($message, $buttons);
+    
+    if ($result && ($result['success'] ?? false)) {
+        error_log("Transfer invoice sent to Telegram successfully for transfer ID: $transferId");
+        return true;
+    } else {
+        $error = $result['error'] ?? 'Unknown error';
+        error_log("Failed to send transfer invoice to Telegram: $error");
+        return false;
+    }
 }
 
