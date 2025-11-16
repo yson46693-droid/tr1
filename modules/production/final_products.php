@@ -2411,69 +2411,107 @@ if (!window.transferFormInitialized) {
             }
         });
 
-        // تحميل المنتجات عند فتح النموذج - مرة واحدة فقط
+        // إدارة نموذج طلب النقل
         const requestTransferModal = document.getElementById('requestTransferModal');
-        if (requestTransferModal && allFinishedProductOptions.length === 0 && <?php echo $primaryWarehouse ? 'true' : 'false'; ?>) {
-            const loadProductsOnce = function() {
-                if (allFinishedProductOptions.length > 0) {
-                    return; // تم التحميل بالفعل
+        const requestTransferBtn = document.querySelector('[data-bs-target="#requestTransferModal"]');
+        
+        // التأكد من وجود النموذج في الصفحة قبل إضافة event listeners
+        if (requestTransferModal && requestTransferBtn) {
+            // إضافة event listener يدوي لمنع فتح النموذج في أماكن أخرى
+            requestTransferBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                // التأكد من وجود Bootstrap
+                if (typeof bootstrap === 'undefined' || typeof bootstrap.Modal === 'undefined') {
+                    alert('تعذر فتح النموذج. يرجى تحديث الصفحة.');
+                    return false;
                 }
                 
-                const currentUrl = new URL(window.location.href);
-                currentUrl.searchParams.set('ajax', 'load_products');
-                currentUrl.searchParams.set('warehouse_id', <?php echo $primaryWarehouse['id'] ?? 'null'; ?>);
+                // التحقق من أن النموذج موجود في نفس الصفحة (ليس في iframe أو مكان آخر)
+                const modal = document.getElementById('requestTransferModal');
+                if (!modal || modal.offsetParent === null) {
+                    console.error('requestTransferModal not found or hidden in current page');
+                    return false;
+                }
                 
-                fetch(currentUrl.toString())
-                    .then(response => {
-                        const contentType = response.headers.get('content-type');
-                        if (!contentType || !contentType.includes('application/json')) {
-                            return response.text().then(text => {
-                                throw new Error('Expected JSON but got: ' + text.substring(0, 100));
-                            });
-                        }
-                        return response.json();
-                    })
-                    .then(data => {
-                        if (data.success && data.products) {
-                            allFinishedProductOptions = data.products;
-                            // تحديث القوائم بدون إعادة ربط الأحداث
-                            itemsContainer.querySelectorAll('.product-select').forEach(select => {
-                                const currentValue = select.value;
-                                select.innerHTML = '<option value="">اختر المنتج</option>';
-                                allFinishedProductOptions.forEach(option => {
-                                    const optionElement = document.createElement('option');
-                                    optionElement.value = option.product_id || 0;
-                                    optionElement.dataset.productId = option.product_id || 0;
-                                    optionElement.dataset.batchId = option.batch_id;
-                                    optionElement.dataset.batchNumber = option.batch_number || '';
-                                    optionElement.dataset.available = option.quantity_available || 0;
-                                    optionElement.textContent = `${option.product_name} - تشغيلة ${option.batch_number || 'بدون'} (متاح: ${parseFloat(option.quantity_available || 0).toFixed(2)})`;
-                                    if (currentValue && option.product_id == currentValue) {
-                                        optionElement.selected = true;
-                                    }
-                                    select.appendChild(optionElement);
-                                });
-                            });
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error loading products:', error);
-                    });
-            };
+                // التأكد من أن النموذج ليس مفتوحاً بالفعل
+                const existingInstance = bootstrap.Modal.getInstance(modal);
+                if (existingInstance && existingInstance._isShown) {
+                    return false; // النموذج مفتوح بالفعل
+                }
+                
+                // فتح النموذج
+                const modalInstance = bootstrap.Modal.getOrCreateInstance(modal);
+                modalInstance.show();
+                
+                return false;
+            }, true); // استخدام capture phase لمنع Bootstrap من التعامل معه أولاً
             
-            // استدعاء التحميل عند فتح النموذج مرة واحدة فقط
-            requestTransferModal.addEventListener('shown.bs.modal', loadProductsOnce, { once: true });
-        }
+            // تحميل المنتجات عند فتح النموذج - مرة واحدة فقط
+            if (allFinishedProductOptions.length === 0 && <?php echo $primaryWarehouse ? 'true' : 'false'; ?>) {
+                const loadProductsOnce = function() {
+                    if (allFinishedProductOptions.length > 0) {
+                        return; // تم التحميل بالفعل
+                    }
+                    
+                    const currentUrl = new URL(window.location.href);
+                    currentUrl.searchParams.set('ajax', 'load_products');
+                    currentUrl.searchParams.set('warehouse_id', <?php echo $primaryWarehouse['id'] ?? 'null'; ?>);
+                    
+                    fetch(currentUrl.toString())
+                        .then(response => {
+                            const contentType = response.headers.get('content-type');
+                            if (!contentType || !contentType.includes('application/json')) {
+                                return response.text().then(text => {
+                                    throw new Error('Expected JSON but got: ' + text.substring(0, 100));
+                                });
+                            }
+                            return response.json();
+                        })
+                        .then(data => {
+                            if (data.success && data.products) {
+                                allFinishedProductOptions = data.products;
+                                // تحديث القوائم بدون إعادة ربط الأحداث
+                                if (itemsContainer) {
+                                    itemsContainer.querySelectorAll('.product-select').forEach(select => {
+                                        const currentValue = select.value;
+                                        select.innerHTML = '<option value="">اختر المنتج</option>';
+                                        allFinishedProductOptions.forEach(option => {
+                                            const optionElement = document.createElement('option');
+                                            optionElement.value = option.product_id || 0;
+                                            optionElement.dataset.productId = option.product_id || 0;
+                                            optionElement.dataset.batchId = option.batch_id;
+                                            optionElement.dataset.batchNumber = option.batch_number || '';
+                                            optionElement.dataset.available = option.quantity_available || 0;
+                                            optionElement.textContent = `${option.product_name} - تشغيلة ${option.batch_number || 'بدون'} (متاح: ${parseFloat(option.quantity_available || 0).toFixed(2)})`;
+                                            if (currentValue && option.product_id == currentValue) {
+                                                optionElement.selected = true;
+                                            }
+                                            select.appendChild(optionElement);
+                                        });
+                                    });
+                                }
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error loading products:', error);
+                        });
+                };
+                
+                // استدعاء التحميل عند فتح النموذج مرة واحدة فقط
+                requestTransferModal.addEventListener('shown.bs.modal', loadProductsOnce, { once: true });
+            }
 
-        // تحديث token عند فتح النموذج
-        const transferTokenInput = document.getElementById('transferToken');
-        if (requestTransferModal && transferTokenInput) {
-            requestTransferModal.addEventListener('shown.bs.modal', function() {
-                if (transferTokenInput && transferTokenInput.value === '') {
-                    // الحصول على token من server (يمكن تحسينه لاحقاً بـ AJAX)
-                    transferTokenInput.value = '<?php echo htmlspecialchars($_SESSION['transfer_submission_token'] ?? '', ENT_QUOTES); ?>';
-                }
-            });
+            // تحديث token عند فتح النموذج
+            const transferTokenInput = document.getElementById('transferToken');
+            if (transferTokenInput) {
+                requestTransferModal.addEventListener('shown.bs.modal', function() {
+                    if (transferTokenInput.value === '') {
+                        transferTokenInput.value = '<?php echo htmlspecialchars($_SESSION['transfer_submission_token'] ?? '', ENT_QUOTES); ?>';
+                    }
+                });
+            }
         }
 
         // تعطيل زر الإرسال بعد النقر لمنع double-click

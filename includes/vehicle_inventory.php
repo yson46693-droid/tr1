@@ -1153,20 +1153,18 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
                     );
                     
                     if ($batchRow) {
-                        $availableQuantity = (float)($batchRow['quantity_produced'] ?? 0);
+                        $quantityProduced = (float)($batchRow['quantity_produced'] ?? 0);
+                        error_log("Approval check - Transfer ID: $transferId, Batch ID: $batchId, quantity_produced: $quantityProduced, requested: $requestedQuantity");
                         
-                        // خصم الكمية المنقولة بالفعل (approved أو completed)
-                        $transferred = $db->queryOne(
-                            "SELECT COALESCE(SUM(wti.quantity), 0) AS total_transferred
-                             FROM warehouse_transfer_items wti
-                             INNER JOIN warehouse_transfers wt ON wt.id = wti.transfer_id
-                             WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND (wt.status = 'approved' OR wt.status = 'completed')",
-                            [$batchId, $transfer['from_warehouse_id']]
-                        );
-                        $availableQuantity -= (float)($transferred['total_transferred'] ?? 0);
+                        // quantity_produced هو الكمية الحالية المتبقية في finished_products
+                        // لكن عند الموافقة على نقل، يتم خصم الكمية مباشرة من quantity_produced
+                        // لذلك، يجب أن نحسب الكمية المتاحة بناءً على quantity_produced الحالي
+                        // ونخصم فقط الكميات المحجوزة في طلبات pending الأخرى (غير النقل الحالي)
+                        $availableQuantity = $quantityProduced;
                         
                         // خصم الكمية المحجوزة في طلبات النقل المعلقة (pending) من نفس المخزن
-                        // نستبعد النقل الحالي من الحساب
+                        // نستبعد النقل الحالي من الحساب لأنه هو نفسه
+                        // ملاحظة: لا نخصم approved/completed لأن quantity_produced نفسه تم تحديثه عند الموافقة السابقة
                         $pendingTransfers = $db->queryOne(
                             "SELECT COALESCE(SUM(wti.quantity), 0) AS pending_quantity
                              FROM warehouse_transfer_items wti
@@ -1174,9 +1172,13 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
                              WHERE wti.batch_id = ? AND wt.from_warehouse_id = ? AND wt.status = 'pending' AND wt.id != ?",
                             [$batchId, $transfer['from_warehouse_id'], $transferId]
                         );
-                        $availableQuantity -= (float)($pendingTransfers['pending_quantity'] ?? 0);
+                        $pendingQuantity = (float)($pendingTransfers['pending_quantity'] ?? 0);
+                        $availableQuantity -= $pendingQuantity;
+                        
+                        error_log("quantity_produced: $quantityProduced, pending (excluding current): $pendingQuantity, final available: $availableQuantity for batch_id: $batchId");
                     } else {
                         $availableQuantity = 0.0;
+                        error_log("Warning: Batch ID $batchId not found in finished_products");
                     }
                 }
             } else if ($productId > 0) {
