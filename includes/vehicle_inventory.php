@@ -970,22 +970,42 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
         }
         
         // النقل تم إنشاؤه بنجاح، الآن نقوم بعمليات إضافية (لا يجب أن تؤثر على نجاح العملية)
-        // إرسال إشعار للمديرين للموافقة
-        try {
-            require_once __DIR__ . '/approval_system.php';
-            $approvalNotes = sprintf(
-                "طلب نقل منتجات من المخزن %s إلى المخزن %s بتاريخ %s",
-                $fromWarehouse['name'] ?? ('#' . $fromWarehouseId),
-                $toWarehouse['name'] ?? ('#' . $toWarehouseId),
-                $transferDate
-            );
-            $approvalResult = requestApproval('warehouse_transfer', $transferId, $requestedBy, $approvalNotes);
-            if (!($approvalResult['success'] ?? false)) {
-                error_log('Warehouse transfer approval request warning: ' . ($approvalResult['message'] ?? 'Unknown error'));
+        
+        // التحقق من دور المستخدم - إذا كان المدير، الموافقة على النقل مباشرة
+        require_once __DIR__ . '/auth.php';
+        $requesterUser = getUserById($requestedBy);
+        $isManager = ($requesterUser && strtolower($requesterUser['role'] ?? '') === 'manager');
+        
+        if ($isManager) {
+            // إذا كان المدير هو من أنشأ الطلب، الموافقة عليه وتنفيذه مباشرة
+            try {
+                $approvalResult = approveWarehouseTransfer($transferId, $requestedBy);
+                if (!($approvalResult['success'] ?? false)) {
+                    error_log('Manager warehouse transfer auto-approval warning: ' . ($approvalResult['message'] ?? 'Unknown error'));
+                    // حتى لو فشلت الموافقة، النقل تم إنشاؤه بنجاح
+                }
+            } catch (Exception $approvalException) {
+                // لا نسمح لفشل الموافقة بإلغاء نجاح إنشاء النقل
+                error_log('Manager warehouse transfer auto-approval exception: ' . $approvalException->getMessage());
             }
-        } catch (Exception $approvalException) {
-            // لا نسمح لفشل طلب الموافقة بإلغاء نجاح إنشاء النقل
-            error_log('Warehouse transfer approval request exception: ' . $approvalException->getMessage());
+        } else {
+            // إذا لم يكن المدير، إرسال إشعار للمديرين للموافقة
+            try {
+                require_once __DIR__ . '/approval_system.php';
+                $approvalNotes = sprintf(
+                    "طلب نقل منتجات من المخزن %s إلى المخزن %s بتاريخ %s",
+                    $fromWarehouse['name'] ?? ('#' . $fromWarehouseId),
+                    $toWarehouse['name'] ?? ('#' . $toWarehouseId),
+                    $transferDate
+                );
+                $approvalResult = requestApproval('warehouse_transfer', $transferId, $requestedBy, $approvalNotes);
+                if (!($approvalResult['success'] ?? false)) {
+                    error_log('Warehouse transfer approval request warning: ' . ($approvalResult['message'] ?? 'Unknown error'));
+                }
+            } catch (Exception $approvalException) {
+                // لا نسمح لفشل طلب الموافقة بإلغاء نجاح إنشاء النقل
+                error_log('Warehouse transfer approval request exception: ' . $approvalException->getMessage());
+            }
         }
         
         // تسجيل عملية التدقيق

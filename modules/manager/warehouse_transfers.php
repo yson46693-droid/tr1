@@ -129,7 +129,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
                     
                     if ($result['success']) {
-                        $_SESSION['warehouse_transfer_success'] = 'تم إنشاء طلب النقل بنجاح. سيتم مراجعته و الموافقة عليه.';
+                        // التحقق من حالة النقل بعد الإنشاء
+                        $transferInfo = $db->queryOne(
+                            "SELECT status FROM warehouse_transfers WHERE id = ?",
+                            [$result['transfer_id']]
+                        );
+                        
+                        if ($transferInfo && $transferInfo['status'] === 'completed') {
+                            $_SESSION['warehouse_transfer_success'] = 'تم تنفيذ النقل بنجاح. تم نقل المنتجات إلى المخزن المحدد مباشرة.';
+                        } else {
+                            $_SESSION['warehouse_transfer_success'] = 'تم إنشاء طلب النقل بنجاح. سيتم مراجعته و الموافقة عليه.';
+                        }
                     } else {
                         $_SESSION['warehouse_transfer_error'] = $result['message'] ?? 'حدث خطأ أثناء إنشاء طلب النقل.';
                     }
