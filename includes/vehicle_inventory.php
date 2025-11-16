@@ -422,10 +422,14 @@ function getVehicleInventory($vehicleId, $filters = []) {
         return [];
     }
     
-    // استخدام products.name أولاً دائماً (الاسم الصحيح)، ثم finished_products.product_name إذا كان هناك batch_id
+    // استخدام finished_products.product_name أولاً إذا كان هناك batch_id (البيانات الصحيحة من finished_products)
+    // ثم products.name، ثم product_name المحفوظ في vehicle_inventory
     $nameExpr = "COALESCE(
+        NULLIF(TRIM(fp.product_name), ''),
+        NULLIF(TRIM(p_fp.name), ''),
         NULLIF(TRIM(p.name), ''),
-        COALESCE(NULLIF(TRIM(p_fp.name), ''), NULLIF(TRIM(fp.product_name), ''), NULLIF(TRIM(vi.product_name), ''), 'منتج غير معروف')
+        NULLIF(TRIM(vi.product_name), ''),
+        'منتج غير معروف'
     )";
     $categoryExpr = "COALESCE(p.category, vi.product_category)";
     $unitExpr = "COALESCE(p.unit, vi.product_unit)";
@@ -435,17 +439,32 @@ function getVehicleInventory($vehicleId, $filters = []) {
         $categoryExpr,
         $unitExpr
     ) {
-        // استخدام products.unit_price أولاً دائماً (السعر الصحيح)، ثم manager_unit_price المحفوظ
+        // استخدام finished_products.unit_price أولاً إذا كان هناك batch_id (البيانات الصحيحة من finished_products)
+        // ثم products.unit_price، ثم manager_unit_price المحفوظ
         $unitPriceExpr = $withManagerPrice
             ? "COALESCE(
-                p.unit_price,
-                p_fp.unit_price,
                 fp.unit_price,
+                p_fp.unit_price,
+                p.unit_price,
                 vi.manager_unit_price,
                 vi.product_unit_price,
                 0
             )"
-            : "COALESCE(p.unit_price, vi.product_unit_price, 0)";
+            : "COALESCE(
+                fp.unit_price,
+                p.unit_price,
+                vi.product_unit_price,
+                0
+            )";
+        
+        // استخدام finished_products.total_price إذا كان موجوداً وحسابه بناءً على الكمية في vehicle_inventory
+        // أو حساب total_value من unit_price × quantity
+        $totalValueExpr = "CASE 
+            WHEN fp.total_price IS NOT NULL AND fp.total_price > 0 AND fp.quantity_produced > 0 THEN
+                (fp.total_price / fp.quantity_produced) * vi.quantity
+            ELSE
+                (vi.quantity * {$unitPriceExpr})
+        END";
 
         return [
             "SELECT 
@@ -456,7 +475,10 @@ function getVehicleInventory($vehicleId, $filters = []) {
                 {$unitExpr} AS product_unit,
                 {$unitExpr} AS unit,
                 {$unitPriceExpr} AS unit_price,
-                (vi.quantity * {$unitPriceExpr}) AS total_value
+                {$totalValueExpr} AS total_value,
+                fp.unit_price AS fp_unit_price,
+                fp.total_price AS fp_total_price,
+                fp.quantity_produced AS fp_quantity_produced
             FROM vehicle_inventory vi
             LEFT JOIN products p ON vi.product_id = p.id
             LEFT JOIN finished_products fp ON vi.finished_batch_id = fp.id
