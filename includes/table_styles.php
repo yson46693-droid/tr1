@@ -166,23 +166,77 @@ if (!defined('GLOBAL_TABLE_STYLES_RENDERED')) {
             .dashboard-table-wrapper {
                 border-radius: 14px;
                 box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
+                overflow-x: auto; /* السماح بالتمرير الأفقي */
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            /* تحسين شريط التمرير */
+            .dashboard-table-wrapper::-webkit-scrollbar {
+                height: 8px;
+            }
+            
+            .dashboard-table-wrapper::-webkit-scrollbar-track {
+                background: #f8f9fa;
+                border-radius: 4px;
+            }
+            
+            .dashboard-table-wrapper::-webkit-scrollbar-thumb {
+                background: #ced4da;
+                border-radius: 4px;
+            }
+            
+            .dashboard-table-wrapper::-webkit-scrollbar-thumb:hover {
+                background: #adb5bd;
+            }
+
+            .dashboard-table {
+                min-width: 600px; /* الحد الأدنى لعرض الجدول */
+                width: auto;
             }
 
             .dashboard-table thead th,
             .dashboard-table tbody td {
                 padding-inline: 0.8rem;
+                white-space: nowrap; /* منع التفاف النص */
             }
 
             .dashboard-table tbody td:first-child {
                 min-width: 150px;
             }
+            
+            /* السماح بالتفاف النص في خلايا محددة */
+            .dashboard-table tbody td.text-wrap,
+            .dashboard-table tbody td[data-wrap="true"] {
+                white-space: normal;
+                word-wrap: break-word;
+                max-width: 200px;
+            }
         }
 
         @media (max-width: 576px) {
+            .dashboard-table-wrapper {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            .dashboard-table {
+                min-width: 600px; /* الحد الأدنى لعرض الجدول */
+                width: auto;
+            }
+            
             .dashboard-table thead th,
             .dashboard-table tbody td {
                 padding-inline: 0.65rem;
                 font-size: 0.8rem;
+                white-space: nowrap; /* منع التفاف النص */
+            }
+            
+            /* السماح بالتفاف النص في خلايا محددة */
+            .dashboard-table tbody td.text-wrap,
+            .dashboard-table tbody td[data-wrap="true"] {
+                white-space: normal;
+                word-wrap: break-word;
+                max-width: 200px;
             }
 
             .dashboard-table-details th,

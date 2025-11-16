@@ -90,7 +90,7 @@
         padding-right: var(--spacing-md);
     }
     
-    /* Ensure no horizontal scroll */
+    /* Ensure no horizontal scroll on body, but allow it for tables */
     body {
         overflow-x: hidden;
         width: 100%;
@@ -99,6 +99,13 @@
     .dashboard-wrapper {
         overflow-x: hidden;
         width: 100%;
+    }
+    
+    /* السماح بالتمرير الأفقي للجداول داخل containers */
+    .table-responsive {
+        overflow-x: auto !important;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
     }
     
     /* إزالة المسافات الزائدة من الجداول والحاويات */
@@ -125,6 +132,7 @@
     .card .table-responsive {
         margin: -0.5rem;
         padding: 0;
+        overflow-x: auto !important;
     }
     
     #cameraModal .modal-dialog {
