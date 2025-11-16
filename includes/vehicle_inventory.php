@@ -476,6 +476,8 @@ function getVehicleInventory($vehicleId, $filters = []) {
                 {$unitExpr} AS unit,
                 {$unitPriceExpr} AS unit_price,
                 {$totalValueExpr} AS total_value,
+                vi.manager_unit_price AS manager_unit_price,
+                vi.product_unit_price AS product_unit_price_stored,
                 fp.unit_price AS fp_unit_price,
                 fp.total_price AS fp_total_price,
                 fp.quantity_produced AS fp_quantity_produced

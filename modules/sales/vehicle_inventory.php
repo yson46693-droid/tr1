@@ -399,7 +399,27 @@ foreach ($vehicleInventory as $item) {
                                     <td style="min-width: 120px; white-space: nowrap;"><?php echo htmlspecialchars($item['finished_batch_number'] ?? '—'); ?></td>
                                     <td style="min-width: 110px; white-space: nowrap;"><?php echo !empty($item['finished_production_date']) ? htmlspecialchars(formatDate($item['finished_production_date'])) : '—'; ?></td>
                                     <td style="min-width: 80px; white-space: nowrap; text-align: center;"><strong><?php echo number_format($item['quantity'], 2); ?></strong></td>
-                                    <td style="min-width: 100px; white-space: nowrap; text-align: center;"><?php echo formatCurrency($item['manager_unit_price'] ?? $item['unit_price'] ?? 0); ?></td>
+                                    <td style="min-width: 100px; white-space: nowrap; text-align: center;">
+                                        <?php
+                                        // حساب سعر الوحدة بناءً على total_value / quantity إذا كان total_value متوفراً
+                                        // أو استخدام unit_price المحسوب
+                                        $unitPrice = 0;
+                                        if (!empty($item['total_value']) && !empty($item['quantity']) && floatval($item['quantity']) > 0) {
+                                            // إذا كان total_value صحيحاً، احسب unit_price منه
+                                            $unitPrice = floatval($item['total_value']) / floatval($item['quantity']);
+                                        } elseif (!empty($item['unit_price']) && floatval($item['unit_price']) > 0) {
+                                            // استخدام unit_price المحسوب من الاستعلام
+                                            $unitPrice = floatval($item['unit_price']);
+                                        } elseif (!empty($item['manager_unit_price']) && floatval($item['manager_unit_price']) > 0) {
+                                            // استخدام manager_unit_price المخزن
+                                            $unitPrice = floatval($item['manager_unit_price']);
+                                        } elseif (!empty($item['fp_unit_price']) && !empty($item['fp_total_price']) && !empty($item['fp_quantity_produced']) && floatval($item['fp_quantity_produced']) > 0) {
+                                            // حساب من finished_products إذا كان متوفراً
+                                            $unitPrice = floatval($item['fp_total_price']) / floatval($item['fp_quantity_produced']);
+                                        }
+                                        echo formatCurrency($unitPrice);
+                                        ?>
+                                    </td>
                                     <td style="min-width: 120px; white-space: nowrap; text-align: center;"><strong><?php echo formatCurrency($item['total_value'] ?? 0); ?></strong></td>
                                 </tr>
                             <?php endforeach; ?>
