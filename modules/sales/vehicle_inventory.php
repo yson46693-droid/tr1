@@ -410,9 +410,9 @@ foreach ($vehicleInventory as $item) {
                                         } elseif (!empty($item['unit_price']) && floatval($item['unit_price']) > 0) {
                                             // استخدام unit_price المحسوب من الاستعلام
                                             $unitPrice = floatval($item['unit_price']);
-                                        } elseif (!empty($item['manager_unit_price']) && floatval($item['manager_unit_price']) > 0) {
-                                            // استخدام manager_unit_price المخزن
-                                            $unitPrice = floatval($item['manager_unit_price']);
+                                        } elseif (!empty($item['fp_unit_price']) && floatval($item['fp_unit_price']) > 0) {
+                                            // استخدام unit_price من finished_products
+                                            $unitPrice = floatval($item['fp_unit_price']);
                                         } elseif (!empty($item['fp_unit_price']) && !empty($item['fp_total_price']) && !empty($item['fp_quantity_produced']) && floatval($item['fp_quantity_produced']) > 0) {
                                             // حساب من finished_products إذا كان متوفراً
                                             $unitPrice = floatval($item['fp_total_price']) / floatval($item['fp_quantity_produced']);

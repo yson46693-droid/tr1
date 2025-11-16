@@ -528,7 +528,7 @@ foreach ($externalProducts as $ext) {
                     <tbody>
                         <?php if (empty($factoryProducts)): ?>
                             <tr>
-                                <td colspan="8" class="text-center text-muted py-4">لا توجد منتجات مصنع حالياً</td>
+                                <td colspan="7" class="text-center text-muted py-4">لا توجد منتجات مصنع حالياً</td>
                             </tr>
                         <?php else: ?>
                             <?php foreach ($factoryProducts as $product): ?>
@@ -540,7 +540,6 @@ foreach ($externalProducts as $ext) {
                                     if ($totalPrice == 0 && $unitPrice > 0 && $quantity > 0) {
                                         $totalPrice = $unitPrice * $quantity;
                                     }
-                                    $workers = !empty($product['workers']) ? htmlspecialchars($product['workers']) : 'غير محدد';
                                 ?>
                                 <tr>
                                     <td><strong class="text-primary"><?php echo htmlspecialchars($batchNumber); ?></strong></td>
@@ -550,7 +549,6 @@ foreach ($externalProducts as $ext) {
                                     <td><?php echo number_format($quantity, 2); ?></td>
                                     <td><?php echo formatCurrency($unitPrice); ?></td>
                                     <td><strong class="text-success"><?php echo formatCurrency($totalPrice); ?></strong></td>
-                                    <td><?php echo $workers; ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>

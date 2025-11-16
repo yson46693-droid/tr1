@@ -434,28 +434,20 @@ function getVehicleInventory($vehicleId, $filters = []) {
     $categoryExpr = "COALESCE(p.category, vi.product_category)";
     $unitExpr = "COALESCE(p.unit, vi.product_unit)";
 
-    $buildQuery = static function (bool $withManagerPrice) use (
+    $buildQuery = static function () use (
         $nameExpr,
         $categoryExpr,
         $unitExpr
     ) {
         // استخدام finished_products.unit_price أولاً إذا كان هناك batch_id (البيانات الصحيحة من finished_products)
-        // ثم products.unit_price، ثم manager_unit_price المحفوظ
-        $unitPriceExpr = $withManagerPrice
-            ? "COALESCE(
-                fp.unit_price,
-                p_fp.unit_price,
-                p.unit_price,
-                vi.manager_unit_price,
-                vi.product_unit_price,
-                0
-            )"
-            : "COALESCE(
-                fp.unit_price,
-                p.unit_price,
-                vi.product_unit_price,
-                0
-            )";
+        // ثم products.unit_price، ثم product_unit_price المحفوظ
+        $unitPriceExpr = "COALESCE(
+            fp.unit_price,
+            p_fp.unit_price,
+            p.unit_price,
+            vi.product_unit_price,
+            0
+        )";
         
         // استخدام finished_products.total_price إذا كان موجوداً وحسابه بناءً على الكمية في vehicle_inventory
         // أو حساب total_value من unit_price × quantity
@@ -476,7 +468,6 @@ function getVehicleInventory($vehicleId, $filters = []) {
                 {$unitExpr} AS unit,
                 {$unitPriceExpr} AS unit_price,
                 {$totalValueExpr} AS total_value,
-                vi.manager_unit_price AS manager_unit_price,
                 vi.product_unit_price AS product_unit_price_stored,
                 fp.unit_price AS fp_unit_price,
                 fp.total_price AS fp_total_price,
@@ -490,7 +481,7 @@ function getVehicleInventory($vehicleId, $filters = []) {
         ];
     };
 
-    [$sql, $unitPriceExpr] = $buildQuery(true);
+    [$sql, $unitPriceExpr] = $buildQuery();
     $params = [$vehicleId];
 
     if (!empty($filters['product_id'])) {
@@ -506,21 +497,7 @@ function getVehicleInventory($vehicleId, $filters = []) {
 
     $sql .= " ORDER BY {$nameExpr} ASC";
 
-    try {
-        return $db->query($sql, $params);
-    } catch (Throwable $queryError) {
-        $message = $queryError->getMessage();
-        if ($message && stripos($message, "unknown column 'vi.manager_unit_price'") !== false) {
-            [$sqlFallback] = $buildQuery(false);
-            $sqlFallback .= " ORDER BY {$nameExpr} ASC";
-            try {
-                return $db->query($sqlFallback, $params);
-            } catch (Throwable $fallbackError) {
-                throw $fallbackError;
-            }
-        }
-        throw $queryError;
-    }
+    return $db->query($sql, $params);
 }
 
 /**
@@ -557,13 +534,24 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
              FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ?",
             [$vehicleId, $productId]
         );
+        
+        // محاولة الحصول على unit_price من finished_products إذا كان هناك finished_batch_id
+        if ($existing && !empty($existing['finished_batch_id'])) {
+            $finishedProdPrice = $db->queryOne(
+                "SELECT unit_price FROM finished_products WHERE id = ?",
+                [$existing['finished_batch_id']]
+            );
+            if ($finishedProdPrice && $finishedProdPrice['unit_price'] !== null) {
+                $managerUnitPriceValue = $managerUnitPriceValue ?? (float)$finishedProdPrice['unit_price'];
+            }
+        }
 
         $productName = $finishedProductData['product_name'] ?? null; // استخدام product_name من finishedMetadata إذا كان متوفراً
         $productCategory = null;
         $productUnit = null;
         $productUnitPrice = null;
         $productSnapshot = null;
-        $managerUnitPriceValue = $finishedProductData['manager_unit_price'] ?? $finishedProductData['manager_price'] ?? null;
+        $managerUnitPriceValue = $finishedProductData['unit_price'] ?? null; // استخدام unit_price من finished_products
         $finishedBatchId = $finishedProductData['batch_id'] ?? $finishedProductData['finished_batch_id'] ?? null;
         $finishedBatchNumber = $finishedProductData['batch_number'] ?? $finishedProductData['finished_batch_number'] ?? null;
         $finishedProductionDate = $finishedProductData['production_date'] ?? $finishedProductData['finished_production_date'] ?? null;
@@ -589,7 +577,7 @@ function updateVehicleInventory($vehicleId, $productId, $quantity, $userId = nul
                 $productCategory = $productRecord['category'] ?? null;
                 $productUnit = $productRecord['unit'] ?? null;
                 $productSnapshot = json_encode($productRecord, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                // استخدام manager_unit_price من finishedMetadata أولاً، ثم من products
+                // استخدام unit_price من finishedMetadata أولاً، ثم من products
                 if ($managerUnitPriceValue === null && array_key_exists('unit_price', $productRecord) && $productRecord['unit_price'] !== null) {
                     $managerUnitPriceValue = (float)$productRecord['unit_price'];
                 }
@@ -830,7 +818,7 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
                         fp.batch_number,
                         fp.product_name,
                         fp.production_date,
-                        fp.manager_unit_price,
+                        fp.unit_price,
                         GROUP_CONCAT(DISTINCT u.full_name ORDER BY u.full_name SEPARATOR ', ') AS workers_summary
                      FROM finished_products fp
                      LEFT JOIN batch_workers bw ON bw.batch_id = fp.batch_id
@@ -959,7 +947,7 @@ function createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate
                     'batch_number' => $batchNumber ?? ($batchRow['batch_number'] ?? null),
                     'production_date' => $batchRow['production_date'] ?? null,
                     'quantity_produced' => $batchRow['quantity_produced'] ?? null,
-                    'manager_unit_price' => $batchRow['manager_unit_price'] ?? null,
+                    'unit_price' => $batchRow['unit_price'] ?? null,
                     'workers' => $batchRow['workers_summary'] ?? null,
                 ];
             }
@@ -1307,8 +1295,8 @@ function executeWarehouseTransferDirectly($transferId, $executedBy = null) {
             // دخول إلى المخزن الوجهة
             if ($toWarehouse && $toWarehouse['vehicle_id']) {
                 $unitPriceOverride = null;
-                if (!empty($finishedMetadata) && isset($finishedMetadata['manager_unit_price']) && $finishedMetadata['manager_unit_price'] !== null) {
-                    $unitPriceOverride = (float)$finishedMetadata['manager_unit_price'];
+                if (!empty($finishedMetadata) && isset($finishedMetadata['unit_price']) && $finishedMetadata['unit_price'] !== null) {
+                    $unitPriceOverride = (float)$finishedMetadata['unit_price'];
                 }
                 if ($unitPriceOverride === null) {
                     $productPriceRow = $db->queryOne(
@@ -1710,8 +1698,8 @@ function approveWarehouseTransfer($transferId, $approvedBy = null) {
             // إذا كان المخزن الوجهة سيارة، تحديث مخزون السيارة
             if ($toWarehouse && $toWarehouse['vehicle_id']) {
                 $unitPriceOverride = null;
-                if (!empty($finishedMetadata) && isset($finishedMetadata['manager_unit_price']) && $finishedMetadata['manager_unit_price'] !== null) {
-                    $unitPriceOverride = (float)$finishedMetadata['manager_unit_price'];
+                if (!empty($finishedMetadata) && isset($finishedMetadata['unit_price']) && $finishedMetadata['unit_price'] !== null) {
+                    $unitPriceOverride = (float)$finishedMetadata['unit_price'];
                 }
                 if ($unitPriceOverride === null) {
                     $productPriceRow = $db->queryOne(
