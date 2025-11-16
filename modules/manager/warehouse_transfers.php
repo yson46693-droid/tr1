@@ -269,16 +269,39 @@ if (isset($_GET['id'])) {
                 
                 // جلب اسم المنتج
                 $productName = 'منتج غير معروف';
+                
+                // إذا كان هناك product_id مباشر، استخدمه
                 if ($productId) {
                     $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$productId]);
                     if ($product && !empty($product['name'])) {
                         $productName = $product['name'];
                     }
                 } elseif ($batchId) {
-                    // محاولة الحصول على اسم المنتج من finished_products
-                    $batch = $db->queryOne("SELECT product_name FROM finished_products WHERE id = ?", [$batchId]);
-                    if ($batch && !empty($batch['product_name'])) {
-                        $productName = $batch['product_name'];
+                    // إذا كان هناك batch_id، احصل على product_id من finished_products أولاً
+                    // ثم احصل على اسم المنتج من products (الاسم الصحيح)، وإلا استخدم finished_products.product_name
+                    $batch = $db->queryOne(
+                        "SELECT 
+                            fp.product_id,
+                            fp.product_name as finished_product_name
+                         FROM finished_products fp
+                         WHERE fp.id = ?",
+                        [$batchId]
+                    );
+                    
+                    if ($batch) {
+                        // إذا كان هناك product_id في finished_products، احصل على الاسم من products أولاً
+                        if (!empty($batch['product_id'])) {
+                            $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$batch['product_id']]);
+                            if ($product && !empty($product['name']) && trim($product['name']) !== '') {
+                                $productName = trim($product['name']);
+                            } elseif (!empty($batch['finished_product_name']) && trim($batch['finished_product_name']) !== '') {
+                                // إذا لم يكن هناك اسم في products، استخدم finished_products.product_name
+                                $productName = trim($batch['finished_product_name']);
+                            }
+                        } elseif (!empty($batch['finished_product_name']) && trim($batch['finished_product_name']) !== '') {
+                            // إذا لم يكن هناك product_id، استخدم finished_products.product_name
+                            $productName = trim($batch['finished_product_name']);
+                        }
                     }
                 }
                 
