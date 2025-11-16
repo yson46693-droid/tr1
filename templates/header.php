@@ -275,10 +275,6 @@ if (ob_get_level() > 0) {
             display: block !important;
         }
         
-        .modal.show ~ .modal-backdrop {
-            z-index: 1040 !important;
-        }
-        
         .modal .modal-content {
             position: relative;
             z-index: 1060;
