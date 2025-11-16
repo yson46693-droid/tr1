@@ -422,7 +422,11 @@ function getVehicleInventory($vehicleId, $filters = []) {
         return [];
     }
     
-    $nameExpr = "COALESCE(p.name, vi.product_name)";
+    // استخدام products.name أولاً دائماً (الاسم الصحيح)، ثم finished_products.product_name إذا كان هناك batch_id
+    $nameExpr = "COALESCE(
+        NULLIF(TRIM(p.name), ''),
+        COALESCE(NULLIF(TRIM(p_fp.name), ''), NULLIF(TRIM(fp.product_name), ''), NULLIF(TRIM(vi.product_name), ''), 'منتج غير معروف')
+    )";
     $categoryExpr = "COALESCE(p.category, vi.product_category)";
     $unitExpr = "COALESCE(p.unit, vi.product_unit)";
 
@@ -431,9 +435,17 @@ function getVehicleInventory($vehicleId, $filters = []) {
         $categoryExpr,
         $unitExpr
     ) {
+        // استخدام products.unit_price أولاً دائماً (السعر الصحيح)، ثم manager_unit_price المحفوظ
         $unitPriceExpr = $withManagerPrice
-            ? "COALESCE(vi.manager_unit_price, vi.product_unit_price, p.unit_price, 0)"
-            : "COALESCE(vi.product_unit_price, p.unit_price, 0)";
+            ? "COALESCE(
+                p.unit_price,
+                p_fp.unit_price,
+                fp.unit_price,
+                vi.manager_unit_price,
+                vi.product_unit_price,
+                0
+            )"
+            : "COALESCE(p.unit_price, vi.product_unit_price, 0)";
 
         return [
             "SELECT 
@@ -447,6 +459,8 @@ function getVehicleInventory($vehicleId, $filters = []) {
                 (vi.quantity * {$unitPriceExpr}) AS total_value
             FROM vehicle_inventory vi
             LEFT JOIN products p ON vi.product_id = p.id
+            LEFT JOIN finished_products fp ON vi.finished_batch_id = fp.id
+            LEFT JOIN products p_fp ON fp.product_id = p_fp.id
             WHERE vi.vehicle_id = ? AND vi.quantity > 0",
             $unitPriceExpr,
         ];
