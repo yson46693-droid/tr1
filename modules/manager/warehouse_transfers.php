@@ -397,26 +397,71 @@ if (isset($_GET['id'])) {
         // التأكد من أن transfer_id هو رقم صحيح
         $transferId = (int)$selectedTransfer['id'];
         
-        // أولاً: جلب العناصر الأساسية بدون JOIN للتأكد من الحصول على جميع العناصر
-        $basicItems = $db->query(
-            "SELECT 
-                wti.id as item_id,
-                wti.transfer_id,
-                wti.product_id,
-                wti.batch_id,
-                wti.batch_number,
-                wti.quantity,
-                wti.notes
-             FROM warehouse_transfer_items wti
-             WHERE wti.transfer_id = ?
-             ORDER BY wti.id",
+        // تهيئة مصفوفة العناصر
+        $selectedTransfer['items'] = [];
+        
+        // أولاً: التحقق من وجود عناصر في قاعدة البيانات
+        $itemsCheck = $db->queryOne(
+            "SELECT COUNT(*) as count FROM warehouse_transfer_items WHERE transfer_id = ?",
             [$transferId]
         );
+        $itemsCount = (int)($itemsCheck['count'] ?? 0);
         
-        // إذا كانت هناك عناصر، نضيف التفاصيل من JOIN
-        if (!empty($basicItems)) {
-            $selectedTransfer['items'] = [];
-            foreach ($basicItems as $basicItem) {
+        // إذا كان هناك عناصر، جلبها
+        if ($itemsCount > 0) {
+            // جلب العناصر الأساسية بدون JOIN للتأكد من الحصول على جميع العناصر
+            $basicItems = $db->query(
+                "SELECT 
+                    wti.id as item_id,
+                    wti.transfer_id,
+                    wti.product_id,
+                    wti.batch_id,
+                    wti.batch_number,
+                    wti.quantity,
+                    wti.notes
+                 FROM warehouse_transfer_items wti
+                 WHERE wti.transfer_id = ?
+                 ORDER BY wti.id",
+                [$transferId]
+            );
+            
+            // التحقق من أن الاستعلام أعاد نتائج
+            if (empty($basicItems) || !is_array($basicItems)) {
+                error_log("Warning: Query returned empty or invalid result for transfer ID $transferId. Expected $itemsCount items.");
+                // محاولة جلب العناصر بشكل مختلف
+                $basicItems = [];
+                try {
+                    $stmt = $db->getConnection()->prepare(
+                        "SELECT 
+                            wti.id as item_id,
+                            wti.transfer_id,
+                            wti.product_id,
+                            wti.batch_id,
+                            wti.batch_number,
+                            wti.quantity,
+                            wti.notes
+                         FROM warehouse_transfer_items wti
+                         WHERE wti.transfer_id = ?
+                         ORDER BY wti.id"
+                    );
+                    if ($stmt) {
+                        $stmt->bind_param("i", $transferId);
+                        $stmt->execute();
+                        $result = $stmt->get_result();
+                        while ($row = $result->fetch_assoc()) {
+                            $basicItems[] = $row;
+                        }
+                        $stmt->close();
+                    }
+                } catch (Exception $e) {
+                    error_log("Error fetching transfer items: " . $e->getMessage());
+                }
+            }
+            
+            // إذا كانت هناك عناصر، نضيف التفاصيل من JOIN
+            if (!empty($basicItems) && is_array($basicItems)) {
+                $selectedTransfer['items'] = [];
+                foreach ($basicItems as $basicItem) {
                 $productId = $basicItem['product_id'] ?? null;
                 $batchId = $basicItem['batch_id'] ?? null;
                 
@@ -513,27 +558,53 @@ if (isset($_GET['id'])) {
                 $selectedTransfer['items'][] = [
                     'item_id' => $basicItem['item_id'],
                     'transfer_id' => $basicItem['transfer_id'],
-                    'product_id' => $basicItem['product_id'],
-                    'batch_id' => $basicItem['batch_id'],
-                    'batch_number' => $basicItem['batch_number'],
-                    'quantity' => $basicItem['quantity'],
-                    'notes' => $basicItem['notes'],
+                    'product_id' => $basicItem['product_id'] ?? null,
+                    'batch_id' => $basicItem['batch_id'] ?? null,
+                    'batch_number' => $basicItem['batch_number'] ?? null,
+                    'quantity' => $basicItem['quantity'] ?? 0,
+                    'notes' => $basicItem['notes'] ?? null,
                     'product_name' => $productName,
                     'finished_batch_number' => $finishedBatchNumber,
                     'batch_quantity_produced' => $batchQuantityProduced,
                     'batch_quantity_available' => $batchQuantityAvailable
                 ];
+                }
             }
-        } else {
-            $selectedTransfer['items'] = [];
+        }
+        
+        // إذا لم تكن هناك عناصر أو فشل جلبها، تسجيل تحذير
+        if (empty($selectedTransfer['items']) && $itemsCount > 0) {
+            error_log("Warning: Failed to load items for transfer ID $transferId. Database shows $itemsCount items but query returned empty.");
             
-            // التحقق مرة أخرى من وجود العناصر
-            $itemsCheck = $db->query(
-                "SELECT COUNT(*) as count FROM warehouse_transfer_items WHERE transfer_id = ?",
-                [$transferId]
-            );
-            if (!empty($itemsCheck) && ($itemsCheck[0]['count'] ?? 0) > 0) {
-                error_log("Warning: Items exist in database for transfer ID $transferId but query returned empty.");
+            // محاولة جلب العناصر الخام لعرضها كبديل
+            try {
+                $rawItems = $db->query(
+                    "SELECT wti.*, p.name as product_name 
+                     FROM warehouse_transfer_items wti
+                     LEFT JOIN products p ON wti.product_id = p.id
+                     WHERE wti.transfer_id = ?",
+                    [$transferId]
+                );
+                
+                if (!empty($rawItems)) {
+                    foreach ($rawItems as $rawItem) {
+                        $selectedTransfer['items'][] = [
+                            'item_id' => $rawItem['id'] ?? null,
+                            'transfer_id' => $rawItem['transfer_id'] ?? null,
+                            'product_id' => $rawItem['product_id'] ?? null,
+                            'batch_id' => $rawItem['batch_id'] ?? null,
+                            'batch_number' => $rawItem['batch_number'] ?? null,
+                            'quantity' => $rawItem['quantity'] ?? 0,
+                            'notes' => $rawItem['notes'] ?? null,
+                            'product_name' => $rawItem['product_name'] ?? 'منتج غير معروف',
+                            'finished_batch_number' => $rawItem['batch_number'] ?? '-',
+                            'batch_quantity_produced' => null,
+                            'batch_quantity_available' => null
+                        ];
+                    }
+                }
+            } catch (Exception $e) {
+                error_log("Error loading raw items: " . $e->getMessage());
             }
         }
     }
