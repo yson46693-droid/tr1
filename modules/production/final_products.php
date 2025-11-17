@@ -95,6 +95,42 @@ if ($currentSection !== null && $currentSection !== '') {
 }
 $managerRedirectRole = 'manager';
 
+// معالجة AJAX لجلب المنتجات من مخزن سيارة المندوب
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_vehicle_inventory' && isset($_GET['vehicle_id'])) {
+    header('Content-Type: application/json');
+    $salesRepId = intval($_GET['vehicle_id']);
+    
+    // الحصول على سيارة المندوب
+    $vehicle = $db->queryOne(
+        "SELECT v.id as vehicle_id FROM vehicles v WHERE v.driver_id = ? AND v.status = 'active'",
+        [$salesRepId]
+    );
+    
+    if (!$vehicle) {
+        echo json_encode(['success' => false, 'message' => 'لم يتم العثور على سيارة للمندوب']);
+        exit;
+    }
+    
+    $vehicleId = $vehicle['vehicle_id'];
+    $inventory = getVehicleInventory($vehicleId);
+    
+    // تحويل البيانات إلى تنسيق مناسب
+    $products = [];
+    foreach ($inventory as $item) {
+        $products[] = [
+            'product_id' => $item['product_id'] ?? 0,
+            'batch_id' => $item['finished_batch_id'] ?? 0,
+            'batch_number' => $item['finished_batch_number'] ?? $item['batch_number'] ?? '',
+            'product_name' => $item['product_name'] ?? 'غير محدد',
+            'quantity' => floatval($item['quantity'] ?? 0),
+            'unit' => $item['unit'] ?? $item['product_unit'] ?? 'قطعة'
+        ];
+    }
+    
+    echo json_encode(['success' => true, 'products' => $products]);
+    exit;
+}
+
 // معالجة طلبات AJAX لتحميل المنتجات
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'load_products') {
     // تنظيف أي output buffer موجود
@@ -439,6 +475,20 @@ if (!empty($warehousesTableExists)) {
     } catch (Exception $warehouseException) {
         error_log('Production inventory warehouse setup error: ' . $warehouseException->getMessage());
     }
+}
+
+// الحصول على قائمة المندوبين (sales reps) الذين لديهم سيارات
+$salesReps = [];
+try {
+    $salesReps = $db->query(
+        "SELECT DISTINCT u.id, u.full_name, u.username, v.id as vehicle_id, v.vehicle_number
+         FROM users u
+         INNER JOIN vehicles v ON v.driver_id = u.id
+         WHERE u.role = 'sales' AND u.status = 'active' AND v.status = 'active'
+         ORDER BY u.full_name ASC"
+    );
+} catch (Exception $e) {
+    error_log('Error fetching sales reps: ' . $e->getMessage());
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -1057,6 +1107,120 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // إعادة إنشاء token للسماح بإعادة المحاولة في حالة وجود أخطاء
             $_SESSION[$sessionTokenKey] = bin2hex(random_bytes(32));
         }
+    } elseif ($postAction === 'create_transfer_from_sales_rep') {
+        // التحقق من duplicate submission
+        $submissionToken = $_POST['transfer_token'] ?? '';
+        $sessionTokenKey = 'transfer_submission_token';
+        $storedToken = $_SESSION[$sessionTokenKey] ?? null;
+        
+        if ($submissionToken === '' || $submissionToken !== $storedToken) {
+            $_SESSION[$sessionErrorKey] = 'تم إرسال هذا الطلب مسبقاً. يرجى عدم إعادة تحميل الصفحة.';
+            productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+            exit;
+        }
+        
+        unset($_SESSION[$sessionTokenKey]);
+        
+        $transferErrors = [];
+        
+        if (!$primaryWarehouse) {
+            $transferErrors[] = 'لا يمكن إنشاء طلب الاستلام حالياً بسبب عدم توفر مخزن رئيسي.';
+        } else {
+            $toWarehouseId = intval($primaryWarehouse['id']);
+            $salesRepId = intval($_POST['sales_rep_id'] ?? 0);
+            $transferDate = $_POST['transfer_date'] ?? date('Y-m-d');
+            $reason = trim((string)($_POST['reason'] ?? ''));
+            $notes = trim((string)($_POST['notes'] ?? ''));
+            
+            // الحصول على سيارة المندوب ومخزنها
+            $vehicle = $db->queryOne(
+                "SELECT v.id as vehicle_id, w.id as warehouse_id, u.full_name as sales_rep_name
+                 FROM vehicles v
+                 LEFT JOIN warehouses w ON w.vehicle_id = v.id AND w.warehouse_type = 'vehicle'
+                 LEFT JOIN users u ON v.driver_id = u.id
+                 WHERE v.driver_id = ? AND v.status = 'active'",
+                [$salesRepId]
+            );
+            
+            if (!$vehicle || empty($vehicle['warehouse_id'])) {
+                $transferErrors[] = 'لم يتم العثور على مخزن سيارة للمندوب المحدد.';
+            } else {
+                $fromWarehouseId = $vehicle['warehouse_id'];
+                $salesRepName = $vehicle['sales_rep_name'] ?? 'مندوب';
+                
+                if ($fromWarehouseId === $toWarehouseId) {
+                    $transferErrors[] = 'لا يمكن النقل من وإلى نفس المخزن.';
+                }
+                
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $transferDate)) {
+                    $transferDate = date('Y-m-d');
+                }
+                
+                $rawItems = $_POST['items'] ?? [];
+                $transferItems = [];
+                
+                if (is_array($rawItems)) {
+                    foreach ($rawItems as $item) {
+                        $productId = isset($item['product_id']) ? intval($item['product_id']) : 0;
+                        $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0.0;
+                        $itemNotes = isset($item['notes']) ? trim((string)$item['notes']) : null;
+                        $batchId = isset($item['batch_id']) ? intval($item['batch_id']) : 0;
+                        $batchNumber = isset($item['batch_number']) ? trim((string)$item['batch_number']) : '';
+                        
+                        if ($quantity > 0 && ($productId > 0 || $batchId > 0)) {
+                            $transferItems[] = [
+                                'product_id' => $productId > 0 ? $productId : null,
+                                'batch_id' => $batchId > 0 ? $batchId : null,
+                                'batch_number' => $batchNumber ?: null,
+                                'quantity' => $quantity,
+                                'notes' => $itemNotes
+                            ];
+                        }
+                    }
+                }
+                
+                if (empty($transferItems)) {
+                    $transferErrors[] = 'يجب إضافة منتج واحد على الأقل.';
+                }
+                
+                if (empty($transferErrors)) {
+                    try {
+                        $result = createWarehouseTransfer(
+                            $fromWarehouseId,
+                            $toWarehouseId,
+                            $transferDate,
+                            $transferItems,
+                            $reason ?: "طلب استلام منتجات من بضاعة المندوب ({$salesRepName})",
+                            $notes,
+                            $currentUser['id']
+                        );
+                        
+                        if ($result['success']) {
+                            $transferInfo = $db->queryOne(
+                                "SELECT status FROM warehouse_transfers WHERE id = ?",
+                                [$result['transfer_id']]
+                            );
+                            
+                            if ($transferInfo && $transferInfo['status'] === 'completed') {
+                                $_SESSION[$sessionSuccessKey] = 'تم استلام المنتجات بنجاح. تم نقل المنتجات إلى المخزن الرئيسي مباشرة.';
+                            } else {
+                                $_SESSION[$sessionSuccessKey] = 'تم إنشاء طلب الاستلام بنجاح. سيتم مراجعته و الموافقة عليه من قبل المدير.';
+                            }
+                        } else {
+                            $_SESSION[$sessionErrorKey] = $result['message'] ?? 'حدث خطأ أثناء إنشاء طلب الاستلام.';
+                        }
+                    } catch (Exception $e) {
+                        error_log('Error creating transfer from sales rep: ' . $e->getMessage());
+                        $_SESSION[$sessionErrorKey] = 'حدث خطأ أثناء إنشاء طلب الاستلام: ' . $e->getMessage();
+                    }
+                } else {
+                    $_SESSION[$sessionErrorKey] = implode(' ', $transferErrors);
+                }
+            }
+        }
+        
+        productionSafeRedirect($productionInventoryUrl, $productionRedirectParams, $productionRedirectRole);
+        exit;
     }
     
     if ($isManager && $postAction === 'create_external_product') {
@@ -1686,6 +1850,17 @@ if ($isManager) {
         >
             <i class="bi bi-arrow-left-right me-1"></i>
             طلب نقل منتجات
+        </button>
+        <button
+            type="button"
+            class="btn btn-success"
+            data-bs-toggle="modal"
+            data-bs-target="#receiveFromSalesRepModal"
+            <?php echo !empty($salesReps) && $primaryWarehouse ? '' : 'disabled'; ?>
+            title="<?php echo !empty($salesReps) && $primaryWarehouse ? '' : 'يرجى التأكد من وجود مندوبين ومخزن رئيسي.'; ?>"
+        >
+            <i class="bi bi-truck me-1"></i>
+            طلب استلام منتجات
         </button>
     </div>
 </div>
@@ -3142,6 +3317,258 @@ if (!window.transferFormInitialized) {
         attachClickEvents();
     }
 }
+</script>
+
+<!-- Modal طلب استلام منتجات من بضاعة المندوب -->
+<div class="modal fade" id="receiveFromSalesRepModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-truck me-2"></i>طلب استلام منتجات من بضاعة المندوب</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="receiveFromSalesRepForm">
+                <input type="hidden" name="action" value="create_transfer_from_sales_rep">
+                <input type="hidden" name="transfer_token" value="<?php echo htmlspecialchars($_SESSION['transfer_submission_token'] ?? ''); ?>">
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المندوب <span class="text-danger">*</span></label>
+                        <select class="form-select" name="sales_rep_id" id="sales_rep_id_receive" required>
+                            <option value="">-- اختر المندوب --</option>
+                            <?php foreach ($salesReps as $rep): ?>
+                                <option value="<?php echo $rep['id']; ?>">
+                                    <?php echo htmlspecialchars($rep['full_name'] ?? $rep['username']); ?>
+                                    <?php if (!empty($rep['vehicle_number'])): ?>
+                                        (<?php echo htmlspecialchars($rep['vehicle_number']); ?>)
+                                    <?php endif; ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">تاريخ الاستلام <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control" name="transfer_date" value="<?php echo date('Y-m-d'); ?>" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">السبب</label>
+                        <input type="text" class="form-control" name="reason" placeholder="سبب الاستلام (اختياري)">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">ملاحظات</label>
+                        <textarea class="form-control" name="notes" rows="2" placeholder="ملاحظات إضافية (اختياري)"></textarea>
+                    </div>
+                    
+                    <hr>
+                    <h6 class="mb-3">المنتجات المراد استلامها:</h6>
+                    
+                    <div id="salesRepProductsContainerReceive">
+                        <div class="alert alert-info">
+                            <i class="bi bi-info-circle me-2"></i>
+                            يرجى اختيار المندوب أولاً لعرض المنتجات المتاحة في مخزن سيارته.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-success" id="submitReceiveSalesRepBtn" disabled>
+                        <i class="bi bi-check-circle me-2"></i>إنشاء طلب الاستلام
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// معالجة modal طلب استلام منتجات من بضاعة المندوب
+document.addEventListener('DOMContentLoaded', function() {
+    const salesRepSelectReceive = document.getElementById('sales_rep_id_receive');
+    const productsContainerReceive = document.getElementById('salesRepProductsContainerReceive');
+    
+    if (salesRepSelectReceive) {
+        salesRepSelectReceive.addEventListener('change', function() {
+            const salesRepId = this.value;
+            productsContainerReceive.innerHTML = '<div class="text-center py-3"><div class="spinner-border" role="status"><span class="visually-hidden">جاري التحميل...</span></div></div>';
+            
+            if (salesRepId) {
+                // جلب المنتجات من مخزن سيارة المندوب
+                const currentUrl = window.location.href.split('?')[0];
+                const urlParams = new URLSearchParams(window.location.search);
+                urlParams.set('ajax', 'get_vehicle_inventory');
+                urlParams.set('vehicle_id', salesRepId);
+                fetch(currentUrl + '?' + urlParams.toString())
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.products) {
+                            displaySalesRepProductsReceive(data.products);
+                        } else {
+                            productsContainerReceive.innerHTML = '<div class="alert alert-info">لا توجد منتجات في مخزن سيارة هذا المندوب.</div>';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        productsContainerReceive.innerHTML = '<div class="alert alert-danger">حدث خطأ أثناء جلب المنتجات.</div>';
+                    });
+            } else {
+                productsContainerReceive.innerHTML = '<div class="alert alert-info">يرجى اختيار المندوب أولاً.</div>';
+            }
+        });
+    }
+    
+    function displaySalesRepProductsReceive(products) {
+        if (products.length === 0) {
+            productsContainerReceive.innerHTML = '<div class="alert alert-info">لا توجد منتجات في مخزن سيارة هذا المندوب.</div>';
+            return;
+        }
+        
+        let html = '<div class="table-responsive" style="max-height: 400px; overflow-y: auto;">';
+        html += '<table class="table table-sm table-bordered">';
+        html += '<thead class="table-light sticky-top"><tr>';
+        html += '<th width="30px"></th>';
+        html += '<th>رقم التشغيلة</th>';
+        html += '<th>اسم المنتج</th>';
+        html += '<th>المتاح</th>';
+        html += '<th>الكمية</th>';
+        html += '</tr></thead><tbody>';
+        
+        products.forEach(product => {
+            const availableQty = parseFloat(product.quantity || 0);
+            const batchNumber = product.finished_batch_number || product.batch_number || '-';
+            const productName = product.product_name || 'غير محدد';
+            const unit = product.unit || product.product_unit || 'قطعة';
+            const productId = product.product_id || 0;
+            const batchId = product.finished_batch_id || product.batch_id || 0;
+            
+            html += '<tr>';
+            html += '<td><input type="checkbox" class="form-check-input product-checkbox-receive" ';
+            html += `data-product-id="${productId}" `;
+            html += `data-batch-id="${batchId}" `;
+            html += `data-batch-number="${batchNumber}" `;
+            html += `data-product-name="${productName.replace(/"/g, '&quot;')}" `;
+            html += `data-available="${availableQty}"></td>`;
+            html += `<td>${batchNumber}</td>`;
+            html += `<td>${productName}</td>`;
+            html += `<td>${availableQty.toFixed(2)} ${unit}</td>`;
+            html += `<td><input type="number" step="0.01" min="0" max="${availableQty}" `;
+            html += `class="form-control form-control-sm quantity-input-receive" `;
+            html += `data-product-id="${productId}" `;
+            html += `data-batch-id="${batchId}" disabled></td>`;
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table></div>';
+        productsContainerReceive.innerHTML = html;
+        
+        // إضافة معالجات الأحداث
+        document.querySelectorAll('.product-checkbox-receive').forEach(cb => {
+            cb.addEventListener('change', function() {
+                const quantityInput = this.closest('tr').querySelector('.quantity-input-receive');
+                quantityInput.disabled = !this.checked;
+                if (!this.checked) {
+                    quantityInput.value = '';
+                }
+                updateReceiveSubmitButton();
+            });
+        });
+        
+        // إضافة معالجات للكميات
+        document.querySelectorAll('.quantity-input-receive').forEach(input => {
+            input.addEventListener('input', function() {
+                updateReceiveSubmitButton();
+            });
+        });
+        
+        updateReceiveSubmitButton();
+    }
+    
+    function updateReceiveSubmitButton() {
+        const submitBtn = document.getElementById('submitReceiveSalesRepBtn');
+        if (!submitBtn) return;
+        
+        const checkedBoxes = document.querySelectorAll('.product-checkbox-receive:checked');
+        let hasValidQuantity = false;
+        
+        checkedBoxes.forEach(cb => {
+            const quantityInput = cb.closest('tr').querySelector('.quantity-input-receive');
+            const quantity = parseFloat(quantityInput.value) || 0;
+            if (quantity > 0) {
+                hasValidQuantity = true;
+            }
+        });
+        
+        submitBtn.disabled = checkedBoxes.length === 0 || !hasValidQuantity;
+    }
+    
+    // معالجة إرسال النموذج
+    const receiveForm = document.getElementById('receiveFromSalesRepForm');
+    if (receiveForm) {
+        receiveForm.addEventListener('submit', function(e) {
+            const checkedBoxes = this.querySelectorAll('.product-checkbox-receive:checked');
+            if (checkedBoxes.length === 0) {
+                e.preventDefault();
+                alert('يرجى اختيار منتج واحد على الأقل.');
+                return false;
+            }
+            
+            checkedBoxes.forEach((cb, index) => {
+                const quantityInput = cb.closest('tr').querySelector('.quantity-input-receive');
+                const quantity = parseFloat(quantityInput.value) || 0;
+                
+                if (quantity <= 0) {
+                    e.preventDefault();
+                    alert('يرجى إدخال كمية صحيحة للمنتج: ' + cb.dataset.productName);
+                    return false;
+                }
+                
+                const productId = cb.dataset.productId || '';
+                const batchId = cb.dataset.batchId || '';
+                const batchNumber = cb.dataset.batchNumber || '';
+                
+                const itemPrefix = `items[${index}]`;
+                const productIdInput = document.createElement('input');
+                productIdInput.type = 'hidden';
+                productIdInput.name = `${itemPrefix}[product_id]`;
+                productIdInput.value = productId;
+                this.appendChild(productIdInput);
+                
+                if (batchId) {
+                    const batchIdInput = document.createElement('input');
+                    batchIdInput.type = 'hidden';
+                    batchIdInput.name = `${itemPrefix}[batch_id]`;
+                    batchIdInput.value = batchId;
+                    this.appendChild(batchIdInput);
+                }
+                
+                if (batchNumber) {
+                    const batchNumberInput = document.createElement('input');
+                    batchNumberInput.type = 'hidden';
+                    batchNumberInput.name = `${itemPrefix}[batch_number]`;
+                    batchNumberInput.value = batchNumber;
+                    this.appendChild(batchNumberInput);
+                }
+                
+                const quantityInput = document.createElement('input');
+                quantityInput.type = 'hidden';
+                quantityInput.name = `${itemPrefix}[quantity]`;
+                quantityInput.value = quantity;
+                this.appendChild(quantityInput);
+            });
+        });
+        
+        // تنظيف النموذج عند إغلاق الـ modal
+        const receiveModal = document.getElementById('receiveFromSalesRepModal');
+        if (receiveModal) {
+            receiveModal.addEventListener('hidden.bs.modal', function() {
+                receiveForm.reset();
+                productsContainerReceive.innerHTML = '<div class="alert alert-info">يرجى اختيار المندوب أولاً.</div>';
+                receiveForm.querySelectorAll('input[type="hidden"][name^="items"]').forEach(input => input.remove());
+            });
+        }
+    }
+});
 </script>
 
 
