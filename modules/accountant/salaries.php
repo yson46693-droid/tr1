@@ -815,14 +815,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
             تقرير رواتب شهري - <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?>
         </h5>
         <div class="d-flex align-items-center gap-2">
-            <form method="POST" class="d-inline">
-                <input type="hidden" name="action" value="send_attendance_report">
-                <input type="hidden" name="month" value="<?php echo (int) $selectedMonth; ?>">
-                <input type="hidden" name="year" value="<?php echo (int) $selectedYear; ?>">
-                <button type="submit" class="btn btn-warning btn-sm text-dark">
-                    <i class="bi bi-send-fill me-1"></i> إرسال تقرير التأخيرات إلى Telegram
-                </button>
-            </form>
             <a href="<?php echo $currentUrl; ?>?page=salaries&view=<?php echo $view; ?>&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>" class="btn btn-light btn-sm">
                 <i class="bi bi-x-lg"></i> إغلاق التقرير
             </a>
@@ -861,48 +853,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                         </div>
                         <h6 class="card-title mb-1 fw-bold text-uppercase small">إجمالي الرواتب</h6>
                         <h2 class="mb-0 fw-bold"><?php echo formatCurrency($monthlyReport['total_amount']); ?></h2>
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-3 col-md-6 col-sm-6">
-                <div class="card salary-summary-card salary-card-red text-white h-100 shadow-lg border-0">
-                    <div class="card-body text-center">
-                        <div class="mb-1">
-                            <i class="bi bi-graph-up-arrow"></i>
-                        </div>
-                        <h6 class="card-title mb-1 fw-bold text-uppercase small">متوسط الراتب</h6>
-                        <h2 class="mb-0 fw-bold">
-                            <?php 
-                            $avgSalary = $monthlyReport['total_users'] > 0 
-                                ? $monthlyReport['total_amount'] / $monthlyReport['total_users'] 
-                                : 0;
-                            echo formatCurrency($avgSalary); 
-                            ?>
-                        </h2>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <div class="row mb-3 g-2">
-            <div class="col-lg-6 col-md-6 col-sm-6">
-                <div class="card salary-summary-card salary-card-red text-white h-100 shadow-lg border-0">
-                    <div class="card-body text-center">
-                        <div class="mb-1">
-                            <i class="bi bi-exclamation-triangle"></i>
-                        </div>
-                        <h6 class="card-title mb-1 fw-bold text-uppercase small">إجمالي التأخيرات (دقائق)</h6>
-                        <h2 class="mb-0 fw-bold"><?php echo number_format($monthlyReport['total_delay_minutes'], 2); ?></h2>
-                    </div>
-                </div>
-            </div>
-            <div class="col-lg-6 col-md-6 col-sm-6">
-                <div class="card salary-summary-card salary-card-yellow text-white h-100 shadow-lg border-0">
-                    <div class="card-body text-center">
-                        <div class="mb-1">
-                            <i class="bi bi-stopwatch"></i>
-                        </div>
-                        <h6 class="card-title mb-1 fw-bold text-uppercase small">متوسط التأخير لكل موظف (دقيقة)</h6>
-                        <h2 class="mb-0 fw-bold"><?php echo number_format($monthlyReport['average_delay_minutes'], 2); ?></h2>
                     </div>
                 </div>
             </div>
