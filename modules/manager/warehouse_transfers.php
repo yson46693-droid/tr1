@@ -264,10 +264,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $items = [];
             if (isset($_POST['items']) && is_array($_POST['items'])) {
                 foreach ($_POST['items'] as $item) {
-                    $productId = !empty($item['product_id']) ? intval($item['product_id']) : 0;
-                    $batchId = !empty($item['batch_id']) ? intval($item['batch_id']) : 0;
+                    $productId = isset($item['product_id']) ? intval($item['product_id']) : 0;
+                    $batchId = isset($item['batch_id']) ? intval($item['batch_id']) : 0;
                     $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0;
                     
+                    // يجب أن يكون هناك product_id أو batch_id على الأقل، وكمية أكبر من صفر
                     if (($productId > 0 || $batchId > 0) && $quantity > 0) {
                         $items[] = [
                             'product_id' => $productId > 0 ? $productId : null,
@@ -279,7 +280,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
             
+            // تسجيل تفاصيل العناصر للمساعدة في التصحيح
             if (empty($items)) {
+                error_log('No items found in POST data. POST items: ' . json_encode($_POST['items'] ?? []));
                 $_SESSION['warehouse_transfer_error'] = 'يجب إضافة منتج واحد على الأقل.';
             } else {
                 try {
@@ -1230,13 +1233,13 @@ if (isset($_GET['id'])) {
                 <h5 class="modal-title">رفض طلب النقل</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST">
+            <form method="POST" id="rejectTransferForm">
                 <input type="hidden" name="action" value="reject_transfer">
                 <input type="hidden" name="transfer_id" id="rejectTransferId">
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">سبب الرفض <span class="text-danger">*</span></label>
-                        <textarea class="form-control" name="rejection_reason" rows="3" required></textarea>
+                        <textarea class="form-control" name="rejection_reason" id="rejectionReason" rows="3" required></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1478,10 +1481,61 @@ if (isset($_GET['id'])) {
 
 <script>
 function showRejectModal(transferId) {
-    document.getElementById('rejectTransferId').value = transferId;
+    const rejectTransferIdInput = document.getElementById('rejectTransferId');
+    const rejectionReasonTextarea = document.getElementById('rejectionReason');
+    const rejectForm = document.getElementById('rejectTransferForm');
+    
+    if (rejectTransferIdInput) {
+        rejectTransferIdInput.value = transferId;
+    }
+    
+    // إعادة تعيين النموذج
+    if (rejectionReasonTextarea) {
+        rejectionReasonTextarea.value = '';
+    }
+    
+    // إزالة أي رسائل خطأ سابقة
+    if (rejectForm) {
+        const existingAlerts = rejectForm.querySelectorAll('.alert');
+        existingAlerts.forEach(alert => alert.remove());
+    }
+    
     const modal = new bootstrap.Modal(document.getElementById('rejectModal'));
     modal.show();
+    
+    // التركيز على حقل سبب الرفض
+    if (rejectionReasonTextarea) {
+        setTimeout(() => {
+            rejectionReasonTextarea.focus();
+        }, 500);
+    }
 }
+
+// التحقق من صحة النموذج قبل الإرسال
+document.addEventListener('DOMContentLoaded', function() {
+    const rejectForm = document.getElementById('rejectTransferForm');
+    if (rejectForm) {
+        rejectForm.addEventListener('submit', function(e) {
+            const rejectionReason = document.getElementById('rejectionReason');
+            const transferId = document.getElementById('rejectTransferId');
+            
+            if (!rejectionReason || !rejectionReason.value || rejectionReason.value.trim() === '') {
+                e.preventDefault();
+                alert('يرجى إدخال سبب الرفض');
+                if (rejectionReason) {
+                    rejectionReason.focus();
+                }
+                return false;
+            }
+            
+            if (!transferId || !transferId.value || transferId.value <= 0) {
+                e.preventDefault();
+                alert('خطأ: معرّف الطلب غير صحيح');
+                return false;
+            }
+        });
+    }
+});
 
 // إدارة نموذج نقل المنتجات من الشركة
 document.addEventListener('DOMContentLoaded', function() {
@@ -1777,7 +1831,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 return false;
             }
             
-            checkedBoxes.forEach((cb, index) => {
+            // إزالة أي حقول hidden سابقة قبل إضافة الجديدة
+            this.querySelectorAll('input[type="hidden"][name^="items"]').forEach(input => input.remove());
+            
+            let itemIndex = 0;
+            checkedBoxes.forEach((cb) => {
                 const quantityInput = cb.closest('tr').querySelector('.quantity-input-sales');
                 const quantity = parseFloat(quantityInput.value) || 0;
                 
@@ -1787,18 +1845,30 @@ document.addEventListener('DOMContentLoaded', function() {
                     return false;
                 }
                 
-                const productId = cb.dataset.productId || '';
-                const batchId = cb.dataset.batchId || '';
+                const productId = parseInt(cb.dataset.productId) || 0;
+                const batchId = parseInt(cb.dataset.batchId) || 0;
                 const batchNumber = cb.dataset.batchNumber || '';
                 
-                const itemPrefix = `items[${index}]`;
-                const productIdInput = document.createElement('input');
-                productIdInput.type = 'hidden';
-                productIdInput.name = `${itemPrefix}[product_id]`;
-                productIdInput.value = productId;
-                this.appendChild(productIdInput);
+                // يجب أن يكون هناك product_id أو batch_id على الأقل
+                if (productId <= 0 && batchId <= 0) {
+                    e.preventDefault();
+                    alert('خطأ في بيانات المنتج: ' + cb.dataset.productName);
+                    return false;
+                }
                 
-                if (batchId) {
+                const itemPrefix = `items[${itemIndex}]`;
+                
+                // إضافة product_id فقط إذا كان موجوداً
+                if (productId > 0) {
+                    const productIdInput = document.createElement('input');
+                    productIdInput.type = 'hidden';
+                    productIdInput.name = `${itemPrefix}[product_id]`;
+                    productIdInput.value = productId;
+                    this.appendChild(productIdInput);
+                }
+                
+                // إضافة batch_id فقط إذا كان موجوداً
+                if (batchId > 0) {
                     const batchIdInput = document.createElement('input');
                     batchIdInput.type = 'hidden';
                     batchIdInput.name = `${itemPrefix}[batch_id]`;
@@ -1806,7 +1876,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     this.appendChild(batchIdInput);
                 }
                 
-                if (batchNumber) {
+                // إضافة batch_number إذا كان موجوداً
+                if (batchNumber && batchNumber !== '-') {
                     const batchNumberInput = document.createElement('input');
                     batchNumberInput.type = 'hidden';
                     batchNumberInput.name = `${itemPrefix}[batch_number]`;
@@ -1814,11 +1885,14 @@ document.addEventListener('DOMContentLoaded', function() {
                     this.appendChild(batchNumberInput);
                 }
                 
-                const quantityInput = document.createElement('input');
-                quantityInput.type = 'hidden';
-                quantityInput.name = `${itemPrefix}[quantity]`;
-                quantityInput.value = quantity;
-                this.appendChild(quantityInput);
+                // إضافة الكمية (مطلوبة دائماً)
+                const quantityInputHidden = document.createElement('input');
+                quantityInputHidden.type = 'hidden';
+                quantityInputHidden.name = `${itemPrefix}[quantity]`;
+                quantityInputHidden.value = quantity;
+                this.appendChild(quantityInputHidden);
+                
+                itemIndex++;
             });
         });
         
