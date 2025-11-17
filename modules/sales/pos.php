@@ -461,15 +461,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('الكمية المتاحة للمنتج ' . $item['name'] . ' غير كافية. المتاح: ' . $available . '، المطلوب: ' . $quantity);
                     }
 
-                    $newQuantity = max(0, $available - $quantity);
-                    $updateResult = updateVehicleInventory($vehicle['id'], $productId, $newQuantity, $currentUser['id']);
-                    if (empty($updateResult['success'])) {
-                        throw new RuntimeException($updateResult['message'] ?? 'تعذر تحديث مخزون السيارة.');
-                    }
-
                     // الحصول على batch_id من vehicle_inventory إذا كان متوفراً
                     $batchId = !empty($vehicleInventoryItem['finished_batch_id']) ? (int)$vehicleInventoryItem['finished_batch_id'] : null;
 
+                    // تسجيل حركة المخزون أولاً (قبل تحديث vehicle_inventory)
+                    // لأن recordInventoryMovement تتحقق من الكمية من vehicle_inventory
                     $movementResult = recordInventoryMovement(
                         $productId,
                         $vehicleWarehouseId,
@@ -484,6 +480,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if (empty($movementResult['success'])) {
                         throw new RuntimeException($movementResult['message'] ?? 'تعذر تسجيل حركة المخزون.');
+                    }
+
+                    // تحديث vehicle_inventory بعد تسجيل الحركة
+                    $newQuantity = max(0, $available - $quantity);
+                    $updateResult = updateVehicleInventory($vehicle['id'], $productId, $newQuantity, $currentUser['id']);
+                    if (empty($updateResult['success'])) {
+                        throw new RuntimeException($updateResult['message'] ?? 'تعذر تحديث مخزون السيارة.');
                     }
 
                     $db->execute(

@@ -64,8 +64,9 @@ function recordInventoryMovement($productId, $warehouseId, $type, $quantity, $re
         // إذا كان مخزن سيارة ونوع الحركة 'out' (بيع)، نستخدم vehicle_inventory
         if ($usingVehicleInventory && $type === 'out' && ($referenceType === 'sales' || $referenceType === 'invoice')) {
             // الحصول على الكمية من vehicle_inventory
+            // ملاحظة: نستخدم FOR UPDATE لأن vehicle_inventory قد يتم تحديثه قبل استدعاء recordInventoryMovement
             $vehicleInventory = $db->queryOne(
-                "SELECT quantity, finished_batch_id FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ?",
+                "SELECT quantity, finished_batch_id FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ? FOR UPDATE",
                 [$vehicleId, $productId]
             );
             

@@ -895,10 +895,32 @@ function createOrUpdateSalary($userId, $month, $year, $bonus = 0, $deductions = 
             }
         }
         
+        $salaryId = $result['insert_id'] ?? null;
+        
+        // تحديث accumulated_amount بعد إنشاء الراتب
+        if ($hasAccumulatedColumn && $salaryId) {
+            // الحصول على المبلغ التراكمي الحالي للموظف من جميع الرواتب السابقة
+            $previousAccumulated = $db->queryOne(
+                "SELECT COALESCE(SUM(accumulated_amount), 0) as total 
+                 FROM salaries 
+                 WHERE user_id = ? AND id != ?",
+                [$userId, $salaryId]
+            );
+            $previousAccumulated = floatval($previousAccumulated['total'] ?? 0);
+            
+            // إضافة المبلغ الجديد للتراكمي
+            $newAccumulated = $previousAccumulated + $calculation['total_amount'];
+            
+            $db->execute(
+                "UPDATE salaries SET accumulated_amount = ? WHERE id = ?",
+                [$newAccumulated, $salaryId]
+            );
+        }
+        
         return [
             'success' => true,
             'message' => 'تم إنشاء الراتب بنجاح',
-            'salary_id' => $result['insert_id'],
+            'salary_id' => $salaryId,
             'calculation' => $calculation
         ];
     }
