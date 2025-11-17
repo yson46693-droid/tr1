@@ -571,14 +571,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// الحصول على قائمة المستخدمين (استبعاد المديرين)
-$users = $db->query(
-    "SELECT id, username, full_name, hourly_rate, role 
-     FROM users 
-     WHERE status = 'active' 
-     AND role != 'manager'
-     ORDER BY full_name ASC"
-);
+// الحصول على قائمة المستخدمين (استبعاد المديرين) - فقط الأدوار التي لها رواتب
+$usersQuery = "SELECT id, username, full_name, hourly_rate, role 
+               FROM users 
+               WHERE status = 'active' 
+               AND role != 'manager'
+               AND role IN ('production', 'accountant', 'sales')";
+               
+if ($selectedUserId > 0) {
+    $usersQuery .= " AND id = " . intval($selectedUserId);
+}
+
+$usersQuery .= " ORDER BY 
+    CASE role 
+        WHEN 'production' THEN 1
+        WHEN 'accountant' THEN 2
+        WHEN 'sales' THEN 3
+        ELSE 4
+    END,
+    full_name ASC";
+
+$users = $db->query($usersQuery);
 
 // الحصول على الرواتب للشهر المحدد مع فلترة
 $yearColumnCheck = $db->queryOne("SHOW COLUMNS FROM salaries LIKE 'year'");
@@ -616,7 +629,7 @@ if ($salaryId > 0) {
 
 $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
-$salaries = $db->query(
+$salariesFromDb = $db->query(
     "SELECT s.*, u.full_name, u.username, u.role, u.hourly_rate as current_hourly_rate,
             approver.full_name as approver_name
      FROM salaries s
@@ -627,11 +640,67 @@ $salaries = $db->query(
     $params
 );
 
-// استبعاد المديرين من قائمة الرواتب المعروضة
+// إنشاء مصفوفة مرتبة برقم المستخدم للبحث السريع
+$salariesMap = [];
+foreach ($salariesFromDb as $salary) {
+    $userId = intval($salary['user_id'] ?? 0);
+    if ($userId > 0) {
+        $salariesMap[$userId] = $salary;
+    }
+}
+
+// دمج جميع المستخدمين مع رواتبهم (أو إنشاء سجل فارغ إذا لم يكن لديهم راتب)
+$salaries = [];
+foreach ($users as $user) {
+    $userId = intval($user['id']);
+    if (isset($salariesMap[$userId])) {
+        // المستخدم لديه راتب مسجل
+        $salaries[] = $salariesMap[$userId];
+    } else {
+        // المستخدم ليس لديه راتب مسجل - إنشاء سجل فارغ
+        $hourlyRate = cleanFinancialValue($user['hourly_rate'] ?? 0);
+        $monthHours = calculateMonthlyHours($userId, $selectedMonth, $selectedYear);
+        $baseAmount = round($monthHours * $hourlyRate, 2);
+        
+        // حساب نسبة التحصيلات إذا كان مندوب
+        $collectionsAmount = 0;
+        $collectionsBonus = 0;
+        if ($user['role'] === 'sales') {
+            $collectionsAmount = calculateSalesCollections($userId, $selectedMonth, $selectedYear);
+            $collectionsBonus = $collectionsAmount * 0.02;
+        }
+        
+        $totalAmount = round($baseAmount + $collectionsBonus, 2);
+        
+        $salaries[] = [
+            'id' => null,
+            'user_id' => $userId,
+            'full_name' => $user['full_name'] ?? $user['username'],
+            'username' => $user['username'],
+            'role' => $user['role'],
+            'hourly_rate' => $hourlyRate,
+            'current_hourly_rate' => $hourlyRate,
+            'total_hours' => $monthHours,
+            'base_amount' => $baseAmount,
+            'bonus' => 0,
+            'collections_bonus' => round($collectionsBonus, 2),
+            'collections_amount' => $collectionsAmount,
+            'deductions' => 0,
+            'total_amount' => $totalAmount,
+            'status' => 'not_calculated',
+            'approved_by' => null,
+            'approver_name' => null,
+            'created_at' => null,
+            'updated_at' => null
+        ];
+    }
+}
+
+// استبعاد المديرين من قائمة الرواتب المعروضة (للأمان)
 $salaries = array_values(array_filter($salaries, function ($salary) {
     $role = strtolower($salary['role'] ?? '');
     $hourlyRate = isset($salary['hourly_rate']) ? floatval($salary['hourly_rate']) : (isset($salary['current_hourly_rate']) ? floatval($salary['current_hourly_rate']) : 0);
-    return $role !== 'manager' && $hourlyRate > 0;
+    return $role !== 'manager';
 }));
 
 // الحصول على طلبات تعديل الرواتب المعلقة (للمدير فقط)
@@ -747,6 +816,24 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
     exit;
 }
 ?>
+<?php if ($view === 'advances'): ?>
+    <!-- صفحة السلف - عرض جدول طلبات السلف فقط -->
+    <?php if ($error): ?>
+        <div class="alert alert-danger alert-dismissible fade show">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+            <?php echo htmlspecialchars($error); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($success): ?>
+        <div class="alert alert-success alert-dismissible fade show">
+            <i class="bi bi-check-circle-fill me-2"></i>
+            <?php echo htmlspecialchars($success); ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    <?php endif; ?>
+<?php else: ?>
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
     <h2 class="mb-0"><i class="bi bi-currency-dollar me-2"></i><?php echo isset($lang['salaries']) ? $lang['salaries'] : 'الرواتب'; ?></h2>
     <div class="d-flex align-items-center gap-3 mt-2 mt-md-0">
@@ -819,8 +906,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
         </a>
     </li>
 </ul>
+<?php endif; ?>
 
-<?php if ($showReport && $monthlyReport): ?>
+<?php if ($view !== 'advances' && $showReport && $monthlyReport): ?>
 <!-- تقرير رواتب شهري -->
 <div class="card shadow-sm mb-4">
     <div class="card-header salary-header-gradient text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -1050,6 +1138,13 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
     background: linear-gradient(135deg, #1e40af 0%, #3b82f6 30%, #60a5fa 60%, #93c5fd 100%) !important;
     border: none;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    color: #ffffff !important;
+}
+
+.salary-header-gradient h5,
+.salary-header-gradient .text-white {
+    color: #ffffff !important;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 /* تحسين عرض الجدول - تدرج الأزرق والأبيض */
@@ -1199,6 +1294,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 </style>
 <?php endif; ?>
 
+<?php if ($view !== 'advances'): ?>
 <!-- تبويب قائمة الرواتب -->
 <div id="listTab" class="tab-content">
     <!-- فلترة -->
@@ -1279,14 +1375,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                             </tr>
                         <?php else: ?>
                             <?php foreach ($salaries as $salary): ?>
+                                <?php 
+                                $hasSalaryId = !empty($salary['id']);
+                                $roleLabels = [
+                                    'production' => 'إنتاج',
+                                    'accountant' => 'محاسب',
+                                    'sales' => 'مندوب مبيعات'
+                                ];
+                                $roleLabel = $roleLabels[$salary['role']] ?? $salary['role'];
+                                ?>
                                 <tr>
                                     <td data-label="المستخدم">
                                         <strong><?php echo htmlspecialchars($salary['full_name'] ?? $salary['username']); ?></strong>
-                                        <br><small class="text-muted"><?php echo isset($lang['role_' . $salary['role']]) ? $lang['role_' . $salary['role']] : $salary['role']; ?></small>
+                                        <br><small class="text-muted"><?php echo htmlspecialchars($roleLabel); ?></small>
                                     </td>
-                                    <td data-label="سعر الساعة"><?php echo formatCurrency($salary['hourly_rate']); ?></td>
-                                    <td data-label="عدد الساعات"><?php echo number_format($salary['total_hours'], 2); ?> ساعة</td>
-                                    <td data-label="الراتب الأساسي"><?php echo formatCurrency($salary['base_amount']); ?></td>
+                                    <td data-label="سعر الساعة"><?php echo formatCurrency($salary['hourly_rate'] ?? $salary['current_hourly_rate'] ?? 0); ?></td>
+                                    <td data-label="عدد الساعات"><?php echo number_format($salary['total_hours'] ?? 0, 2); ?> ساعة</td>
+                                    <td data-label="الراتب الأساسي"><?php echo formatCurrency($salary['base_amount'] ?? 0); ?></td>
                                     <td data-label="مكافأة">
                                         <?php 
                                         $bonusAmount = $salary['bonus'] ?? 0;
@@ -1299,25 +1404,29 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                                         ?>
                                     </td>
                                     <td data-label="خصومات"><?php echo formatCurrency($salary['deductions'] ?? 0); ?></td>
-                                    <td data-label="الإجمالي"><strong><?php echo formatCurrency($salary['total_amount']); ?></strong></td>
+                                    <td data-label="الإجمالي"><strong><?php echo formatCurrency($salary['total_amount'] ?? 0); ?></strong></td>
                                     <td data-label="الحالة">
                                         <span class="badge bg-<?php 
-                                            echo $salary['status'] === 'approved' ? 'success' : 
-                                                ($salary['status'] === 'rejected' ? 'danger' : 
-                                                ($salary['status'] === 'paid' ? 'info' : 'warning')); 
+                                            $status = $salary['status'] ?? 'not_calculated';
+                                            echo $status === 'approved' ? 'success' : 
+                                                ($status === 'rejected' ? 'danger' : 
+                                                ($status === 'paid' ? 'info' : 
+                                                ($status === 'not_calculated' ? 'secondary' : 'warning'))); 
                                         ?>">
                                             <?php 
                                             $statusLabels = [
                                                 'pending' => 'معلق',
                                                 'approved' => 'موافق عليه',
                                                 'rejected' => 'مرفوض',
-                                                'paid' => 'مدفوع'
+                                                'paid' => 'مدفوع',
+                                                'not_calculated' => 'غير محسوب'
                                             ];
-                                            echo $statusLabels[$salary['status']] ?? ($salary['status'] ?? 'غير محدد');
+                                            echo $statusLabels[$status] ?? 'غير محدد';
                                             ?>
                                         </span>
                                     </td>
                                     <td data-label="الإجراءات">
+                                        <?php if ($hasSalaryId): ?>
                                         <div class="btn-group btn-group-sm" role="group">
                                             <button class="btn btn-info" 
                                                     onclick="viewSalaryDetails(<?php echo $salary['id']; ?>)" 
@@ -1335,6 +1444,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                                                 <i class="bi bi-pencil"></i>
                                             </button>
                                         </div>
+                                        <?php else: ?>
+                                        <span class="text-muted small">غير متاح</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -1345,9 +1457,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- تبويب الطلبات المعلقة (للمدير فقط) -->
-<?php if ($currentUser['role'] === 'manager' && !empty($pendingModifications)): ?>
+<?php if ($view !== 'advances' && $currentUser['role'] === 'manager' && !empty($pendingModifications)): ?>
 <div id="pendingTab" class="tab-content" style="display: <?php echo $view === 'pending' ? 'block' : 'none'; ?>;">
     <div class="card shadow-sm border-warning">
         <div class="card-header bg-warning text-dark">
@@ -1468,28 +1581,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 </div>
 
 <?php if ($view === 'advances'): ?>
-<!-- قسم السلف -->
-<div class="card shadow-sm">
-    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
-        <h5 class="mb-0"><i class="bi bi-cash-coin me-2"></i>طلبات السلف</h5>
-        <?php if ($currentUser['role'] !== 'manager'): ?>
-        <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#requestAdvanceModal">
-            <i class="bi bi-plus-circle me-1"></i>طلب سلفة جديدة
-        </button>
-        <?php endif; ?>
+<!-- قسم السلف - جدول طلبات السلف فقط -->
+<?php if (empty($advances)): ?>
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+        <h5>لا توجد طلبات سلف</h5>
     </div>
-    <div class="card-body">
-        <?php if (empty($advances)): ?>
-            <div class="text-center text-muted py-5">
-                <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-                <h5>لا توجد طلبات سلف</h5>
-                <?php if ($currentUser['role'] !== 'manager'): ?>
-                <p>يمكنك طلب سلفة جديدة باستخدام الزر أعلاه</p>
-                <?php endif; ?>
-            </div>
-        <?php else: ?>
-            <div class="table-responsive dashboard-table-wrapper">
-                <table class="table dashboard-table align-middle">
+<?php else: ?>
+    <div class="table-responsive dashboard-table-wrapper">
+        <table class="table dashboard-table align-middle">
                     <thead>
                         <tr>
                             <th>#</th>
@@ -1566,10 +1666,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
-        <?php endif; ?>
     </div>
-</div>
+<?php endif; ?>
 
 <!-- Modal طلب سلفة جديدة -->
 <div class="modal fade" id="requestAdvanceModal" tabindex="-1">
@@ -1738,8 +1836,5 @@ function rejectAdvance(advanceId) {
 function viewAdvanceDetails(advanceId) {
     alert('عرض تفاصيل السلفة #' + advanceId);
     // يمكن إضافة modal لعرض التفاصيل لاحقاً
-}
-</script>
-
 }
 </script>
