@@ -336,6 +336,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => 'خزنة المندوب',
+                'icon' => 'bi-cash-stack',
+                'url' => $baseUrl . 'sales.php?page=cash_register',
+                'active' => ($currentPage === 'sales.php' && $currentPageParam === 'cash_register'),
+                'badge' => null
+            ],
+            [
                 'title' => isset($lang['returns_exchanges']) ? $lang['returns_exchanges'] : 'المرتجعات والاستبدال',
                 'icon' => 'bi-arrow-return-left',
                 'url' => $baseUrl . 'sales.php?page=returns',
