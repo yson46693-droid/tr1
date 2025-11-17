@@ -61,8 +61,9 @@ function recordInventoryMovement($productId, $warehouseId, $type, $quantity, $re
             }
         }
         
-        // إذا كان مخزن سيارة ونوع الحركة 'out' (بيع)، نستخدم vehicle_inventory
-        if ($usingVehicleInventory && $type === 'out' && ($referenceType === 'sales' || $referenceType === 'invoice')) {
+        // إذا كان مخزن سيارة ونوع الحركة خروج (بيع أو نقل)، نستخدم vehicle_inventory مباشرة
+        // لأن الكميات الفعلية المتاحة للمندوبين محفوظة هناك وليس في جدول products
+        if ($usingVehicleInventory && in_array($type, ['out', 'transfer'], true)) {
             // الحصول على الكمية من vehicle_inventory
             // ملاحظة: نستخدم FOR UPDATE لأن vehicle_inventory قد يتم تحديثه قبل استدعاء recordInventoryMovement
             $vehicleInventory = $db->queryOne(

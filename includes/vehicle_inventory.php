@@ -425,10 +425,45 @@ function getFinishedProductBatchOptions($onlyAvailable = true, $fromWarehouseId 
                 }
             }
 
+            // تنظيف اسم المنتج - تجنب استخدام "منتج رقم X" أو "غير محدد" إلا كحل أخير
+            $productName = 'منتج غير محدد';
+            
+            // محاولة الحصول على الاسم الصحيح من products.name أولاً
+            if ($productId > 0) {
+                $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$productId]);
+                if ($product && !empty($product['name']) && trim($product['name']) !== '') {
+                    $prodName = trim($product['name']);
+                    if (!preg_match('/^منتج رقم \d+$/', $prodName)) {
+                        $productName = $prodName;
+                    }
+                }
+            }
+            
+            // إذا لم نجد اسم صحيح من products، جرب finished_products.product_name
+            if ($productName === 'منتج غير محدد' && !empty($row['product_name']) && trim($row['product_name']) !== '') {
+                $fpName = trim($row['product_name']);
+                if (!preg_match('/^منتج رقم \d+$/', $fpName) && $fpName !== 'غير محدد') {
+                    $productName = $fpName;
+                }
+            }
+            
+            // إذا كان الاسم لا يزال "منتج غير محدد"، استخدم أي اسم متاح
+            if ($productName === 'منتج غير محدد') {
+                if ($productId > 0) {
+                    $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$productId]);
+                    if ($product && !empty($product['name']) && trim($product['name']) !== '') {
+                        $productName = trim($product['name']);
+                    }
+                }
+                if ($productName === 'منتج غير محدد' && !empty($row['product_name']) && trim($row['product_name']) !== '' && trim($row['product_name']) !== 'غير محدد') {
+                    $productName = trim($row['product_name']);
+                }
+            }
+            
             $options[] = [
                 'batch_id' => $batchId,
                 'product_id' => $productId,
-                'product_name' => $row['product_name'] ?? 'منتج غير محدد',
+                'product_name' => $productName,
                 'batch_number' => $row['batch_number'] ?? '',
                 'production_date' => $row['production_date'] ?? null,
                 'quantity_produced' => (float)$row['quantity_produced'],
@@ -539,7 +574,6 @@ function getAvailableProductsFromWarehouse($warehouseId): array
             $products = $db->query(
                 "SELECT 
                     id AS product_id,
-                    COALESCE(NULLIF(TRIM(name), ''), CONCAT('منتج رقم ', id)) AS product_name,
                     name AS original_name,
                     quantity AS quantity_available,
                     unit,
