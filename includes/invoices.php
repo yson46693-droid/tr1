@@ -41,8 +41,10 @@ function createInvoice($customerId, $salesRepId, $date, $items, $taxRate = 0, $d
         $taxAmount = 0; // تم إلغاء الضريبة
         $totalAmount = $subtotal - $discountAmount;
         
-        // حساب تاريخ الاستحقاق (افتراضي: 30 يوم)
-        $dueDate = date('Y-m-d', strtotime($date . ' +30 days'));
+        // حساب تاريخ الاستحقاق (إذا لم يتم تحديده، استخدم null لطباعة "أجل غير مسمى")
+        if (empty($dueDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate)) {
+            $dueDate = null;
+        }
         
         // إنشاء الفاتورة
         $sql = "INSERT INTO invoices 

@@ -21,7 +21,8 @@ $companyEmail     = $invoiceData['company_email']   ?? 'البريد الإلك�
 $companyTaxNumber = $invoiceData['company_tax_number'] ?? 'الرقم الضريبي: غير متوفر';
 
 $issueDate = formatDate($invoiceData['date']);
-$dueDate   = formatDate($invoiceData['due_date']);
+$dueDateRaw = $invoiceData['due_date'] ?? null;
+$dueDate = !empty($dueDateRaw) ? formatDate($dueDateRaw) : 'أجل غير مسمى';
 $status    = $invoiceData['status'] ?? 'draft';
 
 $customerName    = $invoiceData['customer_name']    ?? 'عميل نقدي';
@@ -38,14 +39,9 @@ $notes           = trim((string)($invoiceData['notes'] ?? ''));
 
 $currencyLabel   = CURRENCY . ' ' . CURRENCY_SYMBOL;
 
-$qrPayload = sprintf(
-    "فاتورة:%s\nالإجمالي:%s\nالعميل:%s\nالتاريخ:%s",
-    $invoiceData['invoice_number'],
-    formatCurrency($total),
-    $customerName,
-    $issueDate
-);
-$qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' . urlencode($qrPayload);
+// باركود فيسبوك - يمكن تعديل الرابط حسب صفحة الشركة على فيسبوك
+$facebookPageUrl = 'https://www.facebook.com/yourpage'; // يرجى تعديل هذا الرابط
+$qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' . urlencode($facebookPageUrl);
 
 $statusLabel = [
     'draft'    => 'مسودة',
@@ -69,7 +65,8 @@ $statusClass = [
         <header class="invoice-header">
             <div class="brand-block">
                 <div class="logo-placeholder">
-                    <span class="logo-letter"><?php echo mb_substr($companyName, 0, 1); ?></span>
+                    <img src="<?php echo getRelativeUrl('favicon.ico'); ?>" alt="Logo" class="company-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                    <span class="logo-letter" style="display:none;"><?php echo mb_substr($companyName, 0, 1); ?></span>
                 </div>
                 <div>
                     <h1 class="company-name"><?php echo htmlspecialchars($companyName); ?></h1>
@@ -123,31 +120,24 @@ $statusClass = [
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 60px;">#</th>
                         <th>المنتج</th>
                         <th>الوصف</th>
-                        <th style="width: 120px;">الكمية</th>
-                        <th style="width: 150px;">سعر الوحدة</th>
-                        <th style="width: 160px;">الإجمالي</th>
+                        <th style="width: 120px; text-align: center;">الكمية</th>
+                        <th style="width: 150px; text-align: end;">سعر الوحدة</th>
+                        <th style="width: 160px; text-align: end;">الإجمالي</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php 
-                    $itemNumber = 1;
                     foreach ($invoiceData['items'] as $item): 
                         $quantity   = isset($item['quantity']) ? number_format($item['quantity'], 2) : '0.00';
                         $unitPrice  = isset($item['unit_price']) ? formatCurrency($item['unit_price']) : formatCurrency(0);
                         $totalPrice = isset($item['total_price']) ? formatCurrency($item['total_price']) : formatCurrency(0);
-                        $unitLabel  = $item['unit'] ?? '';
                         $description = trim((string)($item['description'] ?? ''));
                     ?>
                     <tr>
-                        <td><?php echo $itemNumber++; ?></td>
                         <td>
                             <div class="product-name"><?php echo htmlspecialchars($item['product_name'] ?? 'منتج'); ?></div>
-                            <?php if (!empty($unitLabel)): ?>
-                                <div class="product-unit">الوحدة: <?php echo htmlspecialchars($unitLabel); ?></div>
-                            <?php endif; ?>
                         </td>
                         <td>
                             <?php if ($description): ?>
@@ -156,9 +146,9 @@ $statusClass = [
                                 <span class="muted">لا يوجد وصف</span>
                             <?php endif; ?>
                         </td>
-                        <td class="text-center"><?php echo $quantity; ?></td>
-                        <td class="text-end"><?php echo $unitPrice; ?></td>
-                        <td class="text-end"><?php echo $totalPrice; ?></td>
+                        <td style="text-align: center; vertical-align: middle;"><?php echo $quantity; ?></td>
+                        <td style="text-align: end; vertical-align: middle;"><?php echo $unitPrice; ?></td>
+                        <td style="text-align: end; vertical-align: middle;"><?php echo $totalPrice; ?></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -194,11 +184,11 @@ $statusClass = [
                 </div>
             </div>
             <div class="summary-card qr-card">
-                <div class="summary-title">رمز QR للفاتورة</div>
+                <div class="summary-title">تابعنا على فيسبوك</div>
                 <div class="qr-wrapper">
-                    <img src="<?php echo htmlspecialchars($qrUrl); ?>" alt="QR Code">
+                    <img src="<?php echo htmlspecialchars($qrUrl); ?>" alt="Facebook QR Code">
                 </div>
-                <div class="qr-note">امسح الرمز لاستعراض بيانات الفاتورة</div>
+                <div class="qr-note">امسح الرمز لمتابعة صفحتنا على فيسبوك</div>
             </div>
             <?php if ($notes): ?>
                 <div class="summary-card notes-card">
@@ -276,6 +266,15 @@ $statusClass = [
     font-size: 30px;
     font-weight: 700;
     box-shadow: 0 12px 24px rgba(15, 76, 129, 0.25);
+    overflow: hidden;
+    position: relative;
+}
+
+.company-logo-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    padding: 8px;
 }
 
 .logo-letter {
@@ -404,8 +403,12 @@ $statusClass = [
     padding: 14px;
     font-size: 13px;
     color: #0f4c81;
-    text-align: center;
+    text-align: right;
     border-bottom: 1px solid rgba(15, 76, 129, 0.12);
+}
+
+.items-table th:first-child {
+    text-align: right;
 }
 
 .items-table td {
@@ -413,6 +416,8 @@ $statusClass = [
     font-size: 14px;
     color: #1f2937;
     border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+    text-align: right;
+    vertical-align: middle;
 }
 
 .items-table tbody tr:last-child td {

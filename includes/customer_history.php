@@ -107,6 +107,7 @@ function customerHistorySyncForCustomer(int $customerId): array
     // حذف السجلات الأقدم من ستة أشهر
     customerHistoryPruneOlderThan($cutoffDate);
 
+    // جلب الفواتير للعميل خلال آخر 6 أشهر
     $invoiceRows = $db->query(
         "SELECT id, invoice_number, date, total_amount, paid_amount, status
          FROM invoices
@@ -114,6 +115,9 @@ function customerHistorySyncForCustomer(int $customerId): array
          ORDER BY date DESC",
         [$customerId, $cutoffDate]
     );
+    
+    // تسجيل عدد الفواتير للتشخيص
+    error_log("customerHistorySyncForCustomer: Found " . count($invoiceRows) . " invoices for customer_id=$customerId since $cutoffDate");
 
     $invoiceIds = array_map(
         static function ($row) {
@@ -264,6 +268,9 @@ function customerHistorySyncForCustomer(int $customerId): array
          ORDER BY invoice_date DESC",
         [$customerId]
     );
+    
+    // تسجيل عدد السجلات للتشخيص
+    error_log("customerHistorySyncForCustomer: Found " . count($historyRows) . " history records for customer_id=$customerId");
 
     $invoicesPayload = [];
     $summaryTotals = [

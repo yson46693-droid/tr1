@@ -228,6 +228,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $prepaidAmount = cleanFinancialValue($_POST['prepaid_amount'] ?? 0);
         $paidAmountInput = cleanFinancialValue($_POST['paid_amount'] ?? 0);
         $notes = trim($_POST['notes'] ?? '');
+        $dueDateInput = trim($_POST['due_date'] ?? '');
+        $dueDate = null;
+        if (!empty($dueDateInput) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDateInput)) {
+            $dueDate = $dueDateInput;
+        }
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $saleDate)) {
             $saleDate = date('Y-m-d');
@@ -416,7 +421,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     0,
                     $prepaidAmount,
                     $notes,
-                    $currentUser['id']
+                    $currentUser['id'],
+                    $dueDate
                 );
 
                 if (empty($invoiceResult['success'])) {
@@ -1570,6 +1576,11 @@ if (!$error) {
                                     <label class="form-label">مبلغ التحصيل الجزئي</label>
                                     <input type="number" step="0.01" min="0" value="0" class="form-control" id="posPartialAmount">
                                 </div>
+                                <div class="mt-3 d-none" id="posDueDateWrapper">
+                                    <label class="form-label">تاريخ الاستحقاق <span class="text-muted">(اختياري)</span></label>
+                                    <input type="date" class="form-control" name="due_date" id="posDueDate">
+                                    <small class="text-muted">اتركه فارغاً لطباعة "أجل غير مسمى"</small>
+                                </div>
                             </div>
 
                             <div class="mb-3">
@@ -1681,6 +1692,8 @@ if (!$error) {
         paymentRadios: document.querySelectorAll('input[name="payment_type"]'),
         partialWrapper: document.getElementById('posPartialWrapper'),
         partialInput: document.getElementById('posPartialAmount'),
+        dueDateWrapper: document.getElementById('posDueDateWrapper'),
+        dueDateInput: document.getElementById('posDueDate'),
         submitBtn: document.getElementById('posSubmitBtn'),
         customerModeRadios: document.querySelectorAll('input[name="customer_mode"]'),
         existingCustomerWrap: document.getElementById('posExistingCustomerWrap'),
@@ -1780,14 +1793,8 @@ if (!$error) {
     }
 
     function sanitizeSummaryDisplays() {
-        if (elements.netTotal) {
-            const current = elements.netTotal.textContent || '';
-            elements.netTotal.textContent = formatCurrency(current);
-        }
-        if (elements.dueAmount) {
-            const current = elements.dueAmount.textContent || '';
-            elements.dueAmount.textContent = formatCurrency(current);
-        }
+        // لا حاجة لإعادة التنسيق لأن updateSummary() تقوم بذلك بالفعل
+        // هذه الدالة محفوظة للتوافق مع الكود القديم
     }
 
     function updateSummary() {
@@ -1796,16 +1803,20 @@ if (!$error) {
             const price = sanitizeNumber(item.unit_price);
             return total + (qty * price);
         }, 0);
-        let prepaid = sanitizeNumber(elements.prepaidInput.value);
+        // الحصول على المبلغ المدفوع مسبقاً
+        let prepaid = sanitizeNumber(elements.prepaidInput ? elements.prepaidInput.value : '0');
         let sanitizedSubtotal = sanitizeNumber(subtotal);
 
+        // التأكد من أن المبلغ المدفوع مسبقاً لا يتجاوز المجموع الفرعي
         if (prepaid < 0) {
             prepaid = 0;
         }
         if (prepaid > sanitizedSubtotal) {
             prepaid = sanitizedSubtotal;
         }
-        elements.prepaidInput.value = prepaid.toFixed(2);
+        if (elements.prepaidInput) {
+            elements.prepaidInput.value = prepaid.toFixed(2);
+        }
 
         const netTotal = sanitizeNumber(sanitizedSubtotal - prepaid);
         let paidAmount = 0;
@@ -1815,8 +1826,14 @@ if (!$error) {
             paidAmount = netTotal;
             elements.partialWrapper.classList.add('d-none');
             elements.partialInput.value = '0.00';
+            if (elements.dueDateWrapper) {
+                elements.dueDateWrapper.classList.add('d-none');
+            }
         } else if (paymentType === 'partial') {
             elements.partialWrapper.classList.remove('d-none');
+            if (elements.dueDateWrapper) {
+                elements.dueDateWrapper.classList.remove('d-none');
+            }
             let partialValue = sanitizeNumber(elements.partialInput.value);
             if (partialValue < 0) {
                 partialValue = 0;
@@ -1829,11 +1846,15 @@ if (!$error) {
         } else {
             elements.partialWrapper.classList.add('d-none');
             elements.partialInput.value = '0.00';
+            if (elements.dueDateWrapper) {
+                elements.dueDateWrapper.classList.remove('d-none');
+            }
             paidAmount = 0;
         }
 
         const dueAmount = sanitizeNumber(Math.max(0, netTotal - paidAmount));
 
+        // تحديث العناصر في الواجهة بشكل فوري
         if (elements.netTotal) {
             elements.netTotal.textContent = formatCurrency(netTotal);
         }
@@ -1841,11 +1862,14 @@ if (!$error) {
             elements.dueAmount.textContent = formatCurrency(dueAmount);
         }
 
-        elements.paidField.value = paidAmount.toFixed(2);
-        elements.submitBtn.disabled = cart.length === 0;
+        if (elements.paidField) {
+            elements.paidField.value = paidAmount.toFixed(2);
+        }
+        if (elements.submitBtn) {
+            elements.submitBtn.disabled = cart.length === 0;
+        }
         syncCartData();
         refreshPaymentOptionStates();
-        sanitizeSummaryDisplays();
     }
 
     function renderCart() {

@@ -118,6 +118,47 @@ if (
             ];
         }
         
+        // التأكد من أن history موجود وبه البيانات المطلوبة
+        if (!isset($historyPayload['history'])) {
+            $historyPayload['history'] = [
+                'window_start' => date('Y-m-d', strtotime('-6 months')),
+                'invoices' => [],
+                'totals' => [
+                    'invoice_count' => 0,
+                    'total_invoiced' => 0.0,
+                    'total_paid' => 0.0,
+                    'total_returns' => 0.0,
+                    'total_exchanges' => 0.0,
+                    'net_total' => 0.0,
+                ],
+                'returns' => [],
+                'exchanges' => [],
+            ];
+        }
+        
+        // التأكد من أن totals موجود
+        if (!isset($historyPayload['history']['totals'])) {
+            $historyPayload['history']['totals'] = [
+                'invoice_count' => 0,
+                'total_invoiced' => 0.0,
+                'total_paid' => 0.0,
+                'total_returns' => 0.0,
+                'total_exchanges' => 0.0,
+                'net_total' => 0.0,
+            ];
+        }
+        
+        // التأكد من أن المصفوفات موجودة
+        if (!isset($historyPayload['history']['invoices']) || !is_array($historyPayload['history']['invoices'])) {
+            $historyPayload['history']['invoices'] = [];
+        }
+        if (!isset($historyPayload['history']['returns']) || !is_array($historyPayload['history']['returns'])) {
+            $historyPayload['history']['returns'] = [];
+        }
+        if (!isset($historyPayload['history']['exchanges']) || !is_array($historyPayload['history']['exchanges'])) {
+            $historyPayload['history']['exchanges'] = [];
+        }
+        
         echo json_encode($historyPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     } catch (Throwable $historyError) {
         error_log('customers purchase history ajax error: ' . $historyError->getMessage());
@@ -1104,18 +1145,31 @@ document.addEventListener('DOMContentLoaded', function () {
             })
                 .then(function (response) {
                     if (!response.ok) {
-                        throw new Error('تعذر تحميل البيانات.');
+                        throw new Error('تعذر تحميل البيانات. حالة الخادم: ' + response.status);
+                    }
+                    // التحقق من نوع المحتوى
+                    const contentType = response.headers.get('content-type') || '';
+                    if (!contentType.includes('application/json')) {
+                        return response.text().then(function(text) {
+                            console.error('Expected JSON but got:', contentType, text);
+                            throw new Error('استجابة غير صحيحة من الخادم.');
+                        });
                     }
                     return response.json();
                 })
                 .then(function (payload) {
-                    if (!payload || !payload.success) {
-                        throw new Error(payload && payload.message ? payload.message : 'فشل تحميل بيانات السجل.');
+                    if (!payload) {
+                        throw new Error('لم يتم استلام أي بيانات من الخادم.');
+                    }
+                    
+                    if (!payload.success) {
+                        throw new Error(payload.message || 'فشل تحميل بيانات السجل.');
                     }
 
                     var history = payload.history || {};
                     var totals = history.totals || {};
 
+                    // تحديث الإحصائيات
                     if (totalInvoicesEl) {
                         totalInvoicesEl.textContent = Number(totals.invoice_count || 0).toLocaleString('ar-EG');
                     }
@@ -1129,15 +1183,21 @@ document.addEventListener('DOMContentLoaded', function () {
                         netTotalEl.textContent = formatCurrency(totals.net_total || 0);
                     }
 
-                    renderInvoices(history.invoices || []);
-                    renderReturns(history.returns || []);
-                    renderExchanges(history.exchanges || []);
+                    // عرض البيانات (حتى لو كانت فارغة)
+                    renderInvoices(Array.isArray(history.invoices) ? history.invoices : []);
+                    renderReturns(Array.isArray(history.returns) ? history.returns : []);
+                    renderExchanges(Array.isArray(history.exchanges) ? history.exchanges : []);
 
+                    // إخفاء مؤشر التحميل وإظهار المحتوى دائماً
                     if (loadingIndicator) {
                         loadingIndicator.classList.add('d-none');
                     }
                     if (contentWrapper) {
                         contentWrapper.classList.remove('d-none');
+                    }
+                    // إخفاء رسالة الخطأ إذا كانت موجودة
+                    if (errorAlert) {
+                        errorAlert.classList.add('d-none');
                     }
                 })
                 .catch(function (error) {
