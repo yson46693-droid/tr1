@@ -1157,6 +1157,8 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 <?php endif; ?>
 
+<?php endif; // end if ($section === 'company') from line 738 ?>
+
 <?php if ($section === 'delegates' && !$isSalesUser): ?>
 
 <?php
