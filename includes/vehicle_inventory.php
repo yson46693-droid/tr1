@@ -14,6 +14,60 @@ require_once __DIR__ . '/notifications.php';
 require_once __DIR__ . '/inventory_movements.php';
 require_once __DIR__ . '/product_name_helper.php';
 
+if (!function_exists('getFinishedProductNameByBatch')) {
+    /**
+     * يعيد اسم المنتج من جدول finished_products باستخدام معرف التشغيلة أو رقمها.
+     */
+    function getFinishedProductNameByBatch($db, ?int $batchId, ?string $batchNumber): ?string
+    {
+        static $cache = [];
+
+        if ($batchId) {
+            $key = 'id_' . $batchId;
+            if (array_key_exists($key, $cache)) {
+                return $cache[$key];
+            }
+
+            $row = $db->queryOne("SELECT product_name FROM finished_products WHERE id = ?", [$batchId]);
+            if ($row && !empty($row['product_name'])) {
+                $name = trim($row['product_name']);
+                if ($name !== '' && !isPlaceholderProductName($name)) {
+                    return $cache[$key] = $name;
+                }
+            }
+            $cache[$key] = null;
+        }
+
+        if ($batchNumber) {
+            $normalizedValue = trim($batchNumber);
+            $normalized = function_exists('mb_strtolower')
+                ? mb_strtolower($normalizedValue)
+                : strtolower($normalizedValue);
+            if ($normalized !== '') {
+                $key = 'num_' . $normalized;
+                if (array_key_exists($key, $cache)) {
+                    return $cache[$key];
+                }
+
+                $row = $db->queryOne(
+                    "SELECT product_name FROM finished_products WHERE batch_number = ? ORDER BY id DESC LIMIT 1",
+                    [$batchNumber]
+                );
+                if ($row && !empty($row['product_name'])) {
+                    $name = trim($row['product_name']);
+                    if ($name !== '' && !isPlaceholderProductName($name)) {
+                        return $cache[$key] = $name;
+                    }
+                }
+
+                $cache[$key] = null;
+            }
+        }
+
+        return null;
+    }
+}
+
 if (!function_exists('ensureVehicleInventoryProductColumns')) {
     /**
      * التأكد من أن جدول vehicle_inventory يحتوي على أعمدة بيانات المنتج التفصيلية.
@@ -437,6 +491,11 @@ function getFinishedProductBatchOptions($onlyAvailable = true, $fromWarehouseId 
                 $candidateNames[] = $row['product_name'];
             }
 
+            $fallbackName = getFinishedProductNameByBatch($db, $batchId, $row['batch_number'] ?? null);
+            if ($fallbackName) {
+                $candidateNames[] = $fallbackName;
+            }
+
             $productName = resolveProductName($candidateNames);
             
             $options[] = [
@@ -496,25 +555,36 @@ function getAvailableProductsFromWarehouse($warehouseId): array
                     p.name AS product_name,
                     vi.quantity AS quantity_available,
                     p.unit,
-                    p.unit_price
+                    p.unit_price,
+                    vi.finished_batch_id,
+                    vi.finished_batch_number,
+                    fp.product_name AS finished_product_name
                 FROM vehicle_inventory vi
                 INNER JOIN products p ON vi.product_id = p.id
+                LEFT JOIN finished_products fp ON vi.finished_batch_id = fp.id
                 WHERE vi.vehicle_id = ? AND vi.quantity > 0 AND p.status = 'active'
-                ORDER BY COALESCE(NULLIF(TRIM(vi.product_name), ''), p.name) ASC",
+                ORDER BY COALESCE(NULLIF(TRIM(fp.product_name), ''), NULLIF(TRIM(vi.product_name), ''), p.name) ASC",
                 [$vehicleId]
             ) ?? [];
 
             foreach ($vehicleProducts as $row) {
+                $finishedName = getFinishedProductNameByBatch(
+                    $db,
+                    isset($row['finished_batch_id']) ? (int)$row['finished_batch_id'] : null,
+                    $row['finished_batch_number'] ?? null
+                );
+
                 $productName = resolveProductName([
+                    $finishedName,
                     $row['vehicle_product_name'] ?? null,
                     $row['product_name'] ?? null
                 ]);
                 
                 $options[] = [
                     'product_id' => (int)$row['product_id'],
-                    'batch_id' => null,
+                    'batch_id' => isset($row['finished_batch_id']) ? (int)$row['finished_batch_id'] : null,
                     'product_name' => $productName,
-                    'batch_number' => null,
+                    'batch_number' => $row['finished_batch_number'] ?? null,
                     'production_date' => null,
                     'quantity_produced' => 0,
                     'quantity_available' => (float)$row['quantity_available'],
@@ -604,7 +674,14 @@ function getAvailableProductsFromWarehouse($warehouseId): array
                     $batchId = (int)$fpRow['batch_id'];
                     
                     if ($productId > 0) {
+                        $fallbackName = getFinishedProductNameByBatch(
+                            $db,
+                            $batchId,
+                            $fpRow['batch_number'] ?? null
+                        );
+
                         $productName = resolveProductName([
+                            $fallbackName,
                             $fpRow['original_product_name'] ?? null,
                             $fpRow['product_name'] ?? null
                         ]);
