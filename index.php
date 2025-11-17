@@ -4,12 +4,9 @@ define('ACCESS_ALLOWED', true);
 require_once __DIR__ . '/includes/config.php';
 require_once __DIR__ . '/includes/install.php';
 
-// تهيئة قاعدة البيانات تلقائياً في الخلفية
 if (needsInstallation()) {
-    // تنفيذ التهيئة في الخلفية
     $installResult = initializeDatabase();
     
-    // إذا فشلت التهيئة، عرض رسالة خطأ
     if (!$installResult['success']) {
         die('<!DOCTYPE html>
         <html lang="ar" dir="rtl">
@@ -42,10 +39,7 @@ require_once __DIR__ . '/includes/db.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/path_helper.php';
 
-// تعريف ASSETS_URL إذا لم يكن معرّفاً
-// (يجب أن يكون معرّفاً بالفعل من config.php، لكن للتأكد)
 if (!defined('ASSETS_URL')) {
-    // استخدام نفس الطريقة من config.php
     $requestUri = $_SERVER['REQUEST_URI'] ?? '';
     $basePath = '';
     
@@ -76,25 +70,20 @@ if (!defined('ASSETS_URL')) {
     }
 }
 
-// إذا كان المستخدم مسجلاً بالفعل، إعادة توجيه
 if (isLoggedIn()) {
     $userRole = $_SESSION['role'] ?? 'accountant';
     $dashboardUrl = getDashboardUrl($userRole);
     
-    // تنظيف شامل للمسار لضمان عدم تكرار الخطأ
     // 1. إزالة أي بروتوكول
     $dashboardUrl = preg_replace('/^https?:\/\//', '', $dashboardUrl);
     $dashboardUrl = preg_replace('/^\/\//', '/', $dashboardUrl);
     
-    // 2. التأكد من أن المسار يبدأ بـ /
     if (strpos($dashboardUrl, '/') !== 0) {
         $dashboardUrl = '/' . $dashboardUrl;
     }
     
-    // 3. تنظيف المسار (إزالة // المكررة)
     $dashboardUrl = preg_replace('/\/+/', '/', $dashboardUrl);
     
-    // 4. إزالة أي hostname إذا كان موجوداً
     if (preg_match('/^\/[^\/]+\.[a-z]/i', $dashboardUrl)) {
         $parts = explode('/', $dashboardUrl);
         $dashboardIndex = array_search('dashboard', $parts);
@@ -105,36 +94,29 @@ if (isLoggedIn()) {
         }
     }
     
-    // 5. التحقق النهائي: إذا كان المسار لا يحتوي على 'dashboard'، أضفه
     if (strpos($dashboardUrl, '/dashboard') === false) {
         $dashboardUrl = '/dashboard/' . $userRole . '.php';
     }
     
-    // 6. التأكد من أن المسار لا يحتوي على http:// أو https:// مرة أخرى
     if (strpos($dashboardUrl, 'http://') === 0 || strpos($dashboardUrl, 'https://') === 0) {
         $parsed = parse_url($dashboardUrl);
         $dashboardUrl = $parsed['path'] ?? '/dashboard/' . $userRole . '.php';
     }
     
-    // 7. تنظيف نهائي
     $dashboardUrl = trim($dashboardUrl);
     if (empty($dashboardUrl) || $dashboardUrl === '/') {
         $dashboardUrl = '/dashboard/' . $userRole . '.php';
     }
     
-    // منع حلقة إعادة التوجيه - التحقق من أننا لسنا في dashboard بالفعل
     $currentScript = basename($_SERVER['PHP_SELF']);
     if ($currentScript !== 'index.php') {
-        // إذا كنا في صفحة أخرى، لا نعيد التوجيه
         return;
     }
     
-    // استخدام header redirect إذا كان متاحاً
     if (!headers_sent()) {
         header('Location: ' . $dashboardUrl);
         exit;
     } else {
-        // استخدام JavaScript redirect كبديل
         echo '<script>window.location.href = "' . htmlspecialchars($dashboardUrl) . '";</script>';
         echo '<noscript><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($dashboardUrl) . '"></noscript>';
         exit;
@@ -144,15 +126,12 @@ if (isLoggedIn()) {
 $error = '';
 $success = '';
 
-// معالجة تسجيل الدخول
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = $_POST['username'] ?? '';
     $password = $_POST['password'] ?? '';
     $login_method = $_POST['login_method'] ?? 'password';
     
     if ($login_method === 'webauthn') {
-        // سيتم التعامل مع WebAuthn عبر JavaScript
-        // لا حاجة لمعالجة هنا
     } else {
         if (empty($username) || empty($password)) {
             $error = 'يرجى إدخال اسم المستخدم وكلمة المرور';
@@ -161,24 +140,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $result = login($username, $password, $rememberMe);
             
             if ($result['success']) {
-                // إعادة توجيه إلى لوحة التحكم المناسبة
                 $userRole = $result['user']['role'] ?? 'accountant';
                 $dashboardUrl = getDashboardUrl($userRole);
                 
-                // تنظيف شامل للمسار لضمان عدم تكرار الخطأ
-                // 1. إزالة أي بروتوكول
                 $dashboardUrl = preg_replace('/^https?:\/\//', '', $dashboardUrl);
                 $dashboardUrl = preg_replace('/^\/\//', '/', $dashboardUrl);
                 
-                // 2. التأكد من أن المسار يبدأ بـ /
                 if (strpos($dashboardUrl, '/') !== 0) {
                     $dashboardUrl = '/' . $dashboardUrl;
                 }
                 
-                // 3. تنظيف المسار (إزالة // المكررة)
                 $dashboardUrl = preg_replace('/\/+/', '/', $dashboardUrl);
                 
-                // 4. إزالة أي hostname إذا كان موجوداً
                 if (preg_match('/^\/[^\/]+\.[a-z]/i', $dashboardUrl)) {
                     $parts = explode('/', $dashboardUrl);
                     $dashboardIndex = array_search('dashboard', $parts);
@@ -189,18 +162,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 
-                // 5. التحقق النهائي: إذا كان المسار لا يحتوي على 'dashboard'، أضفه
                 if (strpos($dashboardUrl, '/dashboard') === false) {
                     $dashboardUrl = '/dashboard/' . $userRole . '.php';
                 }
                 
-                // 6. التأكد من أن المسار لا يحتوي على http:// أو https:// مرة أخرى
                 if (strpos($dashboardUrl, 'http://') === 0 || strpos($dashboardUrl, 'https://') === 0) {
                     $parsed = parse_url($dashboardUrl);
                     $dashboardUrl = $parsed['path'] ?? '/dashboard/' . $userRole . '.php';
                 }
                 
-                // 7. تنظيف نهائي
                 $dashboardUrl = trim($dashboardUrl);
                 if (empty($dashboardUrl) || $dashboardUrl === '/') {
                     $dashboardUrl = '/dashboard/' . $userRole . '.php';
@@ -210,7 +180,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     header('Location: ' . $dashboardUrl);
                     exit;
                 } else {
-                    // استخدام window.location.pathname للتأكد من المسار المطلق
                     echo '<script>window.location.href = "' . htmlspecialchars($dashboardUrl) . '";</script>';
                     echo '<noscript><meta http-equiv="refresh" content="0;url=' . htmlspecialchars($dashboardUrl) . '"></noscript>';
                     exit;
@@ -232,11 +201,8 @@ $lang = $translations;
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?php echo $lang['login_title']; ?> - <?php echo APP_NAME; ?></title>
     
-    <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Custom CSS -->
     <link href="<?php echo ASSETS_URL; ?>css/style.css" rel="stylesheet">
     <link href="<?php echo ASSETS_URL; ?>css/rtl.css" rel="stylesheet">
 </head>
