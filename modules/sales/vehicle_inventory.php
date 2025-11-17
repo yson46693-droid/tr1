@@ -141,29 +141,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $reason = trim($_POST['reason'] ?? '');
         $notes = trim($_POST['notes'] ?? '');
         
-        // معالجة العناصر
-        $items = [];
-        if (isset($_POST['items']) && is_array($_POST['items'])) {
-            foreach ($_POST['items'] as $item) {
-                $productId = !empty($item['product_id']) ? intval($item['product_id']) : 0;
-                $batchId = !empty($item['batch_id']) ? intval($item['batch_id']) : 0;
-                $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0;
+            // معالجة العناصر
+            $items = [];
+            if (isset($_POST['items']) && is_array($_POST['items'])) {
+                foreach ($_POST['items'] as $item) {
+                    $productId = isset($item['product_id']) && $item['product_id'] !== '' ? intval($item['product_id']) : 0;
+                    $batchId = isset($item['batch_id']) && $item['batch_id'] !== '' ? intval($item['batch_id']) : 0;
+                    $quantity = isset($item['quantity']) ? floatval($item['quantity']) : 0;
 
-                if (($productId > 0 || $batchId > 0) && $quantity > 0) {
-                    $items[] = [
-                        'product_id' => $productId > 0 ? $productId : null,
-                        'batch_id' => $batchId > 0 ? $batchId : null,
-                        'batch_number' => !empty($item['batch_number']) ? trim($item['batch_number']) : null,
-                        'quantity' => $quantity,
-                        'notes' => trim($item['notes'] ?? '')
-                    ];
+                    // يجب أن يكون هناك batch_id على الأقل (للمنتجات من finished_products)
+                    // أو product_id (للمنتجات الخارجية)
+                    if (($productId > 0 || $batchId > 0) && $quantity > 0) {
+                        $items[] = [
+                            'product_id' => $productId > 0 ? $productId : null,
+                            'batch_id' => $batchId > 0 ? $batchId : null,
+                            'batch_number' => !empty($item['batch_number']) ? trim($item['batch_number']) : null,
+                            'quantity' => $quantity,
+                            'notes' => trim($item['notes'] ?? '')
+                        ];
+                    }
                 }
             }
-        }
-        
-        if ($fromWarehouseId <= 0 || $toWarehouseId <= 0 || empty($items)) {
-            $error = 'يجب إدخال جميع البيانات المطلوبة';
-        } else {
+            
+            // تسجيل تفاصيل العناصر للمساعدة في التصحيح
+            if (empty($items)) {
+                error_log('No items found in POST data from sales. POST items: ' . json_encode($_POST['items'] ?? []));
+                $error = 'يجب إضافة منتج واحد على الأقل مع تحديد الكمية.';
+            } elseif ($fromWarehouseId <= 0 || $toWarehouseId <= 0) {
+                $error = 'يجب تحديد المخزن المصدر والمخزن الهدف';
+            } else {
             $result = createWarehouseTransfer($fromWarehouseId, $toWarehouseId, $transferDate, $items, $reason, $notes);
             if ($result['success']) {
                 $success = 'تم إنشاء طلب النقل بنجاح: ' . $result['transfer_number'];
@@ -806,14 +812,18 @@ foreach ($vehicleInventory as $item) {
                                     <select class="form-select product-select" required>
                                         <option value="">اختر المنتج</option>
                                         <?php foreach ($finishedProductOptions as $option): ?>
-                                            <option value="<?php echo intval($option['product_id'] ?? 0); ?>" 
+                                            <?php 
+                                            // استخدام batch_id كقيمة للخيار لأنه المطلوب للنقل
+                                            $optionValue = !empty($option['batch_id']) ? intval($option['batch_id']) : intval($option['product_id'] ?? 0);
+                                            ?>
+                                            <option value="<?php echo $optionValue; ?>" 
                                                     data-product-id="<?php echo intval($option['product_id'] ?? 0); ?>"
-                                                    data-batch-id="<?php echo intval($option['batch_id']); ?>"
-                                                    data-batch-number="<?php echo htmlspecialchars($option['batch_number']); ?>"
-                                                    data-available="<?php echo number_format((float)$option['quantity_available'], 2, '.', ''); ?>">
-                                                <?php echo htmlspecialchars($option['product_name']); ?>
-                                                - تشغيلة <?php echo htmlspecialchars($option['batch_number'] ?: 'بدون'); ?>
-                                                (متاح: <?php echo number_format((float)$option['quantity_available'], 2); ?>)
+                                                    data-batch-id="<?php echo intval($option['batch_id'] ?? 0); ?>"
+                                                    data-batch-number="<?php echo htmlspecialchars($option['batch_number'] ?? ''); ?>"
+                                                    data-available="<?php echo number_format((float)($option['quantity_available'] ?? 0), 2, '.', ''); ?>">
+                                                <?php echo htmlspecialchars($option['product_name'] ?? 'غير محدد'); ?>
+                                                - تشغيلة <?php echo htmlspecialchars($option['batch_number'] ?? 'بدون'); ?>
+                                                (متاح: <?php echo number_format((float)($option['quantity_available'] ?? 0), 2); ?>)
                                             </option>
                                         <?php endforeach; ?>
                                     </select>
@@ -975,12 +985,14 @@ function updateProductSelects() {
         
         allFinishedProductOptions.forEach(option => {
             const optionElement = document.createElement('option');
-            optionElement.value = option.product_id || 0;
+            // استخدام batch_id كقيمة للخيار لأنه المطلوب للنقل
+            const optionValue = option.batch_id && option.batch_id > 0 ? option.batch_id : (option.product_id || 0);
+            optionElement.value = optionValue;
             optionElement.dataset.productId = option.product_id || 0;
-            optionElement.dataset.batchId = option.batch_id;
+            optionElement.dataset.batchId = option.batch_id || 0;
             optionElement.dataset.batchNumber = option.batch_number || '';
             optionElement.dataset.available = option.quantity_available || 0;
-            optionElement.textContent = `${option.product_name} - تشغيلة ${option.batch_number || 'بدون'} (متاح: ${parseFloat(option.quantity_available || 0).toFixed(2)})`;
+            optionElement.textContent = `${option.product_name || 'غير محدد'} - تشغيلة ${option.batch_number || 'بدون'} (متاح: ${parseFloat(option.quantity_available || 0).toFixed(2)})`;
             
             // استعادة الاختيار السابق إذا كان موجوداً
             if (currentBatchId && option.batch_id == currentBatchId) {
@@ -1005,12 +1017,14 @@ document.getElementById('addItemBtn')?.addEventListener('click', function() {
     newItem.className = 'transfer-item row mb-2';
     let optionsHtml = '<option value="">اختر المنتج</option>';
     allFinishedProductOptions.forEach(option => {
-        optionsHtml += `<option value="${option.product_id || 0}" 
+        // استخدام batch_id كقيمة للخيار لأنه المطلوب للنقل
+        const optionValue = option.batch_id && option.batch_id > 0 ? option.batch_id : (option.product_id || 0);
+        optionsHtml += `<option value="${optionValue}" 
                 data-product-id="${option.product_id || 0}"
-                data-batch-id="${option.batch_id}"
+                data-batch-id="${option.batch_id || 0}"
                 data-batch-number="${option.batch_number || ''}"
                 data-available="${option.quantity_available || 0}">
-            ${option.product_name} - تشغيلة ${option.batch_number || 'بدون'} (متاح: ${parseFloat(option.quantity_available || 0).toFixed(2)})
+            ${option.product_name || 'غير محدد'} - تشغيلة ${option.batch_number || 'بدون'} (متاح: ${parseFloat(option.quantity_available || 0).toFixed(2)})
         </option>`;
     });
     
@@ -1066,20 +1080,42 @@ function attachItemEvents(item) {
     }
 
     const updateAvailability = () => {
-        const option = productSelect.options[productSelect.selectedIndex];
-        const available = option ? parseFloat(option.dataset.available || '0') : 0;
-        const selectedProductId = option ? parseInt(option.dataset.productId || '0', 10) : 0;
-        const selectedBatchId = option ? parseInt(option.dataset.batchId || '0', 10) : 0;
-        const selectedBatchNumber = option ? option.dataset.batchNumber || '' : '';
+        const selectedIndex = productSelect.selectedIndex;
+        const option = selectedIndex > 0 ? productSelect.options[selectedIndex] : null;
+        
+        if (!option || !option.value || option.value === '') {
+            // لا يوجد خيار محدد - مسح الحقول
+            if (productIdInput) productIdInput.value = '';
+            if (batchIdInput) batchIdInput.value = '';
+            if (batchNumberInput) batchNumberInput.value = '';
+            if (availableHint) availableHint.textContent = '';
+            if (quantityInput) quantityInput.removeAttribute('max');
+            return;
+        }
+        
+        const available = parseFloat(option.dataset.available || '0');
+        const selectedProductId = parseInt(option.dataset.productId || '0', 10);
+        const selectedBatchId = parseInt(option.dataset.batchId || '0', 10);
+        const selectedBatchNumber = option.dataset.batchNumber || '';
 
+        // تحديث الحقول المخفية - batch_id مطلوب دائماً للمنتجات من finished_products
         if (productIdInput) {
             productIdInput.value = selectedProductId > 0 ? selectedProductId : '';
         }
         if (batchIdInput) {
+            // batch_id مطلوب دائماً - يجب أن يكون موجوداً
             batchIdInput.value = selectedBatchId > 0 ? selectedBatchId : '';
         }
         if (batchNumberInput) {
             batchNumberInput.value = selectedBatchNumber;
+        }
+        
+        // التحقق من أن batch_id موجود (مطلوب للنقل)
+        if (selectedBatchId <= 0 && selectedProductId <= 0) {
+            console.error('Warning: No batch_id or product_id found for selected option');
+            if (productIdInput) productIdInput.value = '';
+            if (batchIdInput) batchIdInput.value = '';
+            if (batchNumberInput) batchNumberInput.value = '';
         }
 
         if (availableHint) {
@@ -1146,16 +1182,31 @@ document.getElementById('transferForm')?.addEventListener('submit', function(e) 
         return false;
     }
 
-    for (const row of rows) {
+        for (const row of rows) {
         const select = row.querySelector('.product-select');
         const quantityInput = row.querySelector('.quantity');
+        const productIdInput = row.querySelector('.selected-product-id');
+        const batchIdInput = row.querySelector('.selected-batch-id');
         const max = quantityInput ? parseFloat(quantityInput.getAttribute('max') || '0') : 0;
         const min = quantityInput ? parseFloat(quantityInput.getAttribute('min') || '0.01') : 0.01;
         const value = quantityInput ? parseFloat(quantityInput.value || '0') : 0;
+        const productId = productIdInput ? parseInt(productIdInput.value || '0', 10) : 0;
+        const batchId = batchIdInput ? parseInt(batchIdInput.value || '0', 10) : 0;
 
         if (!select || !quantityInput || !select.value) {
             e.preventDefault();
             alert('اختر منتجاً وتشغيلته لكل عنصر.');
+            return false;
+        }
+
+        // التحقق من أن batch_id أو product_id موجود
+        if (productId <= 0 && batchId <= 0) {
+            e.preventDefault();
+            alert('خطأ: لم يتم تحديد المنتج بشكل صحيح. يرجى إعادة اختيار المنتج.');
+            // إعادة تحديث الحقول
+            if (select) {
+                select.dispatchEvent(new Event('change'));
+            }
             return false;
         }
 
