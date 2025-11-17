@@ -75,24 +75,15 @@ function recordInventoryMovement($productId, $warehouseId, $type, $quantity, $re
             
             $quantityBefore = (float)($vehicleInventory['quantity'] ?? 0);
             
-            // إذا كان هناك finished_batch_id، نستخدمه
+            // إذا كان هناك finished_batch_id، نستخدمه فقط لتسجيله في الحركة
+            // لكن الكمية الفعلية نستخدمها من vehicle_inventory لأنها الكمية الحقيقية المتاحة
             if (!empty($vehicleInventory['finished_batch_id']) && !$batchId) {
                 $batchId = (int)$vehicleInventory['finished_batch_id'];
             }
             
-            // إذا كان هناك batch_id، نتحقق من finished_products.quantity_produced أيضاً
-            if ($batchId) {
-                $finishedProduct = $db->queryOne(
-                    "SELECT quantity_produced FROM finished_products WHERE id = ?",
-                    [$batchId]
-                );
-                
-                if ($finishedProduct && isset($finishedProduct['quantity_produced'])) {
-                    // نستخدم الكمية الأقل بين vehicle_inventory و finished_products
-                    $quantityProduced = (float)($finishedProduct['quantity_produced'] ?? 0);
-                    $quantityBefore = min($quantityBefore, $quantityProduced);
-                }
-            }
+            // ملاحظة: لا نتحقق من finished_products.quantity_produced عند البيع من vehicle_inventory
+            // لأن vehicle_inventory.quantity هو الكمية الفعلية المتاحة في السيارة
+            // و quantity_produced قد يكون أقل بسبب عمليات بيع سابقة من مخازن أخرى
             
             // إنشاء كائن product وهمي للتوافق مع باقي الكود
             $product = ['quantity' => $quantityBefore, 'warehouse_id' => $warehouseId];

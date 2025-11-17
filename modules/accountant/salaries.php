@@ -90,6 +90,67 @@ if (empty($notesColumnCheck)) {
     }
 }
 
+// إضافة أعمدة accumulated_amount و paid_amount في جدول salaries
+$accumulatedColumnCheck = $db->queryOne("SHOW COLUMNS FROM salaries LIKE 'accumulated_amount'");
+if (empty($accumulatedColumnCheck)) {
+    try {
+        $db->execute("
+            ALTER TABLE `salaries` 
+            ADD COLUMN `accumulated_amount` DECIMAL(10,2) DEFAULT 0.00 COMMENT 'المبلغ التراكمي' 
+            AFTER `total_amount`
+        ");
+    } catch (Exception $e) {
+        error_log("Error adding accumulated_amount column: " . $e->getMessage());
+    }
+}
+
+$paidAmountColumnCheck = $db->queryOne("SHOW COLUMNS FROM salaries LIKE 'paid_amount'");
+if (empty($paidAmountColumnCheck)) {
+    try {
+        $db->execute("
+            ALTER TABLE `salaries` 
+            ADD COLUMN `paid_amount` DECIMAL(10,2) DEFAULT 0.00 COMMENT 'المبلغ المدفوع' 
+            AFTER `accumulated_amount`
+        ");
+    } catch (Exception $e) {
+        error_log("Error adding paid_amount column: " . $e->getMessage());
+    }
+}
+
+// إنشاء جدول salary_settlements لتسجيل عمليات التسوية
+$settlementsTableCheck = $db->queryOne("SHOW TABLES LIKE 'salary_settlements'");
+if (empty($settlementsTableCheck)) {
+    try {
+        $db->execute("
+            CREATE TABLE IF NOT EXISTS `salary_settlements` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `salary_id` int(11) NOT NULL COMMENT 'معرف الراتب',
+              `user_id` int(11) NOT NULL COMMENT 'معرف الموظف',
+              `settlement_amount` decimal(10,2) NOT NULL COMMENT 'مبلغ التسوية',
+              `previous_accumulated` decimal(10,2) DEFAULT 0.00 COMMENT 'المبلغ التراكمي السابق',
+              `remaining_after_settlement` decimal(10,2) DEFAULT 0.00 COMMENT 'المتبقي بعد التسوية',
+              `settlement_type` enum('full','partial') DEFAULT 'partial' COMMENT 'نوع التسوية',
+              `settlement_date` date NOT NULL COMMENT 'تاريخ التسوية',
+              `notes` text DEFAULT NULL COMMENT 'ملاحظات',
+              `created_by` int(11) DEFAULT NULL COMMENT 'من قام بالتسوية',
+              `invoice_path` varchar(500) DEFAULT NULL COMMENT 'مسار فاتورة PDF',
+              `telegram_sent` tinyint(1) DEFAULT 0 COMMENT 'تم الإرسال إلى تليجرام',
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `salary_id` (`salary_id`),
+              KEY `user_id` (`user_id`),
+              KEY `settlement_date` (`settlement_date`),
+              KEY `created_by` (`created_by`),
+              CONSTRAINT `salary_settlements_ibfk_1` FOREIGN KEY (`salary_id`) REFERENCES `salaries` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `salary_settlements_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `salary_settlements_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    } catch (Exception $e) {
+        error_log("Error creating salary_settlements table: " . $e->getMessage());
+    }
+}
+
 // الحصول على الشهر والسنة الحالية
 $selectedMonth = isset($_GET['month']) ? intval($_GET['month']) : date('n');
 $selectedYear = isset($_GET['year']) ? intval($_GET['year']) : date('Y');
