@@ -269,6 +269,11 @@ function distributeCollectionToInvoices($customerId, $amount, $createdBy = null)
             $createdBy = $currentUser['id'] ?? null;
         }
         
+        // التحقق من حالة 'partial' في enum مرة واحدة فقط
+        $statusCheck = $db->queryOne("SHOW COLUMNS FROM invoices WHERE Field = 'status'");
+        $statusEnum = $statusCheck['Type'] ?? '';
+        $hasPartialStatus = strpos($statusEnum, 'partial') !== false;
+        
         // الحصول على فواتير العميل التي لم يتم دفعها بالكامل، مرتبة من الأقدم للأحدث
         $invoices = $db->query(
             "SELECT id, invoice_number, total_amount, paid_amount, status 
@@ -302,11 +307,18 @@ function distributeCollectionToInvoices($customerId, $amount, $createdBy = null)
             // تحديد الحالة الجديدة
             $newStatus = $invoice['status'];
             if ($newRemaining <= 0.0001) {
+                // تم دفع الفاتورة بالكامل
                 $newStatus = 'paid';
-            } elseif ($newPaidAmount > 0 && $invoice['status'] === 'draft') {
-                $newStatus = 'sent';
-            } elseif ($newPaidAmount > 0 && $invoice['status'] === 'sent') {
-                $newStatus = 'partial';
+            } elseif ($newPaidAmount > 0 && $newRemaining > 0.0001) {
+                // تم دفع جزء من الفاتورة
+                if ($invoice['status'] === 'draft') {
+                    $newStatus = 'sent';
+                } elseif ($hasPartialStatus) {
+                    $newStatus = 'partial';
+                } else {
+                    // إذا لم تكن 'partial' مدعومة، استخدم 'sent'
+                    $newStatus = 'sent';
+                }
             }
             
             // التحقق من وجود عمود remaining_amount

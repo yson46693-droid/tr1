@@ -1092,7 +1092,7 @@ if (createTransferModal) {
     createTransferModal.addEventListener('show.bs.modal', function() {
         const fromWarehouseSelect = document.getElementById('fromWarehouse');
         if (fromWarehouseSelect && fromWarehouseSelect.value) {
-            // تحميل المنتجات من المخزن المحدد
+            // تحميل المنتجات من المخزن المحدد (مخزن المندوب إذا كان محدداً)
             fromWarehouseSelect.dispatchEvent(new Event('change'));
         } else if (fromWarehouseSelect && allFinishedProductOptions.length === 0) {
             // إذا لم يكن هناك مخزن محدد ولم تكن هناك منتجات، تحميل من المخزن الرئيسي
