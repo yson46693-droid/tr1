@@ -1952,7 +1952,7 @@ if (!$error) {
             newQuantity = maxQty;
         }
         item.quantity = newQuantity;
-        renderCart();
+        renderCart(); // renderCart() تستدعي updateSummary() تلقائياً
     }
 
     function updateQuantity(productId, value) {
@@ -1971,7 +1971,7 @@ if (!$error) {
             qty = maxQty;
         }
         item.quantity = qty;
-        renderCart();
+        renderCart(); // renderCart() تستدعي updateSummary() تلقائياً
     }
 
     function updateUnitPrice(productId, value) {
@@ -1984,7 +1984,7 @@ if (!$error) {
             price = 0;
         }
         item.unit_price = price;
-        renderCart();
+        renderCart(); // renderCart() تستدعي updateSummary() تلقائياً
     }
 
     elements.inventoryButtons.forEach((button) => {
@@ -2042,9 +2042,11 @@ if (!$error) {
             const productId = parseInt(event.target.dataset.productId || '0', 10);
             if (qtyInput) {
                 updateQuantity(productId, qtyInput.value);
+                // renderCart() تستدعي updateSummary() تلقائياً
             }
             if (priceInput) {
                 updateUnitPrice(productId, priceInput.value);
+                // renderCart() تستدعي updateSummary() تلقائياً
             }
         });
     }
@@ -2068,7 +2070,12 @@ if (!$error) {
     }
 
     if (elements.prepaidInput) {
-        elements.prepaidInput.addEventListener('input', updateSummary);
+        elements.prepaidInput.addEventListener('input', function() {
+            updateSummary(); // تحديث فوري عند تغيير المبلغ المدفوع مسبقاً
+        });
+        elements.prepaidInput.addEventListener('change', function() {
+            updateSummary(); // تحديث عند تغيير المبلغ المدفوع مسبقاً
+        });
     }
 
     if (elements.partialInput) {

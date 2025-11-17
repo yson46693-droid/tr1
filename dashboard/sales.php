@@ -808,6 +808,21 @@ if ($page === 'sales_collections') {
                 }
                 ?>
                 
+            <?php elseif ($page === 'cash_register'): ?>
+                <!-- صفحة خزنة المندوب -->
+                <?php 
+                $modulePath = __DIR__ . '/../modules/sales/cash_register.php';
+                if (file_exists($modulePath)) {
+                    include $modulePath;
+                } else {
+                ?>
+                <div class="empty-state-card">
+                    <div class="empty-state-icon"><i class="bi bi-cash-stack"></i></div>
+                    <div class="empty-state-title">خزنة المندوب</div>
+                    <div class="empty-state-description">صفحة خزنة المندوب - غير متاحة حالياً</div>
+                </div>
+                <?php } ?>
+                
             <?php elseif ($page === 'attendance'): ?>
                 <!-- صفحة تسجيل الحضور -->
                 <?php 
