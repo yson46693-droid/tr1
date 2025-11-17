@@ -74,7 +74,8 @@ if (!function_exists('storeSalesInvoiceDocument')) {
 
             $token = bin2hex(random_bytes(8));
             $normalizedNumber = preg_replace('/[^A-Za-z0-9_-]+/', '-', (string) ($invoice['invoice_number'] ?? 'INV'));
-            $filename = sprintf('pos-invoice-%s-%s.html', date('Ymd-His'), $normalizedNumber);
+            // تضمين الـ token في اسم الملف للتحقق من الأمان في reports/view.php
+            $filename = sprintf('pos-invoice-%s-%s-%s.html', date('Ymd-His'), $normalizedNumber, $token);
             $fullPath = $salesDir . DIRECTORY_SEPARATOR . $filename;
 
             if (@file_put_contents($fullPath, $document) === false) {

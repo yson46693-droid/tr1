@@ -946,6 +946,22 @@ $pageTitle = isset($lang['accountant_dashboard']) ? $lang['accountant_dashboard'
                 }
                 ?>
                 
+            <?php elseif ($page === 'customers'): ?>
+                <!-- صفحة العملاء -->
+                <?php 
+                $modulePath = __DIR__ . '/../modules/sales/customers.php';
+                if (file_exists($modulePath)) {
+                    try {
+                        include $modulePath;
+                    } catch (Throwable $e) {
+                        error_log('Accountant customers module error: ' . $e->getMessage());
+                        echo '<div class="alert alert-danger">حدث خطأ أثناء تحميل صفحة العملاء: ' . htmlspecialchars($e->getMessage()) . '</div>';
+                    }
+                } else {
+                    echo '<div class="alert alert-warning">صفحة العملاء غير متاحة حالياً</div>';
+                }
+                ?>
+                
             <?php elseif ($page === 'attendance'): ?>
                 <!-- صفحة الحضور -->
                 <?php 
