@@ -60,9 +60,9 @@ if ($currentRole === 'manager') {
 $customersPageBase = $customersBaseScript . '?page=customers';
 $customersPageBaseWithSection = $customersPageBase . '&section=' . urlencode($section);
 
-// معالجة طلبات سجل مشتريات العميل (للمدير فقط)
+// معالجة طلبات سجل مشتريات العميل (للمدير والمندوب)
 if (
-    $currentRole === 'manager' &&
+    in_array($currentRole, ['manager', 'sales'], true) &&
     isset($_GET['ajax'], $_GET['action']) &&
     $_GET['ajax'] === 'purchase_history' &&
     $_GET['action'] === 'purchase_history'
@@ -79,6 +79,27 @@ if (
     }
 
     try {
+        // التحقق من ملكية العميل للمندوب (إذا كان المستخدم مندوب)
+        if ($isSalesUser) {
+            $customer = $db->queryOne("SELECT id, created_by FROM customers WHERE id = ?", [$customerId]);
+            if (!$customer) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'العميل غير موجود.'
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+            
+            // التحقق من أن العميل ينتمي للمندوب
+            if ((int)($customer['created_by'] ?? 0) !== (int)$currentUser['id']) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'غير مصرح لك بعرض سجل مشتريات هذا العميل.'
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+        }
+        
         $historyPayload = customerHistoryGetHistory($customerId);
         echo json_encode($historyPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     } catch (Throwable $historyError) {
@@ -752,7 +773,7 @@ $collectionsLabel = $isSalesUser ? 'تحصيلاتي' : 'إجمالي التحص
     </div>
 </div>
 
-<?php if ($currentRole === 'manager'): ?>
+<?php if (in_array($currentRole, ['manager', 'sales'], true)): ?>
 <!-- Modal سجل مشتريات العميل -->
 <div class="modal fade" id="customerHistoryModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -874,7 +895,7 @@ $collectionsLabel = $isSalesUser ? 'تحصيلاتي' : 'إجمالي التحص
 </div>
 <?php endif; ?>
 
-<?php if ($currentRole === 'manager'): ?>
+<?php if (in_array($currentRole, ['manager', 'sales'], true)): ?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     var historyModal = document.getElementById('customerHistoryModal');
@@ -2241,7 +2262,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                         >
                                             <i class="bi bi-cash-coin me-1"></i>تحصيل
                                         </button>
-                                        <?php if ($currentRole === 'manager'): ?>
+                                        <?php if (in_array($currentRole, ['manager', 'sales'], true)): ?>
                                         <button
                                             type="button"
                                             class="btn btn-sm btn-outline-dark js-customer-history"
