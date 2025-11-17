@@ -240,16 +240,16 @@ $salesRepInfo = $db->queryOne(
     </div>
     
     <div class="col-12 col-md-6 col-xl-3">
-        <div class="card shadow-sm border-0 h-100 bg-gradient" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-            <div class="card-body d-flex align-items-center justify-content-between text-white">
+        <div class="card shadow-sm border-0 h-100" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="card-body d-flex align-items-center justify-content-between" style="color: #ffffff !important;">
                 <div>
-                    <div class="small fw-semibold opacity-75">رصيد الخزنة</div>
-                    <div class="fs-4 fw-bold mb-0"><?php echo formatCurrency($cashRegisterBalance); ?></div>
-                    <div class="small mt-1 opacity-75">
+                    <div class="small fw-semibold" style="color: rgba(255, 255, 255, 0.9) !important;">رصيد الخزنة</div>
+                    <div class="fs-4 fw-bold mb-0" style="color: #ffffff !important;"><?php echo formatCurrency($cashRegisterBalance); ?></div>
+                    <div class="small mt-1" style="color: rgba(255, 255, 255, 0.85) !important;">
                         (تحصيلات + مبيعات كاملة)
                     </div>
                 </div>
-                <span class="display-6"><i class="bi bi-safe"></i></span>
+                <span class="display-6" style="color: rgba(255, 255, 255, 0.8) !important;"><i class="bi bi-safe"></i></span>
             </div>
         </div>
     </div>
