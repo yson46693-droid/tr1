@@ -529,7 +529,8 @@ function getAvailableProductsFromWarehouse($warehouseId): array
     $options = [];
 
     try {
-        if (!$warehouseId) {
+        if (!$warehouseId || $warehouseId <= 0) {
+            error_log('getAvailableProductsFromWarehouse: Invalid warehouse ID: ' . $warehouseId);
             return [];
         }
 
@@ -540,6 +541,7 @@ function getAvailableProductsFromWarehouse($warehouseId): array
         );
 
         if (!$warehouse) {
+            error_log('getAvailableProductsFromWarehouse: Warehouse not found or inactive: ' . $warehouseId);
             return [];
         }
 
@@ -759,8 +761,10 @@ function getAvailableProductsFromWarehouse($warehouseId): array
         }
 
         return $options;
-    } catch (Exception $e) {
-        error_log('getAvailableProductsFromWarehouse error: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        error_log('getAvailableProductsFromWarehouse error for warehouse ' . $warehouseId . ': ' . $e->getMessage());
+        error_log('Stack trace: ' . $e->getTraceAsString());
+        // إرجاع مصفوفة فارغة بدلاً من رمي الاستثناء لتجنب كسر AJAX
         return [];
     }
 }

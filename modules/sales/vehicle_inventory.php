@@ -39,6 +39,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'load_products') {
     
     // تنظيف أي output buffer موجود
     if (!defined('VEHICLE_INVENTORY_AJAX')) {
+        define('VEHICLE_INVENTORY_AJAX', true);
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
@@ -50,21 +51,46 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'load_products') {
     $warehouseId = isset($_GET['warehouse_id']) ? intval($_GET['warehouse_id']) : null;
     
     try {
-        // التأكد من تحميل الدوال المطلوبة
+        // التأكد من تحميل جميع الملفات المطلوبة
         if (!function_exists('getAvailableProductsFromWarehouse')) {
             require_once __DIR__ . '/../../includes/vehicle_inventory.php';
         }
         
+        // التأكد من تحميل الدوال المساعدة
+        if (!function_exists('resolveProductName')) {
+            require_once __DIR__ . '/../../includes/product_name_helper.php';
+        }
+        
+        if (!$warehouseId || $warehouseId <= 0) {
+            throw new Exception('معرف المخزن غير صحيح');
+        }
+        
         $products = getAvailableProductsFromWarehouse($warehouseId);
+        
+        if (!is_array($products)) {
+            throw new Exception('الدالة لم تُرجع مصفوفة صحيحة');
+        }
+        
         echo json_encode([
             'success' => true,
             'products' => $products
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         error_log('AJAX load_products error: ' . $e->getMessage());
+        error_log('Stack trace: ' . $e->getTraceAsString());
+        
+        // إرسال رسالة خطأ واضحة
+        $errorMessage = 'حدث خطأ أثناء تحميل المنتجات';
+        if (strpos($e->getMessage(), 'SQL') !== false || strpos($e->getMessage(), 'database') !== false) {
+            $errorMessage = 'حدث خطأ في قاعدة البيانات. يرجى التحقق من الاتصال.';
+        } elseif (strpos($e->getMessage(), 'function') !== false) {
+            $errorMessage = 'خطأ في تحميل الدوال المطلوبة. يرجى تحديث الصفحة.';
+        }
+        
         echo json_encode([
             'success' => false,
-            'message' => 'حدث خطأ أثناء تحميل المنتجات: ' . $e->getMessage()
+            'message' => $errorMessage,
+            'debug' => (defined('DEBUG_MODE') && DEBUG_MODE) ? $e->getMessage() : null
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
     exit;
@@ -896,17 +922,29 @@ document.getElementById('fromWarehouse')?.addEventListener('change', function() 
     
     fetch(currentUrl.toString())
         .then(response => {
+            // التحقق من حالة الاستجابة
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text.substring(0, 200)}`);
+                });
+            }
+            
             // التحقق من نوع المحتوى
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
                 return response.text().then(text => {
-                    throw new Error('Expected JSON but got: ' + text.substring(0, 100));
+                    console.error('Non-JSON response:', text.substring(0, 500));
+                    throw new Error('Expected JSON but got: ' + contentType + ' - ' + text.substring(0, 100));
                 });
             }
             return response.json();
         })
         .then(data => {
-            if (data.success && data.products) {
+            if (!data) {
+                throw new Error('لا توجد بيانات في الاستجابة');
+            }
+            
+            if (data.success && Array.isArray(data.products)) {
                 allFinishedProductOptions = data.products;
                 updateProductSelects();
                 
@@ -930,21 +968,34 @@ document.getElementById('fromWarehouse')?.addEventListener('change', function() 
                 } else {
                     if (infoAlert && infoAlert.classList.contains('alert-warning')) {
                         infoAlert.className = 'alert alert-info d-flex align-items-center gap-2 mb-2';
-                        infoAlert.innerHTML = '<i class="bi bi-info-circle"></i><div>تم تحميل المنتجات المتاحة من المخزن المحدد.</div>';
+                        infoAlert.innerHTML = '<i class="bi bi-info-circle"></i><div>تم تحميل ' + allFinishedProductOptions.length + ' منتج من المخزن المحدد.</div>';
                     }
                 }
             } else {
-                console.error('Error loading products:', data.message || 'Unknown error');
-                alert('حدث خطأ أثناء تحميل المنتجات: ' + (data.message || 'خطأ غير معروف'));
+                const errorMsg = data.message || 'خطأ غير معروف';
+                console.error('Error loading products:', data);
+                throw new Error(errorMsg);
             }
         })
         .catch(error => {
             console.error('Error loading products:', error);
             let errorMessage = 'حدث خطأ أثناء تحميل المنتجات. يرجى المحاولة مرة أخرى.';
-            if (error.message && error.message.includes('Expected JSON')) {
-                errorMessage = 'حدث خطأ في استجابة الخادم. يرجى التأكد من الاتصال بالإنترنت والمحاولة مرة أخرى.';
+            
+            if (error.message) {
+                if (error.message.includes('Expected JSON')) {
+                    errorMessage = 'حدث خطأ في استجابة الخادم. يرجى التأكد من الاتصال بالإنترنت والمحاولة مرة أخرى.';
+                } else if (error.message.includes('HTTP')) {
+                    errorMessage = 'حدث خطأ في الاتصال بالخادم. يرجى التحقق من الاتصال والمحاولة مرة أخرى.';
+                } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                    errorMessage = 'فشل الاتصال بالخادم. يرجى التحقق من الاتصال بالإنترنت.';
+                } else {
+                    errorMessage = error.message;
+                }
             }
+            
             alert(errorMessage);
+            
+            // إعادة تعيين حالة الأزرار
             if (addItemBtn) {
                 addItemBtn.disabled = false;
                 addItemBtn.innerHTML = originalAddBtnText || '<i class="bi bi-plus-circle me-2"></i>إضافة عنصر';
@@ -952,6 +1003,13 @@ document.getElementById('fromWarehouse')?.addEventListener('change', function() 
             if (submitBtn) {
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = originalSubmitBtnText || 'إنشاء الطلب';
+            }
+            
+            // إظهار رسالة خطأ في التنبيه
+            const infoAlert = document.querySelector('#transferItems').previousElementSibling;
+            if (infoAlert) {
+                infoAlert.className = 'alert alert-danger d-flex align-items-center gap-2 mb-2';
+                infoAlert.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i><div>' + errorMessage + '</div>';
             }
         });
 });

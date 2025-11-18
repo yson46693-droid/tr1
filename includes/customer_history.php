@@ -107,7 +107,7 @@ function customerHistorySyncForCustomer(int $customerId): array
     // حذف السجلات الأقدم من ستة أشهر
     customerHistoryPruneOlderThan($cutoffDate);
 
-    // جلب الفواتير للعميل خلال آخر 6 أشهر
+    // جلب الفواتير للعميل خلال آخر 6 أشهر (فقط الفواتير الرسمية من جدول invoices)
     $invoiceRows = $db->query(
         "SELECT id, invoice_number, date, total_amount, paid_amount, status
          FROM invoices
@@ -116,72 +116,19 @@ function customerHistorySyncForCustomer(int $customerId): array
         [$customerId, $cutoffDate]
     );
     
-    // جلب المبيعات من جدول sales (إن وُجد) للعميل خلال آخر 6 أشهر وتجميعها حسب التاريخ
-    $salesRows = [];
-    try {
-        $salesTableExists = $db->queryOne("SHOW TABLES LIKE 'sales'");
-        if (!empty($salesTableExists)) {
-            $statusColumnExists = $db->queryOne("SHOW COLUMNS FROM sales LIKE 'status'");
-            $paidExpression = "SUM(total)";
-            if (!empty($statusColumnExists)) {
-                $paidExpression = "SUM(CASE WHEN status IN ('approved','completed','sent') THEN total ELSE 0 END)";
-            }
+    // تسجيل عدد الفواتير للتشخيص
+    error_log("customerHistorySyncForCustomer: Found " . count($invoiceRows) . " invoices for customer_id=$customerId since $cutoffDate");
 
-            $salesRows = $db->query(
-                "SELECT date,
-                        SUM(total) as total_amount,
-                        {$paidExpression} as paid_amount,
-                        COUNT(*) as item_count,
-                        MIN(id) as first_sale_id
-                 FROM sales
-                 WHERE customer_id = ? AND date >= ?
-                 GROUP BY date
-                 ORDER BY date DESC",
-                [$customerId, $cutoffDate]
-            );
-        }
-    } catch (Throwable $salesQueryError) {
-        error_log('customerHistorySyncForCustomer: failed loading sales rows -> ' . $salesQueryError->getMessage());
-        $salesRows = [];
-    }
-    
-    // تحويل المبيعات إلى فواتير وهمية في نفس التنسيق
-    $salesInvoiceRows = [];
-    foreach ($salesRows as $saleRow) {
-        $salesInvoiceRows[] = [
-            'id' => 0, // سيتم استخدام sale_date كمعرف فريد
-            'invoice_number' => 'SALE-' . str_replace('-', '', $saleRow['date']),
-            'date' => $saleRow['date'],
-            'total_amount' => (float)($saleRow['total_amount'] ?? 0.0),
-            'paid_amount' => (float)($saleRow['paid_amount'] ?? 0.0),
-            'status' => (float)($saleRow['paid_amount'] ?? 0.0) >= (float)($saleRow['total_amount'] ?? 0.0) ? 'paid' : 'partial',
-            'is_sale' => true, // علامة للتمييز بين الفواتير الحقيقية والمبيعات
-            'sale_date' => $saleRow['date'],
-        ];
-    }
-    
-    // دمج الفواتير والمبيعات معاً
-    $allInvoiceRows = array_merge($invoiceRows, $salesInvoiceRows);
-    
-    // تسجيل عدد الفواتير والمبيعات للتشخيص
-    error_log("customerHistorySyncForCustomer: Found " . count($invoiceRows) . " invoices and " . count($salesRows) . " sales for customer_id=$customerId since $cutoffDate");
+    // استخدام الفواتير فقط (بدون المبيعات المباشرة)
+    $allInvoiceRows = $invoiceRows;
 
-    // إنشاء معرفات فريدة للفواتير والمبيعات
+    // إنشاء معرفات الفواتير
     $invoiceIds = [];
-    $invoiceIdMap = []; // خريطة لربط المعرفات الوهمية بالمعرفات الحقيقية
     
-    foreach ($allInvoiceRows as $idx => $row) {
-        if (!empty($row['is_sale'])) {
-            // للمبيعات، نستخدم sale_date كمعرف فريد
-            $fakeId = -1000 - (int)strtotime($row['sale_date']); // رقم سالب فريد
-            $invoiceIds[] = $fakeId;
-            $invoiceIdMap[$fakeId] = $row;
-        } else {
-            $realId = (int)($row['id'] ?? 0);
-            if ($realId > 0) {
-                $invoiceIds[] = $realId;
-                $invoiceIdMap[$realId] = $row;
-            }
+    foreach ($allInvoiceRows as $row) {
+        $realId = (int)($row['id'] ?? 0);
+        if ($realId > 0) {
+            $invoiceIds[] = $realId;
         }
     }
 
@@ -250,17 +197,11 @@ function customerHistorySyncForCustomer(int $customerId): array
         }
     }
 
-    // تحديث أو إنشاء السجلات في جدول التاريخ
+    // تحديث أو إنشاء السجلات في جدول التاريخ (فقط للفواتير الرسمية)
     foreach ($allInvoiceRows as $invoiceRow) {
         $invoiceId = (int)($invoiceRow['id'] ?? 0);
-        $isSale = !empty($invoiceRow['is_sale']);
         
-        // للمبيعات، نستخدم معرف وهمي فريد
-        if ($isSale && $invoiceId <= 0) {
-            $invoiceId = -1000 - (int)strtotime($invoiceRow['sale_date'] ?? $invoiceRow['date']);
-        }
-        
-        if ($invoiceId == 0 && !$isSale) {
+        if ($invoiceId <= 0) {
             continue;
         }
 
@@ -268,17 +209,12 @@ function customerHistorySyncForCustomer(int $customerId): array
         $paidAmount = (float)($invoiceRow['paid_amount'] ?? 0.0);
         $status = (string)($invoiceRow['status'] ?? '');
 
-        // المرتجعات والاستبدالات لا تنطبق على المبيعات المباشرة (sales) لأنها مرتبطة بالفواتير فقط
-        $returnsData = ['count' => 0, 'total' => 0.0];
-        $exchangesData = ['count' => 0, 'total' => 0.0];
-        
-        if (!$isSale && $invoiceId > 0) {
-            $returnsData = $returnsByInvoice[$invoiceId] ?? ['count' => 0, 'total' => 0.0];
-            $exchangesData = $exchangesByInvoice[$invoiceId] ?? ['count' => 0, 'total' => 0.0];
-        }
+        // تجميع بيانات المرتجعات والاستبدالات للفواتير
+        $returnsData = $returnsByInvoice[$invoiceId] ?? ['count' => 0, 'total' => 0.0];
+        $exchangesData = $exchangesByInvoice[$invoiceId] ?? ['count' => 0, 'total' => 0.0];
 
         try {
-            // للمبيعات، نستخدم invoice_id سالب فريد، ونستخدم invoice_number كمعرف فريد في UNIQUE KEY
+            // حفظ سجل الفاتورة في جدول التاريخ
             $db->execute(
                 "INSERT INTO customer_purchase_history
                     (customer_id, invoice_id, invoice_number, invoice_date, invoice_total, paid_amount, invoice_status,
@@ -315,18 +251,22 @@ function customerHistorySyncForCustomer(int $customerId): array
     }
 
     // إزالة السجلات الزائدة للعميل إذا لم يكن لديه فواتير ضمن النافذة الزمنية
+    // أيضاً إزالة أي سجلات SALE (المبيعات المباشرة) لأننا لا نعرضها بعد الآن
     try {
         if (!empty($invoiceIds)) {
             $placeholders = implode(',', array_fill(0, count($invoiceIds), '?'));
             $params = array_merge([$customerId], $invoiceIds);
             $db->execute(
                 "DELETE FROM customer_purchase_history
-                 WHERE customer_id = ? AND invoice_id NOT IN ($placeholders)",
+                 WHERE customer_id = ? 
+                   AND (invoice_id NOT IN ($placeholders) OR invoice_number LIKE 'SALE-%' OR invoice_id < 0)",
                 $params
             );
         } else {
+            // إذا لم تكن هناك فواتير، احذف جميع السجلات بما فيها SALE
             $db->execute(
-                "DELETE FROM customer_purchase_history WHERE customer_id = ?",
+                "DELETE FROM customer_purchase_history 
+                 WHERE customer_id = ?",
                 [$customerId]
             );
         }
