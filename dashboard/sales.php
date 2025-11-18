@@ -46,11 +46,29 @@ if ($page === 'sales_collections') {
 }
 
 // معالجة طلبات AJAX قبل إرسال أي HTML
-if (isset($_GET['ajax']) && $_GET['ajax'] === 'load_products' && $page === 'vehicle_inventory') {
-    $modulePath = __DIR__ . '/../modules/sales/vehicle_inventory.php';
-    if (file_exists($modulePath)) {
-        include $modulePath;
-        exit; // الخروج بعد معالجة AJAX
+if (isset($_GET['ajax'], $_GET['action'])) {
+    // طلبات مخزن السيارة
+    if ($_GET['ajax'] === 'load_products' && $page === 'vehicle_inventory') {
+        $modulePath = __DIR__ . '/../modules/sales/vehicle_inventory.php';
+        if (file_exists($modulePath)) {
+            include $modulePath;
+            exit; // الخروج بعد معالجة AJAX
+        }
+    }
+
+    // طلب سجل مشتريات العميل (يحتاج للوحدة customers)
+    if ($_GET['ajax'] === 'purchase_history' && $_GET['action'] === 'purchase_history') {
+        $customersModulePath = __DIR__ . '/../modules/sales/customers.php';
+        if (file_exists($customersModulePath)) {
+            include $customersModulePath;
+        } else {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'success' => false,
+                'message' => 'وحدة العملاء غير متاحة.'
+            ], JSON_UNESCAPED_UNICODE);
+        }
+        exit;
     }
 }
 ?>

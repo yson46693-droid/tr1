@@ -76,6 +76,24 @@ requireRole('manager');
 $currentUser = getCurrentUser();
 $db = db();
 
+$customersModulePath = __DIR__ . '/../modules/sales/customers.php';
+if (
+    isset($_GET['ajax'], $_GET['action']) &&
+    $_GET['ajax'] === 'purchase_history' &&
+    $_GET['action'] === 'purchase_history'
+) {
+    if (file_exists($customersModulePath)) {
+        include $customersModulePath;
+    } else {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'success' => false,
+            'message' => 'وحدة العملاء غير متاحة.'
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $pageStylesheets = isset($pageStylesheets) && is_array($pageStylesheets) ? $pageStylesheets : [];
 $extraScripts = isset($extraScripts) && is_array($extraScripts) ? $extraScripts : [];
 if ($page === 'final_products' && !in_array('assets/css/production-page.css', $pageStylesheets, true)) {

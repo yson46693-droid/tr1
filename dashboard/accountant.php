@@ -19,6 +19,24 @@ $currentUser = getCurrentUser();
 $db = db();
 $page = $_GET['page'] ?? 'dashboard';
 
+$customersModulePath = __DIR__ . '/../modules/sales/customers.php';
+if (
+    isset($_GET['ajax'], $_GET['action']) &&
+    $_GET['ajax'] === 'purchase_history' &&
+    $_GET['action'] === 'purchase_history'
+) {
+    if (file_exists($customersModulePath)) {
+        include $customersModulePath;
+    } else {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'success' => false,
+            'message' => 'وحدة العملاء غير متاحة.'
+        ], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
 $financialSuccess = '';
 $financialError = '';
 $financialFormData = [];
