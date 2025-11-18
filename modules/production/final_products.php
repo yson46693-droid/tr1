@@ -2382,13 +2382,15 @@ if ($isManager) {
                                             <?php endforeach; ?>
                                         </select>
                                     </div>
-                                    <div class="col-md-3">
+                                    <div class="col-md-4">
                                         <label class="form-label small text-muted" for="transferQuantity0">الكمية</label>
                                         <input type="number" id="transferQuantity0" step="0.01" min="0.01" class="form-control quantity-input" name="items[0][quantity]" placeholder="الكمية" required>
                                     </div>
                                     <div class="col-md-3">
-                                        <label class="form-label small text-muted" for="transferNotes0">ملاحظات</label>
-                                        <input type="text" id="transferNotes0" class="form-control" name="items[0][notes]" placeholder="ملاحظات (اختياري)">
+                                        <label class="form-label small text-muted d-block">&nbsp;</label>
+                                        <button type="button" class="btn btn-outline-danger btn-sm w-100 remove-transfer-item" title="حذف العنصر">
+                                            <i class="bi bi-trash"></i> حذف
+                                        </button>
                                     </div>
                                     <div class="col-12">
                                         <small class="text-muted available-hint d-block"></small>
@@ -2396,22 +2398,12 @@ if ($isManager) {
                                         <input type="hidden" id="transferBatchId0" name="items[0][batch_id]" class="selected-batch-id">
                                         <input type="hidden" id="transferBatchNumber0" name="items[0][batch_number]" class="selected-batch-number">
                                     </div>
-                                    <div class="col-auto text-end">
-                                        <button type="button" class="btn btn-outline-danger btn-sm remove-transfer-item" title="حذف العنصر">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </div>
                                 </div>
                             </div>
                             <button type="button" class="btn btn-sm btn-outline-primary" id="addTransferItemBtn">
                                 <i class="bi bi-plus-circle me-1"></i>
                                 إضافة منتج آخر
                             </button>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label" for="transferAdditionalNotes">ملاحظات إضافية</label>
-                            <textarea id="transferAdditionalNotes" class="form-control" name="notes" rows="3" placeholder="أي تفاصيل إضافية للمدير (اختياري)"></textarea>
                         </div>
 
                         <div class="alert alert-info d-flex align-items-center gap-2">
@@ -2526,24 +2518,21 @@ if (!window.transferFormInitialized) {
                         ${optionsHtml}
                     </select>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-4">
                     <label class="form-label small text-muted" for="transferQuantity${index}">الكمية</label>
                     <input type="number" id="transferQuantity${index}" step="0.01" min="0.01" class="form-control quantity-input" name="items[${index}][quantity]" placeholder="الكمية" required>
                 </div>
                 <div class="col-md-3">
-                    <label class="form-label small text-muted" for="transferNotes${index}">ملاحظات</label>
-                    <input type="text" id="transferNotes${index}" class="form-control" name="items[${index}][notes]" placeholder="ملاحظات (اختياري)">
+                    <label class="form-label small text-muted d-block">&nbsp;</label>
+                    <button type="button" class="btn btn-outline-danger btn-sm w-100 remove-transfer-item" title="حذف العنصر">
+                        <i class="bi bi-trash"></i> حذف
+                    </button>
                 </div>
                 <div class="col-12">
                     <small class="text-muted available-hint d-block"></small>
                     <input type="hidden" id="transferProductId${index}" name="items[${index}][product_id]" class="selected-product-id">
                     <input type="hidden" id="transferBatchId${index}" name="items[${index}][batch_id]" class="selected-batch-id">
                     <input type="hidden" id="transferBatchNumber${index}" name="items[${index}][batch_number]" class="selected-batch-number">
-                </div>
-                <div class="col-auto text-end">
-                    <button type="button" class="btn btn-outline-danger btn-sm remove-transfer-item" title="حذف العنصر">
-                        <i class="bi bi-trash"></i>
-                    </button>
                 </div>
             `;
             return wrapper;
