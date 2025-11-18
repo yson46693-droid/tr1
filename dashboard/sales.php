@@ -212,7 +212,18 @@ if (isset($_GET['ajax'], $_GET['action'])) {
                                 $recentSales = $db->query(
                                     "SELECT s.*, 
                                             c.name as customer_name, 
-                                            COALESCE(p.name, CONCAT('منتج رقم ', s.product_id)) as product_name 
+                                            COALESCE(
+                                                (SELECT fp2.product_name 
+                                                 FROM finished_products fp2 
+                                                 WHERE fp2.product_id = p.id 
+                                                   AND fp2.product_name IS NOT NULL 
+                                                   AND TRIM(fp2.product_name) != ''
+                                                   AND fp2.product_name NOT LIKE 'منتج رقم%'
+                                                 ORDER BY fp2.id DESC 
+                                                 LIMIT 1),
+                                                NULLIF(TRIM(p.name), ''),
+                                                CONCAT('منتج رقم ', s.product_id)
+                                            ) as product_name 
                                      FROM sales s 
                                      LEFT JOIN customers c ON s.customer_id = c.id 
                                      LEFT JOIN products p ON s.product_id = p.id 
