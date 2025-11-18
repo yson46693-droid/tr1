@@ -1131,33 +1131,27 @@ if (isset($_GET['id'])) {
 <?php if ($warehouseTransfersShowHeading): ?>
 <div class="d-flex justify-content-between align-items-center mb-4">
     <h2><i class="bi bi-arrow-left-right me-2"></i>طلبات النقل بين المخازن</h2>
-    <div class="btn-group">
+    <div class="d-flex gap-2">
         <?php if ($isManager): ?>
-            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#transferFromCompanyModal">
+            <button type="button" class="btn btn-primary rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#transferFromCompanyModal">
                 <i class="bi bi-box-arrow-right me-2"></i>نقل من منتجات الشركة
             </button>
-            <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#transferFromSalesRepModal">
+            <button type="button" class="btn btn-success rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#transferFromSalesRepModal">
                 <i class="bi bi-truck me-2"></i>نقل من بضاعة المندوب
             </button>
         <?php endif; ?>
-        <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#generalTransferModal">
-            <i class="bi bi-arrow-left-right me-2"></i>طلب نقل عام
-        </button>
     </div>
 </div>
 <?php else: ?>
 <div class="d-flex justify-content-end mb-3 gap-2">
     <?php if ($isManager): ?>
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#transferFromCompanyModal">
+        <button type="button" class="btn btn-primary rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#transferFromCompanyModal">
             <i class="bi bi-box-arrow-right me-2"></i>نقل من منتجات الشركة
         </button>
-        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#transferFromSalesRepModal">
+        <button type="button" class="btn btn-success rounded-3 shadow-sm" data-bs-toggle="modal" data-bs-target="#transferFromSalesRepModal">
             <i class="bi bi-truck me-2"></i>نقل من بضاعة المندوب
         </button>
     <?php endif; ?>
-    <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#generalTransferModal">
-        <i class="bi bi-arrow-left-right me-2"></i>طلب نقل عام
-    </button>
 </div>
 <?php endif; ?>
 
