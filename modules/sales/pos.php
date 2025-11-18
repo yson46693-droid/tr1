@@ -1878,7 +1878,16 @@ if (!$error) {
             elements.paidField.value = paidAmount.toFixed(2);
         }
         if (elements.submitBtn) {
-            elements.submitBtn.disabled = cart.length === 0;
+            const hasCartItems = cart.length > 0;
+            const hasValidCustomer = (() => {
+                const customerMode = Array.from(elements.customerModeRadios).find((radio) => radio.checked)?.value || 'existing';
+                if (customerMode === 'existing') {
+                    return elements.customerSelect && elements.customerSelect.value && elements.customerSelect.value !== '';
+                } else {
+                    return elements.newCustomerName && elements.newCustomerName.value && elements.newCustomerName.value.trim() !== '';
+                }
+            })();
+            elements.submitBtn.disabled = !hasCartItems || !hasValidCustomer;
         }
         syncCartData();
         refreshPaymentOptionStates();
@@ -2136,8 +2145,19 @@ if (!$error) {
                 elements.newCustomerWrap?.classList.remove('d-none');
                 elements.newCustomerName?.setAttribute('required', 'required');
             }
+            updateSummary(); // تحديث حالة الزر عند تغيير وضع العميل
         });
     });
+
+    // إضافة مستمعين لحقول العميل لتحديث حالة الزر
+    if (elements.customerSelect) {
+        elements.customerSelect.addEventListener('change', updateSummary);
+        elements.customerSelect.addEventListener('input', updateSummary);
+    }
+    if (elements.newCustomerName) {
+        elements.newCustomerName.addEventListener('input', updateSummary);
+        elements.newCustomerName.addEventListener('change', updateSummary);
+    }
 
     if (elements.form) {
         elements.form.addEventListener('submit', function (event) {
