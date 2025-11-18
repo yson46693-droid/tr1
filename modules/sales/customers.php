@@ -8,16 +8,20 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
-require_once __DIR__ . '/../../includes/config.php';
-require_once __DIR__ . '/../../includes/db.php';
-require_once __DIR__ . '/../../includes/auth.php';
-require_once __DIR__ . '/../../includes/audit_log.php';
-require_once __DIR__ . '/../../includes/path_helper.php';
-require_once __DIR__ . '/../../includes/customer_history.php';
-require_once __DIR__ . '/../../includes/invoices.php';
-require_once __DIR__ . '/../../includes/salary_calculator.php';
+if (!defined('CUSTOMERS_MODULE_BOOTSTRAPPED')) {
+    define('CUSTOMERS_MODULE_BOOTSTRAPPED', true);
 
-requireRole(['sales', 'accountant', 'manager']);
+    require_once __DIR__ . '/../../includes/config.php';
+    require_once __DIR__ . '/../../includes/db.php';
+    require_once __DIR__ . '/../../includes/auth.php';
+    require_once __DIR__ . '/../../includes/audit_log.php';
+    require_once __DIR__ . '/../../includes/path_helper.php';
+    require_once __DIR__ . '/../../includes/customer_history.php';
+    require_once __DIR__ . '/../../includes/invoices.php';
+    require_once __DIR__ . '/../../includes/salary_calculator.php';
+
+    requireRole(['sales', 'accountant', 'manager']);
+}
 
 if (!defined('CUSTOMERS_PURCHASE_HISTORY_AJAX')) {
     require_once __DIR__ . '/table_styles.php';

@@ -38,8 +38,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'load_products') {
     }
     
     // تنظيف أي output buffer موجود
-    while (ob_get_level() > 0) {
-        ob_end_clean();
+    if (!defined('VEHICLE_INVENTORY_AJAX')) {
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
     }
     
     header('Content-Type: application/json; charset=utf-8');

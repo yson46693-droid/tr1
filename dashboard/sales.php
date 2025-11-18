@@ -51,6 +51,7 @@ if (isset($_GET['ajax'], $_GET['action'])) {
     if ($_GET['ajax'] === 'load_products' && $page === 'vehicle_inventory') {
         $modulePath = __DIR__ . '/../modules/sales/vehicle_inventory.php';
         if (file_exists($modulePath)) {
+            define('VEHICLE_INVENTORY_AJAX', true);
             include $modulePath;
             exit; // الخروج بعد معالجة AJAX
         }
