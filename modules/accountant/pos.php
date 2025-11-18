@@ -190,10 +190,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $currentBalance = (float)($customerRow['balance'] ?? 0);
                 if ($currentBalance < 0 && $dueAmount > 0) {
+                    // إذا كان للعميل رصيد دائن (سالب)، يتم استخدامه لخفض الدين
                     $creditUsed = min(abs($currentBalance), $dueAmount);
                     $dueAmount = round($dueAmount - $creditUsed, 2);
+                    // إضافة الرصيد المستخدم إلى المبلغ المدفوع
+                    $effectivePaidAmount += $creditUsed;
                 }
 
+                // حساب الرصيد الجديد: الرصيد الحالي + الرصيد المستخدم + الدين المتبقي
                 $newBalance = round($currentBalance + $creditUsed + $dueAmount, 2);
                 if (abs($newBalance - $currentBalance) > 0.0001) {
                     $db->execute("UPDATE customers SET balance = ? WHERE id = ?", [$newBalance, $customerId]);
@@ -227,13 +231,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $invoiceId = (int)$invoiceResult['invoice_id'];
                 $invoiceNumber = $invoiceResult['invoice_number'] ?? '';
 
+                // تحديد حالة الفاتورة
+                // إذا كان الدين = 0 (إما دفعة كاملة نقداً أو استخدام الرصيد الدائن بالكامل)، تكون الفاتورة مدفوعة
                 $invoiceStatus = 'sent';
                 if ($dueAmount <= 0.0001) {
                     $invoiceStatus = 'paid';
+                    // عند استخدام الرصيد الدائن بالكامل، المبلغ المدفوع = إجمالي الفاتورة
+                    if ($creditUsed > 0 && $effectivePaidAmount < $netTotal) {
+                        $effectivePaidAmount = $netTotal;
+                    }
                 } elseif ($effectivePaidAmount > 0) {
                     $invoiceStatus = 'partial';
                 }
 
+                // تحديث الفاتورة بالمبلغ المدفوع والمبلغ المتبقي
                 $db->execute(
                     "UPDATE invoices SET paid_amount = ?, remaining_amount = ?, status = ?, updated_at = NOW() WHERE id = ?",
                     [$effectivePaidAmount, $dueAmount, $invoiceStatus, $invoiceId]

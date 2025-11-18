@@ -2646,9 +2646,12 @@ document.addEventListener('DOMContentLoaded', function () {
                         <input type="text" class="form-control" name="phone" placeholder="مثال: 01234567890">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">ديون العميل</label>
+                        <label class="form-label">ديون العميل / رصيد العميل</label>
                         <input type="number" class="form-control" name="balance" step="0.01" value="0" placeholder="مثال: 0 أو -500">
-                        <small class="text-muted">يمكن إدخال قيمة سالبة لتمثل رصيداً دائنًا لصالح العميل.</small>
+                        <small class="text-muted">
+                            <strong>إدخال قيمة سالبة:</strong> يتم اعتبارها رصيد دائن للعميل (مبلغ متاح للعميل). 
+                            لا يتم تحصيل هذا الرصيد، ويمكن للعميل استخدامه عند شراء فواتير حيث يتم خصم قيمة الفاتورة من الرصيد تلقائياً دون تسجيلها كدين.
+                        </small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">العنوان</label>
