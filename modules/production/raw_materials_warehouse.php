@@ -706,17 +706,19 @@ $derivativeMaterialOptions = array_map(static function ($type, $data) {
 
 // السمسم المتاح للاستخدام في القوالب
 $availableSesameForTemplates = [];
-try {
-    $availableSesameForTemplates = $db->query(
-        "SELECT ss.quantity, s.name AS supplier_name
-         FROM sesame_stock ss
-         INNER JOIN suppliers s ON ss.supplier_id = s.id
-         WHERE ss.quantity > 0
-         ORDER BY s.name"
-    );
-} catch (Exception $e) {
-    error_log('Failed to load sesame stock for templates: ' . $e->getMessage());
-    $availableSesameForTemplates = [];
+if ($sesameStockTableReady) {
+    try {
+        $availableSesameForTemplates = $db->query(
+            "SELECT ss.quantity, s.name AS supplier_name
+             FROM sesame_stock ss
+             INNER JOIN suppliers s ON ss.supplier_id = s.id
+             WHERE ss.quantity > 0
+             ORDER BY s.name"
+        );
+    } catch (Exception $e) {
+        error_log('Failed to load sesame stock for templates: ' . $e->getMessage());
+        $availableSesameForTemplates = [];
+    }
 }
 
 $sesameMaterialAggregates = [];
@@ -1103,14 +1105,17 @@ if ($nutsSummary || $mixedNutsSummary) {
 }
 
 // Sesame summary
-$sesameSummary = $rawReportQueryOne($db, "
-    SELECT 
-        COALESCE(SUM(quantity), 0) AS total_quantity,
-        COUNT(*) AS records,
-        COUNT(DISTINCT supplier_id) AS suppliers,
-        SUM(CASE WHEN COALESCE(quantity,0) <= 0 THEN 1 ELSE 0 END) AS zero_items
-    FROM sesame_stock
-");
+$sesameSummary = null;
+if ($sesameStockTableReady) {
+    $sesameSummary = $rawReportQueryOne($db, "
+        SELECT 
+            COALESCE(SUM(quantity), 0) AS total_quantity,
+            COUNT(*) AS records,
+            COUNT(DISTINCT supplier_id) AS suppliers,
+            SUM(CASE WHEN COALESCE(quantity,0) <= 0 THEN 1 ELSE 0 END) AS zero_items
+        FROM sesame_stock
+    ");
+}
 if ($sesameSummary) {
     $sectionKey = 'sesame';
     $rawWarehouseReport['sections_order'][] = $sectionKey;
@@ -1373,28 +1378,56 @@ if (empty($mixedNutsIngredientsCheck)) {
     }
 }
 
-// ======= إنشاء جدول مخزن السمسم =======
-$sesameStockCheck = $db->queryOne("SHOW TABLES LIKE 'sesame_stock'");
-if (empty($sesameStockCheck)) {
-    try {
-        $db->execute("
-            CREATE TABLE IF NOT EXISTS `sesame_stock` (
-              `id` int(11) NOT NULL AUTO_INCREMENT,
-              `supplier_id` int(11) NOT NULL,
-              `quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالكيلوجرام',
-              `unit_price` decimal(10,2) DEFAULT NULL COMMENT 'سعر الكيلو',
-              `notes` text DEFAULT NULL,
-              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
-              PRIMARY KEY (`id`),
-              KEY `supplier_id_idx` (`supplier_id`),
-              CONSTRAINT `sesame_stock_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        ");
-    } catch (Exception $e) {
-        error_log("Error creating sesame_stock table: " . $e->getMessage());
+if (!function_exists('ensureSesameStockTable')) {
+    function ensureSesameStockTable(bool $forceRetry = false): bool
+    {
+        static $checked = false;
+        static $ready = false;
+        
+        if ($forceRetry) {
+            $checked = false;
+        }
+        
+        if ($checked) {
+            return $ready;
+        }
+        
+        $checked = true;
+        
+        try {
+            $db = db();
+            $sesameStockCheck = $db->queryOne("SHOW TABLES LIKE 'sesame_stock'");
+            if (!empty($sesameStockCheck)) {
+                $ready = true;
+                return $ready;
+            }
+            
+            $db->execute("
+                CREATE TABLE IF NOT EXISTS `sesame_stock` (
+                  `id` int(11) NOT NULL AUTO_INCREMENT,
+                  `supplier_id` int(11) NOT NULL,
+                  `quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالكيلوجرام',
+                  `unit_price` decimal(10,2) DEFAULT NULL COMMENT 'سعر الكيلو',
+                  `notes` text DEFAULT NULL,
+                  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (`id`),
+                  KEY `supplier_id_idx` (`supplier_id`),
+                  CONSTRAINT `sesame_stock_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            
+            $ready = true;
+        } catch (Exception $e) {
+            error_log("Error ensuring sesame_stock table: " . $e->getMessage());
+            $ready = false;
+        }
+        
+        return $ready;
     }
 }
+
+$sesameStockTableReady = ensureSesameStockTable();
 
 if (!ensureRawMaterialDamageLogsTable()) {
     error_log("Unable to ensure raw_material_damage_logs table exists.");
@@ -1953,20 +1986,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             }
                         }
                     } elseif ($materialCategory === 'sesame') {
-                        $stock = $db->queryOne("
-                            SELECT ss.*, s.name AS supplier_name
-                            FROM sesame_stock ss
-                            LEFT JOIN suppliers s ON ss.supplier_id = s.id
-                            WHERE ss.id = ?", [$stockId]);
-                        
-                        if (!$stock) {
-                            $error = 'سجل السمسم غير موجود';
-                        } elseif (floatval($stock['quantity']) < $quantity) {
-                            $error = 'الكمية المدخلة أكبر من الكمية المتاحة';
+                        if (!$sesameStockTableReady) {
+                            $sesameStockTableReady = ensureSesameStockTable(true);
+                        }
+                        if (!$sesameStockTableReady) {
+                            $error = 'جدول مخزون السمسم غير متوفر.';
                         } else {
-                            $db->execute("UPDATE sesame_stock SET quantity = quantity - ?, updated_at = NOW() WHERE id = ?", [$quantity, $stockId]);
-                            $logDetails['supplier_id'] = $stock['supplier_id'];
-                            $logDetails['item_label'] = 'سمسم';
+                            $stock = $db->queryOne("
+                                SELECT ss.*, s.name AS supplier_name
+                                FROM sesame_stock ss
+                                LEFT JOIN suppliers s ON ss.supplier_id = s.id
+                                WHERE ss.id = ?", [$stockId]);
+                            
+                            if (!$stock) {
+                                $error = 'سجل السمسم غير موجود';
+                            } elseif (floatval($stock['quantity']) < $quantity) {
+                                $error = 'الكمية المدخلة أكبر من الكمية المتاحة';
+                            } else {
+                                $db->execute("UPDATE sesame_stock SET quantity = quantity - ?, updated_at = NOW() WHERE id = ?", [$quantity, $stockId]);
+                                $logDetails['supplier_id'] = $stock['supplier_id'];
+                                $logDetails['item_label'] = 'سمسم';
+                            }
                         }
                     }
                     
@@ -2319,12 +2359,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // عمليات السمسم
         elseif ($action === 'add_single_sesame') {
+            if (!$sesameStockTableReady) {
+                $sesameStockTableReady = ensureSesameStockTable(true);
+            }
+            if (!$sesameStockTableReady) {
+                $error = 'لا يمكن الوصول إلى جدول مخزون السمسم. يرجى المحاولة لاحقاً أو التواصل مع الدعم.';
+            }
+            
             $supplierId = intval($_POST['supplier_id'] ?? 0);
             $quantity = floatval($_POST['quantity'] ?? 0);
             $notes = trim($_POST['notes'] ?? '');
             $supplyStockId = null;
             
-            if ($supplierId <= 0) {
+            if (!empty($error)) {
+                // keep $error as is
+            } elseif ($supplierId <= 0) {
                 $error = 'يجب اختيار المورد';
             } elseif ($quantity <= 0) {
                 $error = 'يجب إدخال كمية صحيحة';
@@ -4860,22 +4909,52 @@ $nutsSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status 
     <?php
 } elseif ($section === 'sesame') {
     // جلب موردي السمسم
-    $sesameSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status = 'active' AND type = 'sesame' ORDER BY name");
+    $sesameSuppliers = [];
+    try {
+        $sesameSuppliers = $db->query("SELECT id, name, phone FROM suppliers WHERE status = 'active' AND type = 'sesame' ORDER BY name");
+    } catch (Exception $e) {
+        error_log('Failed to load sesame suppliers: ' . $e->getMessage());
+        $sesameSuppliers = [];
+    }
     
-    // جلب مخزون السمسم
-    $sesameStock = $db->query("
-        SELECT ss.*, s.name as supplier_name, s.phone as supplier_phone 
-        FROM sesame_stock ss
-        INNER JOIN suppliers s ON ss.supplier_id = s.id
-        WHERE ss.quantity > 0
-        ORDER BY s.name
-    ");
-    
-    // إحصائيات السمسم
+    $sesameSectionTableError = !$sesameStockTableReady;
+    $sesameStock = [];
     $sesameStats = [
-        'total_quantity' => $db->queryOne("SELECT COALESCE(SUM(quantity), 0) as total FROM sesame_stock")['total'] ?? 0,
-        'suppliers_count' => $db->queryOne("SELECT COUNT(DISTINCT supplier_id) as total FROM sesame_stock")['total'] ?? 0
+        'total_quantity' => 0,
+        'suppliers_count' => 0
     ];
+    
+    if (!$sesameSectionTableError) {
+        try {
+            $sesameStock = $db->query("
+                SELECT ss.*, s.name as supplier_name, s.phone as supplier_phone 
+                FROM sesame_stock ss
+                INNER JOIN suppliers s ON ss.supplier_id = s.id
+                WHERE ss.quantity > 0
+                ORDER BY s.name
+            ");
+        } catch (Exception $e) {
+            error_log('Failed to load sesame stock: ' . $e->getMessage());
+            $sesameStock = [];
+            $sesameSectionTableError = true;
+        }
+        
+        if (!$sesameSectionTableError) {
+            try {
+                $sesameStats = [
+                    'total_quantity' => $db->queryOne("SELECT COALESCE(SUM(quantity), 0) as total FROM sesame_stock")['total'] ?? 0,
+                    'suppliers_count' => $db->queryOne("SELECT COUNT(DISTINCT supplier_id) as total FROM sesame_stock")['total'] ?? 0
+                ];
+            } catch (Exception $e) {
+                error_log('Failed to load sesame stats: ' . $e->getMessage());
+                $sesameStats = [
+                    'total_quantity' => 0,
+                    'suppliers_count' => 0
+                ];
+                $sesameSectionTableError = true;
+            }
+        }
+    }
     ?>
     
     <!-- إحصائيات السمسم -->
