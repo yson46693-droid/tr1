@@ -626,21 +626,44 @@ if (!$error) {
 <?php endif; ?>
 
 <?php if ($success): ?>
-    <div class="alert alert-success alert-dismissible fade show" id="successAlert" data-auto-refresh="true" role="alert">
+    <div class="alert alert-success alert-dismissible fade show" id="successAlert" role="alert">
         <i class="bi bi-check-circle-fill me-2"></i>
         <?php echo htmlspecialchars($success); ?>
-        <?php if (!empty($posInvoiceLinks['absolute_report_url'])): ?>
-            <div class="mt-3 d-flex flex-wrap gap-2">
-                <a href="<?php echo htmlspecialchars($posInvoiceLinks['absolute_report_url']); ?>" target="_blank" class="btn btn-light btn-sm">
-                    <i class="bi bi-eye me-1"></i>عرض الفاتورة
-                </a>
-                <a href="<?php echo htmlspecialchars($posInvoiceLinks['absolute_print_url'] ?? $posInvoiceLinks['absolute_report_url']); ?>" target="_blank" class="btn btn-primary btn-sm">
-                    <i class="bi bi-printer me-1"></i>طباعة الفاتورة
-                </a>
-            </div>
-        <?php endif; ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
+<?php endif; ?>
+
+<?php if (!empty($posInvoiceLinks['absolute_report_url'])): ?>
+<!-- Modal عرض الفاتورة بعد البيع -->
+<div class="modal fade" id="posInvoiceModal" tabindex="-1" aria-labelledby="posInvoiceModalLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-fullscreen">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="posInvoiceModalLabel">
+                    <i class="bi bi-receipt-cutoff me-2"></i>
+                    فاتورة البيع
+                </h5>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-light btn-sm" onclick="printInvoice()">
+                        <i class="bi bi-printer me-1"></i>طباعة
+                    </button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="إغلاق"></button>
+                </div>
+            </div>
+            <div class="modal-body p-0" style="height: calc(100vh - 120px);">
+                <iframe id="posInvoiceFrame" src="<?php echo htmlspecialchars($posInvoiceLinks['absolute_report_url']); ?>" style="width: 100%; height: 100%; border: none;"></iframe>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle me-1"></i>إغلاق
+                </button>
+                <button type="button" class="btn btn-primary" onclick="printInvoice()">
+                    <i class="bi bi-printer me-1"></i>طباعة الفاتورة
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <?php if (!$error && !$vehicle): ?>
@@ -2197,27 +2220,64 @@ if (!$error) {
 })();
 </script>
 
-<!-- إعادة تحميل الصفحة تلقائياً بعد أي رسالة (نجاح أو خطأ) لمنع تكرار الطلبات -->
+<!-- إدارة Modal الفاتورة ومنع Refresh -->
 <script>
-// إعادة تحميل الصفحة تلقائياً بعد أي رسالة (نجاح أو خطأ) لمنع تكرار الطلبات
 (function() {
+    // فتح Modal الفاتورة تلقائياً بعد البيع
+    const invoiceModal = document.getElementById('posInvoiceModal');
+    const invoiceUrl = <?php echo !empty($posInvoiceLinks['absolute_report_url']) ? json_encode($posInvoiceLinks['absolute_report_url'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : 'null'; ?>;
+    const invoicePrintUrl = <?php echo !empty($posInvoiceLinks['absolute_print_url']) ? json_encode($posInvoiceLinks['absolute_print_url'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : 'null'; ?>;
+    
+    if (invoiceModal && invoiceUrl && typeof bootstrap !== 'undefined') {
+        // فتح Modal تلقائياً
+        const modal = new bootstrap.Modal(invoiceModal);
+        modal.show();
+        
+        // Modal مفتوح - لا حاجة لمنع الإغلاق، يمكن للمستخدم إغلاقه
+        
+        // عند إغلاق Modal، تنظيف URL لمنع refresh
+        invoiceModal.addEventListener('hidden.bs.modal', function() {
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.delete('success');
+            currentUrl.searchParams.delete('error');
+            window.history.replaceState({}, '', currentUrl.toString());
+        });
+    }
+    
+    // دالة الطباعة
+    window.printInvoice = function() {
+        if (invoicePrintUrl) {
+            const printWindow = window.open(invoicePrintUrl, '_blank');
+            if (printWindow) {
+                printWindow.onload = function() {
+                    printWindow.print();
+                };
+            }
+        } else if (invoiceUrl) {
+            const printWindow = window.open(invoiceUrl + (invoiceUrl.includes('?') ? '&' : '?') + 'print=1', '_blank');
+            if (printWindow) {
+                printWindow.onload = function() {
+                    printWindow.print();
+                };
+            }
+        }
+    };
+    
+    // منع refresh تلقائي عند وجود فاتورة
     const successAlert = document.getElementById('successAlert');
     const errorAlert = document.getElementById('errorAlert');
     
-    // التحقق من وجود رسالة نجاح أو خطأ
-    const alertElement = successAlert || errorAlert;
-    
-    if (alertElement && alertElement.dataset.autoRefresh === 'true') {
-        // انتظار 3 ثوانٍ لإعطاء المستخدم وقتاً لرؤية الرسالة
-        setTimeout(function() {
-            // إعادة تحميل الصفحة بدون معاملات GET لمنع تكرار الطلبات
-            const currentUrl = new URL(window.location.href);
-            // إزالة معاملات success و error من URL
-            currentUrl.searchParams.delete('success');
-            currentUrl.searchParams.delete('error');
-            // إعادة تحميل الصفحة
-            window.location.href = currentUrl.toString();
-        }, 3000);
+    // فقط إذا لم تكن هناك فاتورة، نفعل auto-refresh
+    if (!invoiceModal && (successAlert || errorAlert)) {
+        const alertElement = successAlert || errorAlert;
+        if (alertElement && alertElement.dataset.autoRefresh === 'true') {
+            setTimeout(function() {
+                const currentUrl = new URL(window.location.href);
+                currentUrl.searchParams.delete('success');
+                currentUrl.searchParams.delete('error');
+                window.location.href = currentUrl.toString();
+            }, 3000);
+        }
     }
 })();
 </script>
