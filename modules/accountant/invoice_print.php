@@ -17,7 +17,7 @@ $companyName      = COMPANY_NAME;
 $companySubtitle  = 'نظام إدارة المبيعات';
 $companyAddress   = $invoiceData['company_address'] ?? 'الفرع الرئيسي - العنوان: ابو يوسف الرئيسي';
 $companyPhone     = $invoiceData['company_phone']   ?? 'الهاتف: 0000000000';
-$companyEmail     = $invoiceData['company_email']   ?? 'البريد الإلكتروني: info@example.com';
+$companyEmail     = $invoiceData['company_email']   ?? ' info@example.com : البريد الإلكتروني  ';
 $companyTaxNumber = $invoiceData['company_tax_number'] ?? 'الرقم الضريبي: غير متوفر';
 
 $issueDate = formatDate($invoiceData['date']);

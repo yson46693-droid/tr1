@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/auth.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/path_helper.php';
 require_once __DIR__ . '/../../includes/customer_history.php';
+require_once __DIR__ . '/../../includes/invoices.php';
 
 requireRole(['sales', 'accountant', 'manager']);
 
@@ -501,10 +502,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     ]
                 );
 
+                $collectionNumber = null;
+                $collectionId = null;
+                $distributionResult = null;
+
+                // حفظ التحصيل في جدول collections ليظهر في صفحات التحصيلات وخزنة المندوب
+                $collectionsTableExists = $db->queryOne("SHOW TABLES LIKE 'collections'");
+                if (!empty($collectionsTableExists)) {
+                    $hasStatusColumn = !empty($db->queryOne("SHOW COLUMNS FROM collections LIKE 'status'"));
+
+                    $year = date('Y');
+                    $month = date('m');
+                    $lastCollection = $db->queryOne(
+                        "SELECT collection_number FROM collections WHERE collection_number LIKE ? ORDER BY collection_number DESC LIMIT 1 FOR UPDATE",
+                        ["COL-{$year}{$month}-%"]
+                    );
+
+                    $serial = 1;
+                    if (!empty($lastCollection['collection_number'])) {
+                        $parts = explode('-', $lastCollection['collection_number']);
+                        $serial = intval($parts[2] ?? 0) + 1;
+                    }
+
+                    $collectionNumber = sprintf("COL-%s%s-%04d", $year, $month, $serial);
+
+                    $collectionColumns = ['collection_number', 'customer_id', 'amount', 'date', 'payment_method', 'collected_by', 'notes'];
+                    $collectionValues = [$collectionNumber, $customerId, $amount, date('Y-m-d'), 'cash', $currentUser['id'], 'تحصيل من صفحة العملاء'];
+                    $collectionPlaceholders = array_fill(0, count($collectionColumns), '?');
+
+                    if ($hasStatusColumn) {
+                        $collectionColumns[] = 'status';
+                        $collectionValues[] = 'pending';
+                        $collectionPlaceholders[] = '?';
+                    }
+
+                    $db->execute(
+                        "INSERT INTO collections (" . implode(', ', $collectionColumns) . ") VALUES (" . implode(', ', $collectionPlaceholders) . ")",
+                        $collectionValues
+                    );
+
+                    $collectionId = $db->getLastInsertId();
+
+                    logAudit(
+                        $currentUser['id'],
+                        'add_collection_from_customers_page',
+                        'collection',
+                        $collectionId,
+                        null,
+                        [
+                            'collection_number' => $collectionNumber,
+                            'customer_id' => $customerId,
+                            'amount' => $amount,
+                        ]
+                    );
+                } else {
+                    error_log('collect_debt: collections table not found, skipping collection record.');
+                }
+
+                $distributionResult = distributeCollectionToInvoices($customerId, $amount, $currentUser['id']);
+
                 $db->commit();
                 $transactionStarted = false;
 
-                $_SESSION['success_message'] = 'تم تحصيل المبلغ بنجاح.';
+                $messageParts = ['تم تحصيل المبلغ بنجاح.'];
+                if ($collectionNumber !== null) {
+                    $messageParts[] = 'رقم التحصيل: ' . $collectionNumber . '.';
+                }
+
+                if (!empty($distributionResult['updated_invoices'])) {
+                    $messageParts[] = 'تم تحديث ' . count($distributionResult['updated_invoices']) . ' فاتورة.';
+                } elseif (!empty($distributionResult['message'])) {
+                    $messageParts[] = 'ملاحظة: ' . $distributionResult['message'];
+                }
+
+                $_SESSION['success_message'] = implode(' ', array_filter($messageParts));
 
                 $redirectFilters = [];
                 if (!empty($section)) {
