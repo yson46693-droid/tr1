@@ -67,8 +67,11 @@ function getOfficialWorkTime($userId) {
     // مواعيد العمل الرسمية
     if ($role === 'accountant') {
         return ['start' => '10:00:00', 'end' => '19:00:00'];
+    } elseif ($role === 'sales') {
+        // المندوبين
+        return ['start' => '10:00:00', 'end' => '19:00:00'];
     } else {
-        // عمال الإنتاج والمندوبين
+        // عمال الإنتاج
         return ['start' => '09:00:00', 'end' => '19:00:00'];
     }
 }
