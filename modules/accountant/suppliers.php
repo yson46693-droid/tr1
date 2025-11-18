@@ -36,7 +36,20 @@ try {
     
     $supplierTypeCheck = $db->queryOne("SHOW COLUMNS FROM suppliers LIKE 'type'");
     if (empty($supplierTypeCheck)) {
-        $db->execute("ALTER TABLE suppliers ADD COLUMN type ENUM('honey', 'packaging', 'nuts', 'olive_oil', 'derivatives', 'beeswax') NULL DEFAULT NULL AFTER supplier_code");
+        $db->execute("ALTER TABLE suppliers ADD COLUMN type ENUM('honey', 'packaging', 'nuts', 'olive_oil', 'derivatives', 'beeswax', 'sesame') NULL DEFAULT NULL AFTER supplier_code");
+    } else {
+        // التحقق من وجود 'sesame' في ENUM وتحديثه إذا لم يكن موجوداً
+        $typeColumn = $db->queryOne("SHOW COLUMNS FROM suppliers WHERE Field = 'type'");
+        if ($typeColumn) {
+            $typeEnum = $typeColumn['Type'];
+            if (stripos($typeEnum, 'sesame') === false) {
+                try {
+                    $db->execute("ALTER TABLE suppliers MODIFY COLUMN type ENUM('honey', 'packaging', 'nuts', 'olive_oil', 'derivatives', 'beeswax', 'sesame') NULL DEFAULT NULL");
+                } catch (Exception $e) {
+                    error_log("Error adding 'sesame' to supplier type enum: " . $e->getMessage());
+                }
+            }
+        }
     }
     
     // توليد كود للموردين الموجودين الذين لا يملكون كود
@@ -128,7 +141,8 @@ function generateSupplierCode($type, $db) {
         'nuts' => 'NUT',        // مكسرات
         'olive_oil' => 'OIL',   // زيت زيتون
         'derivatives' => 'DRV', // مشتقات
-        'beeswax' => 'WAX'      // شمع عسل
+        'beeswax' => 'WAX',     // شمع عسل
+        'sesame' => 'SES'       // مورد سمسم
     ];
     
     $prefix = $typeCodes[$type] ?? 'SUP';
@@ -945,6 +959,7 @@ $historyTypeLabels = [
                             <option value="honey">مورد عسل</option>
                             <option value="packaging">أدوات تعبئة</option>
                             <option value="nuts">مكسرات</option>
+                            <option value="sesame">مورد سمسم</option>
                             <option value="olive_oil">زيت زيتون</option>
                             <option value="derivatives">مشتقات</option>
                             <option value="beeswax">شمع عسل</option>
@@ -1018,6 +1033,7 @@ $historyTypeLabels = [
                             <option value="olive_oil" <?php echo ($editSupplier['type'] ?? '') === 'olive_oil' ? 'selected' : ''; ?>>زيت زيتون</option>
                             <option value="derivatives" <?php echo ($editSupplier['type'] ?? '') === 'derivatives' ? 'selected' : ''; ?>>مشتقات</option>
                             <option value="beeswax" <?php echo ($editSupplier['type'] ?? '') === 'beeswax' ? 'selected' : ''; ?>>شمع عسل</option>
+                            <option value="sesame" <?php echo ($editSupplier['type'] ?? '') === 'sesame' ? 'selected' : ''; ?>>مورد سمسم</option>
                         </select>
                         <small class="text-muted">سيتم توليد كود جديد إذا تم تغيير النوع</small>
                     </div>
