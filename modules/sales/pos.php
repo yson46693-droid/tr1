@@ -594,7 +594,6 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = implode('<br>', array_map('htmlspecialchars', $validationErrors));
         }
-        } // إغلاق if (empty($error))
     }
 }
 
