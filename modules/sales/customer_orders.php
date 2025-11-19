@@ -59,7 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $orderDate = $_POST['order_date'] ?? date('Y-m-d');
         $deliveryDate = !empty($_POST['delivery_date']) ? $_POST['delivery_date'] : null;
         $priority = $_POST['priority'] ?? 'normal';
-        $notes = trim($_POST['notes'] ?? '');
+        $notes = '';
         $createNewCustomer = isset($_POST['create_new_customer']) && $_POST['create_new_customer'] === '1';
         $newCustomerName = trim($_POST['new_customer_name'] ?? '');
         $newCustomerPhone = trim($_POST['new_customer_phone'] ?? '');
@@ -69,12 +69,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $items = [];
         if (isset($_POST['items']) && is_array($_POST['items'])) {
             foreach ($_POST['items'] as $item) {
-                if (!empty($item['product_id']) && $item['quantity'] > 0 && $item['unit_price'] > 0) {
+                if (!empty($item['product_id']) && $item['quantity'] > 0) {
                     $items[] = [
                         'product_id' => intval($item['product_id']),
                         'quantity' => floatval($item['quantity']),
-                        'unit_price' => floatval($item['unit_price']),
-                        'total_price' => floatval($item['quantity']) * floatval($item['unit_price'])
+                        'unit_price' => 0.0,
+                        'total_price' => 0.0
                     ];
                 }
             }
@@ -172,12 +172,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $orderNumber = sprintf("ORD-%s%s-%04d", $year, $month, $serial);
 
-                $subtotal = 0;
-                foreach ($items as $item) {
-                    $subtotal += $item['total_price'];
-                }
+                $subtotal = 0.0;
                 $discountAmount = 0.0;
-                $totalAmount = $subtotal;
+                $totalAmount = 0.0;
 
                 $db->execute(
                     "INSERT INTO customer_orders 
@@ -201,18 +198,107 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $orderId = (int)$db->getLastInsertId();
 
+                if ($orderId <= 0) {
+                    throw new RuntimeException('فشل إنشاء الطلب: لم يتم الحصول على معرف الطلب.');
+                }
+
+                // التحقق من وجود عمود template_id وإضافته إذا لم يكن موجوداً
+                try {
+                    $templateIdColumn = $db->queryOne("SHOW COLUMNS FROM order_items LIKE 'template_id'");
+                    if (empty($templateIdColumn)) {
+                        $db->execute("ALTER TABLE order_items ADD COLUMN template_id INT(11) NULL AFTER product_id");
+                    }
+                } catch (Throwable $alterError) {
+                    error_log('Error checking/adding template_id column: ' . $alterError->getMessage());
+                }
+                
+                // محاولة تعديل product_id ليكون NULL إذا كان NOT NULL
+                try {
+                    $productIdColumn = $db->queryOne("SHOW COLUMNS FROM order_items WHERE Field = 'product_id'");
+                    if (!empty($productIdColumn) && $productIdColumn['Null'] === 'NO') {
+                        // محاولة إزالة Foreign Key constraint أولاً
+                        try {
+                            $db->execute("ALTER TABLE order_items DROP FOREIGN KEY order_items_ibfk_2");
+                        } catch (Throwable $fkError) {
+                            // قد يكون اسم الـ constraint مختلفاً أو غير موجود
+                            error_log('Error dropping foreign key: ' . $fkError->getMessage());
+                        }
+                        // تعديل product_id ليكون NULL
+                        $db->execute("ALTER TABLE order_items MODIFY COLUMN product_id INT(11) NULL");
+                    }
+                } catch (Throwable $modifyError) {
+                    error_log('Error modifying product_id column: ' . $modifyError->getMessage());
+                }
+
                 foreach ($items as $item) {
-                    $db->execute(
-                        "INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price) 
-                         VALUES (?, ?, ?, ?, ?)",
-                        [
-                            $orderId,
-                            $item['product_id'],
-                            $item['quantity'],
-                            $item['unit_price'],
-                            $item['total_price']
-                        ]
-                    );
+                    // التحقق من وجود القالب في أحد الجداول
+                    $templateExists = false;
+                    $templateType = null;
+                    
+                    // التحقق من unified_product_templates
+                    $unifiedCheck = $db->queryOne("SHOW TABLES LIKE 'unified_product_templates'");
+                    if (!empty($unifiedCheck)) {
+                        $template = $db->queryOne(
+                            "SELECT id FROM unified_product_templates WHERE id = ? AND status = 'active'",
+                            [$item['product_id']]
+                        );
+                        if ($template) {
+                            $templateExists = true;
+                            $templateType = 'unified';
+                        }
+                    }
+                    
+                    // التحقق من product_templates
+                    if (!$templateExists) {
+                        $productTemplatesCheck = $db->queryOne("SHOW TABLES LIKE 'product_templates'");
+                        if (!empty($productTemplatesCheck)) {
+                            $template = $db->queryOne(
+                                "SELECT id FROM product_templates WHERE id = ? AND status = 'active'",
+                                [$item['product_id']]
+                            );
+                            if ($template) {
+                                $templateExists = true;
+                                $templateType = 'product';
+                            }
+                        }
+                    }
+                    
+                    if (!$templateExists) {
+                        throw new InvalidArgumentException('القالب المحدد غير موجود أو غير نشط: ' . $item['product_id']);
+                    }
+                    
+                    // إدراج العنصر مع template_id و product_id = NULL
+                    try {
+                        $db->execute(
+                            "INSERT INTO order_items (order_id, product_id, template_id, quantity, unit_price, total_price) 
+                             VALUES (?, NULL, ?, ?, ?, ?)",
+                            [
+                                $orderId,
+                                $item['product_id'],
+                                $item['quantity'],
+                                $item['unit_price'],
+                                $item['total_price']
+                            ]
+                        );
+                    } catch (Throwable $insertError) {
+                        // إذا فشل لأن template_id غير موجود، نجرب بدون template_id
+                        if (stripos($insertError->getMessage(), 'template_id') !== false || 
+                            stripos($insertError->getMessage(), 'Unknown column') !== false) {
+                            // محاولة إدراج بدون template_id (product_id = NULL)
+                            $db->execute(
+                                "INSERT INTO order_items (order_id, product_id, quantity, unit_price, total_price) 
+                                 VALUES (?, NULL, ?, ?, ?)",
+                                [
+                                    $orderId,
+                                    $item['quantity'],
+                                    $item['unit_price'],
+                                    $item['total_price']
+                                ]
+                            );
+                        } else {
+                            throw $insertError;
+                        }
+                    }
                 }
 
                 $db->commit();
@@ -250,7 +336,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 error_log('Create order error: ' . $createOrderError->getMessage());
-                $error = 'حدث خطأ أثناء إنشاء الطلب. يرجى المحاولة مرة أخرى.';
+                error_log('Create order error trace: ' . $createOrderError->getTraceAsString());
+                error_log('Create order POST data: ' . json_encode($_POST, JSON_UNESCAPED_UNICODE));
+                $error = 'حدث خطأ أثناء إنشاء الطلب: ' . $createOrderError->getMessage();
             }
         }
     } elseif ($action === 'send_sales_order' && $isManagerOrAccountant) {
@@ -263,7 +351,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $orderDateRaw = $_POST['order_date'] ?? date('Y-m-d');
         $deliveryDateRaw = $_POST['delivery_date'] ?? null;
         $totalAmount = isset($_POST['total_amount']) ? cleanFinancialValue($_POST['total_amount']) : 0;
-        $notes = trim($_POST['notes'] ?? '');
+        $notes = '';
 
         if ($customerName === '' || $salesRepId <= 0 || $productId <= 0 || $packageCount <= 0 || $totalAmount <= 0) {
             $error = 'يرجى إدخال جميع البيانات المطلوبة لإرسال الطلب للمندوب.';
@@ -1153,55 +1241,30 @@ if (isset($_GET['id'])) {
                         <label class="form-label">عناصر الطلب</label>
                         <div id="orderItems">
                             <div class="order-item row mb-2">
-                                <div class="col-md-5">
+                                <div class="col-md-9">
                                     <select class="form-select product-select" name="items[0][product_id]" required>
                                         <option value="">اختر القالب</option>
                                         <?php foreach ($products as $product): ?>
-                                            <option value="<?php echo $product['id']; ?>" 
-                                                    data-price="<?php echo $product['unit_price']; ?>">
+                                            <option value="<?php echo $product['id']; ?>">
                                                 <?php echo htmlspecialchars($product['name']); ?>
                                             </option>
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
-                                <div class="col-md-3">
+                                <div class="col-md-2">
                                     <input type="number" step="0.01" class="form-control quantity" 
                                            name="items[0][quantity]" placeholder="الكمية" required min="0.01">
                                 </div>
-                                <div class="col-md-2">
-                                    <input type="number" step="0.01" class="form-control unit-price" 
-                                           name="items[0][unit_price]" placeholder="السعر" required min="0.01">
-                                </div>
-                                <div class="col-md-2">
-                                    <div class="d-flex">
-                                        <input type="text" class="form-control item-total" readonly placeholder="الإجمالي">
-                                        <button type="button" class="btn btn-danger ms-2 remove-item">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </div>
+                                <div class="col-md-1">
+                                    <button type="button" class="btn btn-danger w-100 remove-item">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
                                 </div>
                             </div>
                         </div>
                         <button type="button" class="btn btn-sm btn-outline-primary" id="addItemBtn">
                             <i class="bi bi-plus-circle me-2"></i>إضافة عنصر
                         </button>
-                    </div>
-                    
-                    <div class="row mb-3">
-                        <div class="col-md-6">
-                            <label class="form-label">ملاحظات</label>
-                            <textarea class="form-control" name="notes" rows="3"></textarea>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="card bg-light">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between">
-                                        <h5>الإجمالي:</h5>
-                                        <h5 id="totalAmount">0.00 ج.م</h5>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -1255,32 +1318,24 @@ document.getElementById('addItemBtn')?.addEventListener('click', function() {
     const newItem = document.createElement('div');
     newItem.className = 'order-item row mb-2';
     newItem.innerHTML = `
-        <div class="col-md-5">
+        <div class="col-md-9">
             <select class="form-select product-select" name="items[${itemIndex}][product_id]" required>
                 <option value="">اختر القالب</option>
                 <?php foreach ($products as $product): ?>
-                    <option value="<?php echo $product['id']; ?>" 
-                            data-price="<?php echo $product['unit_price']; ?>">
+                    <option value="<?php echo $product['id']; ?>">
                         <?php echo htmlspecialchars($product['name']); ?>
                     </option>
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <input type="number" step="0.01" class="form-control quantity" 
                    name="items[${itemIndex}][quantity]" placeholder="الكمية" required min="0.01">
         </div>
-        <div class="col-md-2">
-            <input type="number" step="0.01" class="form-control unit-price" 
-                   name="items[${itemIndex}][unit_price]" placeholder="السعر" required min="0.01">
-        </div>
-        <div class="col-md-2">
-            <div class="d-flex">
-                <input type="text" class="form-control item-total" readonly placeholder="الإجمالي">
-                <button type="button" class="btn btn-danger ms-2 remove-item">
-                    <i class="bi bi-trash"></i>
-                </button>
-            </div>
+        <div class="col-md-1">
+            <button type="button" class="btn btn-danger w-100 remove-item">
+                <i class="bi bi-trash"></i>
+            </button>
         </div>
     `;
     itemsDiv.appendChild(newItem);
@@ -1353,45 +1408,7 @@ if (addOrderModalElement && typeof bootstrap !== 'undefined') {
 
 // ربط أحداث العناصر
 function attachItemEvents(item) {
-    const productSelect = item.querySelector('.product-select');
-    const quantityInput = item.querySelector('.quantity');
-    const unitPriceInput = item.querySelector('.unit-price');
-    const itemTotal = item.querySelector('.item-total');
-    
-    productSelect?.addEventListener('change', function() {
-        const price = this.options[this.selectedIndex].dataset.price;
-        if (price) {
-            unitPriceInput.value = price;
-            calculateItemTotal(item);
-            calculateOrderTotal();
-        }
-    });
-    
-    [quantityInput, unitPriceInput].forEach(input => {
-        input?.addEventListener('input', function() {
-            calculateItemTotal(item);
-            calculateOrderTotal();
-        });
-    });
-}
-
-function calculateItemTotal(item) {
-    const quantity = parseFloat(item.querySelector('.quantity').value) || 0;
-    const unitPrice = parseFloat(item.querySelector('.unit-price').value) || 0;
-    const total = quantity * unitPrice;
-    item.querySelector('.item-total').value = total.toFixed(2);
-}
-
-function calculateOrderTotal() {
-    const form = document.getElementById('orderForm');
-    if (!form) return;
-    
-    let total = 0;
-    document.querySelectorAll('.item-total').forEach(input => {
-        total += parseFloat(input.value) || 0;
-    });
-    
-    document.getElementById('totalAmount').textContent = total.toFixed(2) + ' ج.م';
+    // لا حاجة لحسابات السعر والإجمالي
 }
 
 // ربط الأحداث للعناصر الموجودة
