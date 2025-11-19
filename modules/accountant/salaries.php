@@ -1876,7 +1876,7 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
                                 <td><?php echo htmlspecialchars($mod['notes'] ?? '-'); ?></td>
                                 <td>
                                     <a href="<?php echo $currentUrl; ?>?page=salaries&approval_id=<?php echo $mod['id']; ?>&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>&view=pending" 
-                                       class="btn btn-sm btn-primary">
+                                       class="btn btn-sm btn-primary-salary">
                                         <i class="bi bi-eye"></i> مراجعة
                                     </a>
                                 </td>

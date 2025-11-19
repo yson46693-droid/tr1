@@ -861,7 +861,13 @@ $monthName = date('F', mktime(0, 0, 0, $selectedMonth, 1));
     <div class="summary-card">
         <div class="summary-card-title">الراتب الحالي</div>
         <div class="summary-card-value"><?php echo formatCurrency($monthStats['total_salary']); ?></div>
-        <div class="summary-card-description">قبل خصم السلفات</div>
+        <div class="summary-card-description">
+            <?php if ($currentUser['role'] === 'sales' && $collectionsBonus > 0): ?>
+                يتضمن نسبة التحصيلات (<?php echo formatCurrency($collectionsBonus); ?>)
+            <?php else: ?>
+                قبل خصم السلفات
+            <?php endif; ?>
+        </div>
     </div>
     <div class="summary-card">
         <div class="summary-card-title">قبل خصم السلفات</div>

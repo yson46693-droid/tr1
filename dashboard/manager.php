@@ -864,7 +864,7 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 ?>
                 
             <?php elseif ($page === 'honey_warehouse'): ?>
-                <!-- Ø¥Ø¹Ø§Ø¯Ø© ØªÙˆØ¬ÙŠÙ‡ Ù…Ù† Ø§Ù„Ø±Ø§Ø¨Ø· Ø§Ù„Ù‚Ø¯ÙŠÙ… -->
+                <!-- إعادة توجيه من الرابط القديم -->
                 <?php 
                 header('Location: manager.php?page=raw_materials_warehouse&section=honey');
                 exit;
@@ -966,7 +966,7 @@ function renderInvoiceDetails(invoiceData, items) {
                 <tr>
                     <td>
                         <div class="fw-semibold">${item.product_name || item.description || '-'}</div>
-                        <div class="small text-muted">Ø§Ù„Ù…ØªØ§Ø­ Ù„Ù„Ø§Ø±Ø¬Ø§Ø¹: ${remaining.toFixed(2)}</div>
+                        <div class="small text-muted">المتاح للارجاع: ${remaining.toFixed(2)}</div>
                     </td>
                     <td class="text-center">${quantity.toFixed(2)}</td>
                     <td class="text-center">${unitPrice.toFixed(2)}</td>
@@ -1121,7 +1121,7 @@ async function submitInvoiceReturn() {
     });
 
     if (hasInvalidQuantity) {
-        setReturnSubmitFeedback('ØªÙˆØ¬Ø¯ ÙƒÙ…ÙŠØ§Øª Ù…Ø®ØªØ§Ø±Ø© ØªØªØ¬Ø§ÙˆØ² Ø§Ù„Ø­Ø¯ Ø§Ù„Ù…Ø³Ù…ÙˆØ­ Ø¨Ù‡Ø§ Ù„Ù„Ø§Ø±Ø¬Ø§Ø¹.', 'danger');
+        setReturnSubmitFeedback('توجد كميات مختارة تتجاوز الحد المسموح به للارجاع.', 'danger');
         return;
     }
 
@@ -1131,16 +1131,16 @@ async function submitInvoiceReturn() {
     }
 
     if (!invoiceReturnState.refundMethod) {
-        setReturnSubmitFeedback('Ø§Ø®ØªØ± Ø·Ø±ÙŠÙ‚Ø© Ø§Ø±Ø¬Ø§Ø¹ Ø§Ù„Ù…Ø¨Ù„Øº Ù‚Ø¨Ù„ Ø§Ø³ØªÙƒÙ…Ø§Ù„ Ø§Ù„Ø¹Ù…Ù„ÙŠØ©.', 'warning');
+        setReturnSubmitFeedback('اختر طريقة ارجاع المبلغ قبل استكمال العملية.', 'warning');
         return;
     }
 
-    setReturnSubmitFeedback('Ø¬Ø§Ø±ÙŠ ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ù…Ø±ØªØ¬Ø¹...', 'info');
+    setReturnSubmitFeedback('جاري تسجيل المرتجع...', 'info');
     printButton?.classList.add('d-none');
     if (submitButton) {
         submitButton.disabled = true;
         submitButton.dataset.originalText = submitButton.dataset.originalText || submitButton.innerHTML;
-        submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Ø¬Ø§Ø±ÙŠ Ø§Ù„Ù…Ø¹Ø§Ù„Ø¬Ø©';
+        submitButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>جاري المعالجة';
     }
 
     try {
@@ -1176,8 +1176,8 @@ async function submitInvoiceReturn() {
         };
 
         const statusLabel = result.status_label || '';
-        const feedbackType = statusLabel === 'Ù‚ÙŠØ¯ Ø§Ù„ØªØ·ÙˆÙŠØ±' ? 'warning' : 'success';
-        setReturnSubmitFeedback(result.message || 'ØªÙ… ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ù…Ø±ØªØ¬Ø¹ Ø¨Ù†Ø¬Ø§Ø­.', feedbackType);
+        const feedbackType = statusLabel === 'قيد التطوير' ? 'warning' : 'success';
+        setReturnSubmitFeedback(result.message || 'تم تسجيل المرتجع بنجاح.', feedbackType);
 
         if (result.print_url && printButton) {
             printButton.href = result.print_url;
@@ -1185,7 +1185,7 @@ async function submitInvoiceReturn() {
         }
     } catch (error) {
         console.error('submitInvoiceReturn error:', error);
-        setReturnSubmitFeedback(error.message || 'Ø­Ø¯Ø« Ø®Ø·Ø£ ØºÙŠØ± Ù…ØªÙˆÙ‚Ø¹ Ø£Ø«Ù†Ø§Ø¡ ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ù…Ø±ØªØ¬Ø¹.', 'danger');
+        setReturnSubmitFeedback(error.message || 'حدث خطأ غير متوقع أثناء تسجيل المرتجع.', 'danger');
     } finally {
         if (submitButton) {
             const original = submitButton.dataset.originalText;
@@ -1207,7 +1207,7 @@ async function fetchInvoiceDetails(invoiceNumber) {
         }
     });
     if (!response.ok) {
-        throw new Error('ØªØ¹Ø°Ø± Ø§Ù„Ø§ØªØµØ§Ù„ Ø¨Ø§Ù„Ø®Ø§Ø¯Ù…');
+        throw new Error('تعذر الاتصال بالخادم');
     }
     const payload = await response.json();
     if (!payload.success) {
