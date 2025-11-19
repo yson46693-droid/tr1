@@ -826,6 +826,14 @@ if (isset($_GET['id'])) {
                             <td><?php echo htmlspecialchars($selectedOrder['customer_name'] ?? '-'); ?></td>
                         </tr>
                         <tr>
+                            <th>رقم العميل:</th>
+                            <td><?php echo htmlspecialchars($selectedOrder['customer_phone'] ?? '-'); ?></td>
+                        </tr>
+                        <tr>
+                            <th>عنوان العميل:</th>
+                            <td><?php echo htmlspecialchars($selectedOrder['customer_address'] ?? '-'); ?></td>
+                        </tr>
+                        <tr>
                             <th>تاريخ الطلب:</th>
                             <td><?php echo formatDate($selectedOrder['order_date']); ?></td>
                         </tr>
@@ -895,6 +903,9 @@ if (isset($_GET['id'])) {
                             <tr>
                                 <th>القالب</th>
                                 <th>الكمية</th>
+                                <th>سعر الوحدة</th>
+                                <th>الإجمالي</th>
+                                <th>حالة الإنتاج</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -902,6 +913,24 @@ if (isset($_GET['id'])) {
                                 <tr>
                                     <td data-label="القالب"><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
                                     <td data-label="الكمية"><?php echo number_format($item['quantity'], 2); ?></td>
+                                    <td data-label="سعر الوحدة"><?php echo formatCurrency($item['unit_price'] ?? 0); ?></td>
+                                    <td data-label="الإجمالي"><?php echo formatCurrency($item['total_price'] ?? 0); ?></td>
+                                    <td data-label="حالة الإنتاج">
+                                        <span class="badge bg-<?php 
+                                            $productionStatus = $item['production_status'] ?? 'pending';
+                                            echo $productionStatus === 'completed' ? 'success' : 
+                                                ($productionStatus === 'in_production' ? 'info' : 'warning'); 
+                                        ?>">
+                                            <?php 
+                                            $productionStatuses = [
+                                                'pending' => 'معلق',
+                                                'in_production' => 'قيد الإنتاج',
+                                                'completed' => 'مكتمل'
+                                            ];
+                                            echo $productionStatuses[$productionStatus] ?? $productionStatus;
+                                            ?>
+                                        </span>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
