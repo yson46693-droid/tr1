@@ -139,11 +139,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'amount' => $amount
             ]);
             
-            refreshSalesCommissionForUser(
-                $currentUser['id'],
-                $date,
-                'تحديث تلقائي بعد تسجيل تحصيل جديد'
-            );
+            // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+            // وليس بالضرورة الشخص الذي قام بالتحصيل
+            try {
+                $salesRepId = getSalesRepForCustomer($customerId);
+                if ($salesRepId && $salesRepId > 0) {
+                    refreshSalesCommissionForUser(
+                        $salesRepId,
+                        $date,
+                        'تحديث تلقائي بعد تسجيل تحصيل جديد'
+                    );
+                }
+            } catch (Throwable $e) {
+                // لا نوقف العملية إذا فشل تحديث الراتب
+                error_log('Error updating sales commission after collection: ' . $e->getMessage());
+            }
             
             // توزيع التحصيل على فواتير العميل وتحديثها
             $distributionResult = distributeCollectionToInvoices($customerId, $amount, $currentUser['id']);
@@ -175,16 +185,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             
             if ($collection) {
+                $customerId = $collection['customer_id'] ?? 0;
+                $collectionDate = $collection['date'] ?? null;
+                
                 $db->execute("DELETE FROM collections WHERE id = ?", [$collectionId]);
                 
                 logAudit($currentUser['id'], 'delete_collection', 'collection', $collectionId, 
                          json_encode($collection), null);
                 
-                refreshSalesCommissionForUser(
-                    $collection['collected_by'] ?? 0,
-                    $collection['date'] ?? null,
-                    'تحديث تلقائي بعد حذف تحصيل'
-                );
+                // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+                try {
+                    $salesRepId = getSalesRepForCustomer($customerId);
+                    if ($salesRepId && $salesRepId > 0) {
+                        refreshSalesCommissionForUser(
+                            $salesRepId,
+                            $collectionDate,
+                            'تحديث تلقائي بعد حذف تحصيل'
+                        );
+                    }
+                } catch (Throwable $e) {
+                    // لا نوقف العملية إذا فشل تحديث الراتب
+                    error_log('Error updating sales commission after collection deletion: ' . $e->getMessage());
+                }
                 
                 $success = 'تم حذف التحصيل بنجاح';
             } else {

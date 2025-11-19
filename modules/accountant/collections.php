@@ -84,31 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'amount' => $amount
             ]);
             
-            // تحديث راتب المندوب المسؤول عن العميل
-            // نحاول تحديد المندوب من خلال created_by في جدول customers
-            // أو من خلال sales_rep_id في جدول invoices
+            // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
             try {
-                $customer = $db->queryOne("SELECT created_by FROM customers WHERE id = ?", [$customerId]);
-                $salesRepId = null;
-                
-                if ($customer && !empty($customer['created_by'])) {
-                    // المندوب الذي أنشأ العميل
-                    $salesRepId = intval($customer['created_by']);
-                } else {
-                    // محاولة الحصول على المندوب من خلال الفواتير
-                    $invoicesTableCheck = $db->queryOne("SHOW TABLES LIKE 'invoices'");
-                    if (!empty($invoicesTableCheck)) {
-                        $invoice = $db->queryOne(
-                            "SELECT sales_rep_id FROM invoices WHERE customer_id = ? AND sales_rep_id IS NOT NULL ORDER BY date DESC LIMIT 1",
-                            [$customerId]
-                        );
-                        if ($invoice && !empty($invoice['sales_rep_id'])) {
-                            $salesRepId = intval($invoice['sales_rep_id']);
-                        }
-                    }
-                }
-                
-                // تحديث راتب المندوب إذا تم تحديده
+                $salesRepId = getSalesRepForCustomer($customerId);
                 if ($salesRepId && $salesRepId > 0) {
                     refreshSalesCommissionForUser(
                         $salesRepId,
@@ -166,17 +144,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $success = 'تم تحديث التحصيل بنجاح';
             
-            if ($oldCollectedBy) {
-                refreshSalesCommissionForUser(
-                    $oldCollectedBy,
-                    $oldCollectionDate,
-                    'تحديث تلقائي بعد تعديل تحصيل'
-                );
-                refreshSalesCommissionForUser(
-                    $oldCollectedBy,
-                    $date,
-                    'تحديث تلقائي بعد تعديل تحصيل'
-                );
+            // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+            // نحدث للتاريخ القديم والجديد للتأكد من الحساب الصحيح
+            $customerId = $oldCollection['customer_id'] ?? 0;
+            if ($customerId > 0) {
+                try {
+                    $salesRepId = getSalesRepForCustomer($customerId);
+                    if ($salesRepId && $salesRepId > 0) {
+                        // تحديث للتاريخ القديم (لإزالة التأثير السابق)
+                        if ($oldCollectionDate) {
+                            refreshSalesCommissionForUser(
+                                $salesRepId,
+                                $oldCollectionDate,
+                                'تحديث تلقائي بعد تعديل تحصيل'
+                            );
+                        }
+                        // تحديث للتاريخ الجديد
+                        refreshSalesCommissionForUser(
+                            $salesRepId,
+                            $date,
+                            'تحديث تلقائي بعد تعديل تحصيل'
+                        );
+                    }
+                } catch (Throwable $e) {
+                    error_log('Error updating sales commission after collection update: ' . $e->getMessage());
+                }
             }
         }
     } elseif ($action === 'delete_collection') {
@@ -186,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'معرّف التحصيل غير صحيح';
         } else {
             $collection = $db->queryOne("SELECT * FROM collections WHERE id = ?", [$collectionId]);
-            $deletedCollectedBy = is_array($collection) && isset($collection['collected_by']) ? $collection['collected_by'] : null;
+            $deletedCustomerId = is_array($collection) && isset($collection['customer_id']) ? $collection['customer_id'] : 0;
             $deletedCollectionDate = is_array($collection) && isset($collection['date']) ? $collection['date'] : null;
             
             if ($collection) {
@@ -197,12 +189,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 $success = 'تم حذف التحصيل بنجاح';
                 
-                if ($deletedCollectedBy) {
-                    refreshSalesCommissionForUser(
-                        $deletedCollectedBy,
-                        $deletedCollectionDate,
-                        'تحديث تلقائي بعد حذف تحصيل'
-                    );
+                // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+                if ($deletedCustomerId > 0) {
+                    try {
+                        $salesRepId = getSalesRepForCustomer($deletedCustomerId);
+                        if ($salesRepId && $salesRepId > 0) {
+                            refreshSalesCommissionForUser(
+                                $salesRepId,
+                                $deletedCollectionDate,
+                                'تحديث تلقائي بعد حذف تحصيل'
+                            );
+                        }
+                    } catch (Throwable $e) {
+                        error_log('Error updating sales commission after collection deletion: ' . $e->getMessage());
+                    }
                 }
             } else {
                 $error = 'التحصيل غير موجود';
@@ -214,7 +214,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($collectionId <= 0) {
             $error = 'معرّف التحصيل غير صحيح';
         } else {
-            $collectionData = $db->queryOne("SELECT collected_by, date FROM collections WHERE id = ?", [$collectionId]);
+            $collectionData = $db->queryOne("SELECT customer_id, date FROM collections WHERE id = ?", [$collectionId]);
             $statusColumnCheck = $db->queryOne("SHOW COLUMNS FROM collections LIKE 'status'");
             $approvedByColumnCheck = $db->queryOne("SHOW COLUMNS FROM collections LIKE 'approved_by'");
             
@@ -235,12 +235,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 $success = 'تم الموافقة على التحصيل بنجاح';
                 
-                if ($collectionData && !empty($collectionData['collected_by'])) {
-                    refreshSalesCommissionForUser(
-                        $collectionData['collected_by'],
-                        $collectionData['date'] ?? null,
-                        'تحديث تلقائي بعد موافقة التحصيل'
-                    );
+                // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+                if ($collectionData && !empty($collectionData['customer_id'])) {
+                    try {
+                        $salesRepId = getSalesRepForCustomer($collectionData['customer_id']);
+                        if ($salesRepId && $salesRepId > 0) {
+                            refreshSalesCommissionForUser(
+                                $salesRepId,
+                                $collectionData['date'] ?? null,
+                                'تحديث تلقائي بعد موافقة التحصيل'
+                            );
+                        }
+                    } catch (Throwable $e) {
+                        error_log('Error updating sales commission after collection approval: ' . $e->getMessage());
+                    }
                 }
             } else {
                 $error = 'نظام الموافقات غير متاح';
@@ -252,7 +260,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($collectionId <= 0) {
             $error = 'معرّف التحصيل غير صحيح';
         } else {
-            $collectionData = $db->queryOne("SELECT collected_by, date FROM collections WHERE id = ?", [$collectionId]);
+            $collectionData = $db->queryOne("SELECT customer_id, date FROM collections WHERE id = ?", [$collectionId]);
             $statusColumnCheck = $db->queryOne("SHOW COLUMNS FROM collections LIKE 'status'");
             $approvedByColumnCheck = $db->queryOne("SHOW COLUMNS FROM collections LIKE 'approved_by'");
             
@@ -273,12 +281,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 $success = 'تم رفض التحصيل';
                 
-                if ($collectionData && !empty($collectionData['collected_by'])) {
-                    refreshSalesCommissionForUser(
-                        $collectionData['collected_by'],
-                        $collectionData['date'] ?? null,
-                        'تحديث تلقائي بعد رفض التحصيل'
-                    );
+                // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+                if ($collectionData && !empty($collectionData['customer_id'])) {
+                    try {
+                        $salesRepId = getSalesRepForCustomer($collectionData['customer_id']);
+                        if ($salesRepId && $salesRepId > 0) {
+                            refreshSalesCommissionForUser(
+                                $salesRepId,
+                                $collectionData['date'] ?? null,
+                                'تحديث تلقائي بعد رفض التحصيل'
+                            );
+                        }
+                    } catch (Throwable $e) {
+                        error_log('Error updating sales commission after collection rejection: ' . $e->getMessage());
+                    }
                 }
             } else {
                 $error = 'نظام الموافقات غير متاح';

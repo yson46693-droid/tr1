@@ -596,12 +596,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         ]
                     );
                     
-                    if ($isSalesUser) {
-                        refreshSalesCommissionForUser(
-                            $currentUser['id'],
-                            $collectionDate,
-                            'تحديث تلقائي بعد تحصيل من صفحة العملاء'
-                        );
+                    // تحديث راتب المندوب المسؤول عن العميل (المستحق للعمولة)
+                    // وليس بالضرورة الشخص الذي قام بالتحصيل
+                    try {
+                        $salesRepId = getSalesRepForCustomer($customerId);
+                        if ($salesRepId && $salesRepId > 0) {
+                            refreshSalesCommissionForUser(
+                                $salesRepId,
+                                $collectionDate,
+                                'تحديث تلقائي بعد تحصيل من صفحة العملاء'
+                            );
+                        }
+                    } catch (Throwable $e) {
+                        // لا نوقف العملية إذا فشل تحديث الراتب
+                        error_log('Error updating sales commission after collection from customers page: ' . $e->getMessage());
                     }
                 } else {
                     error_log('collect_debt: collections table not found, skipping collection record.');

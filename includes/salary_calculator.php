@@ -1039,6 +1039,67 @@ function calculateAllSalaries($month, $year) {
 }
 
 /**
+ * الحصول على معرف المندوب المستحق للعمولة من عميل معين
+ * يبحث عن المندوب من خلال:
+ * 1. created_by في جدول customers (المندوب الذي أنشأ العميل)
+ * 2. sales_rep_id في جدول invoices (المندوب المرتبط بفواتير العميل)
+ *
+ * @param int $customerId معرف العميل
+ * @return int|null معرف المندوب أو null إذا لم يتم العثور عليه
+ */
+function getSalesRepForCustomer($customerId) {
+    $customerId = (int)$customerId;
+    if ($customerId <= 0) {
+        return null;
+    }
+    
+    try {
+        $db = db();
+        
+        // أولاً: البحث عن المندوب من خلال created_by في جدول customers
+        $customer = $db->queryOne("SELECT created_by FROM customers WHERE id = ?", [$customerId]);
+        if ($customer && !empty($customer['created_by'])) {
+            $salesRepId = intval($customer['created_by']);
+            // التحقق من أن المستخدم مندوب نشط
+            $salesRep = $db->queryOne(
+                "SELECT id FROM users WHERE id = ? AND role = 'sales' AND status = 'active'",
+                [$salesRepId]
+            );
+            if ($salesRep) {
+                return $salesRepId;
+            }
+        }
+        
+        // ثانياً: البحث عن المندوب من خلال sales_rep_id في جدول invoices
+        $invoicesTableCheck = $db->queryOne("SHOW TABLES LIKE 'invoices'");
+        if (!empty($invoicesTableCheck)) {
+            $invoice = $db->queryOne(
+                "SELECT sales_rep_id FROM invoices 
+                 WHERE customer_id = ? AND sales_rep_id IS NOT NULL 
+                 ORDER BY date DESC LIMIT 1",
+                [$customerId]
+            );
+            if ($invoice && !empty($invoice['sales_rep_id'])) {
+                $salesRepId = intval($invoice['sales_rep_id']);
+                // التحقق من أن المستخدم مندوب نشط
+                $salesRep = $db->queryOne(
+                    "SELECT id FROM users WHERE id = ? AND role = 'sales' AND status = 'active'",
+                    [$salesRepId]
+                );
+                if ($salesRep) {
+                    return $salesRepId;
+                }
+            }
+        }
+        
+        return null;
+    } catch (Throwable $e) {
+        error_log('Error getting sales rep for customer ' . $customerId . ': ' . $e->getMessage());
+        return null;
+    }
+}
+
+/**
  * إعادة احتساب راتب المندوب مباشرةً بعد حدوث عملية تؤثر على نسبة التحصيل.
  *
  * @param int $userId
