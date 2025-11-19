@@ -4,6 +4,13 @@
  * Company Products Page - Manager
  */
 
+// تعيين ترميز UTF-8
+if (!headers_sent()) {
+    header('Content-Type: text/html; charset=UTF-8');
+}
+mb_internal_encoding('UTF-8');
+mb_http_output('UTF-8');
+
 if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }

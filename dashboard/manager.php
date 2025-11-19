@@ -154,30 +154,30 @@ if ($page === 'reports' && !in_array('assets/css/production-page.css', $pageStyl
 }
 require_once __DIR__ . '/../includes/lang/' . getCurrentLanguage() . '.php';
 $lang = $translations;
-$pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : 'Ù„ÙˆØ­Ø© Ø§Ù„Ù…Ø¯ÙŠØ±';
+$pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : 'لوحة المدير';
 ?>
 <?php include __DIR__ . '/../templates/header.php'; ?>
 
             <?php if ($page === 'overview' || $page === ''): ?>
                 <!-- Page Header -->
                 <div class="page-header">
-                    <h2><i class="bi bi-graph-up"></i><?php echo isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : 'Ù„ÙˆØ­Ø© Ø§Ù„Ù…Ø¯ÙŠØ±'; ?></h2>
+                    <h2><i class="bi bi-graph-up"></i><?php echo isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : 'لوحة المدير'; ?></h2>
                 </div>
 
                 <?php
                 $quickLinks = [
                     [
-                        'label' => 'Ù…Ù‡Ø§Ù… Ø§Ù„Ø¥Ù†ØªØ§Ø¬',
+                        'label' => 'مهام الإنتاج',
                         'icon' => 'bi-list-task',
                         'url' => getRelativeUrl('dashboard/manager.php?page=production_tasks')
                     ],
                     [
-                        'label' => 'Ù…Ù†ØªØ¬Ø§Øª Ø§Ù„Ø´Ø±ÙƒØ©',
+                        'label' => 'منتجات الشركة',
                         'icon' => 'bi-box-seam',
                         'url' => getRelativeUrl('dashboard/manager.php?page=company_products')
                     ],
                     [
-                        'label' => 'Ù‚ÙˆØ§Ù„Ø¨ Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª',
+                        'label' => 'قوالب المنتجات',
                         'icon' => 'bi-file-earmark-text',
                         'url' => getRelativeUrl('dashboard/manager.php?page=product_templates')
                     ],
@@ -187,32 +187,32 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                         'url' => getRelativeUrl('dashboard/manager.php?page=product_specifications')
                     ],
                     [
-                        'label' => 'Ù…Ø®Ø²Ù† Ø£Ø¯ÙˆØ§Øª Ø§Ù„ØªØ¹Ø¨Ø¦Ø©',
+                        'label' => 'مخزن أدوات التعبيئة',
                         'icon' => 'bi-box-seam',
                         'url' => getRelativeUrl('dashboard/manager.php?page=packaging_warehouse')
                     ],
                     [
-                        'label' => 'Ù…Ø®Ø²Ù† Ø§Ù„Ø®Ø§Ù…Ø§Øª',
+                        'label' => 'مخزن الخامات',
                         'icon' => 'bi-box2-heart',
                         'url' => getRelativeUrl('dashboard/manager.php?page=raw_materials_warehouse')
                     ],
                     [
-                        'label' => 'Ø§Ù„Ù…ÙˆØ±Ø¯ÙŠÙ†',
+                        'label' => 'الموردين',
                         'icon' => 'bi-truck',
                         'url' => getRelativeUrl('dashboard/manager.php?page=suppliers')
                     ],
                     [
-                        'label' => 'Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡',
+                        'label' => 'العملاء',
                         'icon' => 'bi-people',
                         'url' => getRelativeUrl('dashboard/manager.php?page=customers')
                     ],
                     [
-                        'label' => 'Ø·Ù„Ø¨Ø§Øª Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡',
+                        'label' => 'طلبات العملاء',
                         'icon' => 'bi-cart-check',
                         'url' => getRelativeUrl('dashboard/manager.php?page=orders')
                     ],
                     [
-                        'label' => 'Ù†Ù‚Ø·Ø© Ø§Ù„Ø¨ÙŠØ¹',
+                        'label' => 'نقطة البيع',
                         'icon' => 'bi-cart4',
                         'url' => getRelativeUrl('dashboard/manager.php?page=pos')
                     ]
@@ -242,10 +242,10 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 $activitySummary = getManagerActivitySummary();
                 ?>
 
-                <!-- Ù…Ù„Ø®Øµ Ø§Ù„Ø£Ù†Ø´Ø·Ø© Ø§Ù„Ø³Ø±ÙŠØ¹ -->
+                <!-- ملخص الأنشطة السريع -->
                 <div class="analytics-card mb-4">
                     <div class="analytics-card-header">
-                        <h3 class="analytics-card-title"><i class="bi bi-activity me-2"></i>Ù…Ù„Ø®Øµ Ø§Ù„Ø£Ù†Ø´Ø·Ø© Ø§Ù„Ø³Ø±ÙŠØ¹</h3>
+                        <h3 class="analytics-card-title"><i class="bi bi-activity me-2"></i>ملخص الأنشطة السريع</h3>
                         <div>
                             <button class="btn btn-sm btn-link" data-bs-toggle="tooltip" title="Ù…Ø¹Ù„ÙˆÙ…Ø§Øª">
                                 <i class="bi bi-info-circle"></i>
@@ -283,7 +283,7 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                         <i class="bi bi-box-seam"></i>
                                     </div>
                                 </div>
-                                <div class="stat-card-title">Ø¥Ù†ØªØ§Ø¬ Ù…Ø¹Ù„Ù‚</div>
+                                <div class="stat-card-title">إنتاج معلق</div>
                                 <div class="stat-card-value"><?php echo $activitySummary['pending_production'] ?? 0; ?></div>
                             </div>
                             
@@ -293,7 +293,7 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                         <i class="bi bi-cart-check"></i>
                                     </div>
                                 </div>
-                                <div class="stat-card-title">Ù…Ø¨ÙŠØ¹Ø§Øª Ù…Ø¹Ù„Ù‚Ø©</div>
+                                <div class="stat-card-title">مبيعات معلقة</div>
                                 <div class="stat-card-value"><?php echo $activitySummary['pending_sales'] ?? 0; ?></div>
                             </div>
                         </div>
@@ -1514,5 +1514,3 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 </script>
-
-

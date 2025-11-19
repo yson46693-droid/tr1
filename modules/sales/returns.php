@@ -318,7 +318,7 @@ $hasSaleNumberColumn = !empty($saleNumberColumnCheck);
 // بناء استعلام المبيعات بشكل ديناميكي
 if ($hasSaleNumberColumn) {
     $sales = $db->query(
-        "SELECT s.id, s.sale_number, c.name as customer_name 
+        "SELECT s.id, s.sale_number, s.customer_id, c.name as customer_name 
          FROM sales s
          LEFT JOIN customers c ON s.customer_id = c.id
          WHERE s.status = 'approved'
@@ -326,7 +326,7 @@ if ($hasSaleNumberColumn) {
     );
 } else {
     $sales = $db->query(
-        "SELECT s.id, s.id as sale_number, c.name as customer_name 
+        "SELECT s.id, s.id as sale_number, s.customer_id, c.name as customer_name 
          FROM sales s
          LEFT JOIN customers c ON s.customer_id = c.id
          WHERE s.status = 'approved'
@@ -897,9 +897,10 @@ if (isset($_GET['id'])) {
                                 <option value="">اختر البيع</option>
                                 <?php foreach ($sales as $sale): ?>
                                     <option value="<?php echo $sale['id']; ?>" 
-                                            data-customer="<?php echo $sale['customer_name']; ?>">
+                                            data-customer-id="<?php echo $sale['customer_id']; ?>"
+                                            data-customer="<?php echo htmlspecialchars($sale['customer_name'] ?? ''); ?>">
                                         <?php echo htmlspecialchars($sale['sale_number']); ?> - 
-                                        <?php echo htmlspecialchars($sale['customer_name']); ?>
+                                        <?php echo htmlspecialchars($sale['customer_name'] ?? ''); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
