@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../includes/returns.php';
 require_once __DIR__ . '/../../includes/exchanges.php';
 require_once __DIR__ . '/../../includes/audit_log.php';
 require_once __DIR__ . '/../../includes/notifications.php';
+require_once __DIR__ . '/../../includes/path_helper.php';
 
 require_once __DIR__ . '/table_styles.php';
 
@@ -1081,15 +1082,18 @@ if (isset($_GET['id'])) {
         invoiceLoading.style.display = 'block';
         fetchInvoiceBtn.disabled = true;
         
-        // حساب المسار الصحيح للـ API
-        const currentPath = window.location.pathname;
-        const pathParts = currentPath.split('/').filter(p => p);
-        const dashboardIndex = pathParts.indexOf('dashboard');
-        const basePath = dashboardIndex !== -1 ? '/' + pathParts.slice(0, dashboardIndex).join('/') : '';
-        const apiPath = (basePath + '/api/get_invoice_for_return.php').replace(/\/+/g, '/');
+        // حساب المسار الصحيح للـ API باستخدام getBasePath من PHP
+        const basePath = '<?php echo getBasePath(); ?>';
+        const apiPath = (basePath ? basePath : '') + '/api/get_invoice_for_return.php';
+        const fullUrl = apiPath + '?invoice_number=' + encodeURIComponent(invoiceNumber);
         
-        fetch(apiPath + '?invoice_number=' + encodeURIComponent(invoiceNumber))
-            .then(response => response.json())
+        fetch(fullUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('HTTP error! status: ' + response.status);
+                }
+                return response.json();
+            })
             .then(data => {
                 invoiceLoading.style.display = 'none';
                 fetchInvoiceBtn.disabled = false;
@@ -1106,10 +1110,11 @@ if (isset($_GET['id'])) {
             .catch(error => {
                 invoiceLoading.style.display = 'none';
                 fetchInvoiceBtn.disabled = false;
-                invoiceError.textContent = 'حدث خطأ في الاتصال بالخادم';
+                invoiceError.textContent = 'حدث خطأ في الاتصال بالخادم: ' + (error.message || 'خطأ غير معروف');
                 invoiceError.style.display = 'block';
                 invoiceNumberInput.classList.add('is-invalid');
-                console.error('Error:', error);
+                console.error('Error fetching invoice:', error);
+                console.error('API URL attempted:', fullUrl);
             });
     });
     
