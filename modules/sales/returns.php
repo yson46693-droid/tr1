@@ -472,11 +472,13 @@ if (isset($_GET['id'])) {
     $selectColumns[] = 'c.phone as customer_phone';
     $selectColumns[] = 'u.full_name as sales_rep_name';
     $selectColumns[] = 'u2.full_name as approved_by_name';
+    $selectColumns[] = 'i.invoice_number';
     
     $selectedReturn = $db->queryOne(
         "SELECT " . implode(', ', $selectColumns) . "
          FROM returns r
          LEFT JOIN sales s ON r.sale_id = s.id
+         LEFT JOIN invoices i ON r.invoice_id = i.id
          LEFT JOIN customers c ON r.customer_id = c.id
          LEFT JOIN users u ON r.sales_rep_id = u.id
          LEFT JOIN users u2 ON r.approved_by = u2.id
@@ -554,6 +556,12 @@ if (isset($_GET['id'])) {
                             <th>رقم البيع:</th>
                             <td><?php echo htmlspecialchars($selectedReturn['sale_number'] ?? '-'); ?></td>
                         </tr>
+                        <?php if (!empty($selectedReturn['invoice_number'])): ?>
+                        <tr>
+                            <th>رقم الفاتورة:</th>
+                            <td><?php echo htmlspecialchars($selectedReturn['invoice_number']); ?></td>
+                        </tr>
+                        <?php endif; ?>
                         <tr>
                             <th>تاريخ المرتجع:</th>
                             <td><?php echo formatDate($selectedReturn['return_date']); ?></td>
@@ -611,7 +619,8 @@ if (isset($_GET['id'])) {
                                 $methods = [
                                     'cash' => 'نقدي',
                                     'credit' => 'رصيد',
-                                    'exchange' => 'استبدال'
+                                    'exchange' => 'استبدال',
+                                    'company_request' => 'طلب من الشركة (قيد التطوير)'
                                 ];
                                 echo $methods[$selectedReturn['refund_method']] ?? $selectedReturn['refund_method'];
                                 ?>
@@ -679,8 +688,8 @@ if (isset($_GET['id'])) {
                 </div>
             <?php endif; ?>
             
-            <?php if ($selectedReturn['status'] === 'pending' && hasRole('manager')): ?>
-                <div class="mt-3">
+            <div class="mt-3 d-flex gap-2 flex-wrap">
+                <?php if ($selectedReturn['status'] === 'pending' && hasRole('manager')): ?>
                     <form method="POST" class="d-inline">
                         <input type="hidden" name="section" value="returns">
                         <input type="hidden" name="action" value="approve_return">
@@ -689,8 +698,15 @@ if (isset($_GET['id'])) {
                             <i class="bi bi-check-circle me-2"></i>الموافقة على المرتجع
                         </button>
                     </form>
-                </div>
-            <?php endif; ?>
+                <?php endif; ?>
+                <?php if (in_array($selectedReturn['status'], ['processed', 'approved']) && !empty($selectedReturn['invoice_number'])): ?>
+                    <?php require_once __DIR__ . '/../../includes/path_helper.php'; ?>
+                    <a href="<?php echo getRelativeUrl('print_return_invoice.php?id=' . $selectedReturn['id']); ?>" 
+                       class="btn btn-primary" target="_blank">
+                        <i class="bi bi-printer me-2"></i>طباعة فاتورة المرتجع
+                    </a>
+                <?php endif; ?>
+            </div>
         </div>
     </div>
 <?php endif; ?>
@@ -759,6 +775,7 @@ if (isset($_GET['id'])) {
                     <tr>
                         <th>رقم المرتجع</th>
                         <th>العميل</th>
+                        <th>رقم الفاتورة</th>
                         <th>تاريخ المرتجع</th>
                         <th>مبلغ الاسترداد</th>
                         <th>الحالة</th>
@@ -768,7 +785,7 @@ if (isset($_GET['id'])) {
                 <tbody>
                     <?php if (empty($returns)): ?>
                         <tr>
-                            <td colspan="6" class="text-center text-muted">لا توجد مرتجعات</td>
+                            <td colspan="7" class="text-center text-muted">لا توجد مرتجعات</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($returns as $return): ?>
@@ -779,6 +796,13 @@ if (isset($_GET['id'])) {
                                     </a>
                                 </td>
                                 <td><?php echo htmlspecialchars($return['customer_name'] ?? '-'); ?></td>
+                                <td>
+                                    <?php if (!empty($return['invoice_number'])): ?>
+                                        <span class="badge bg-info"><?php echo htmlspecialchars($return['invoice_number']); ?></span>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td><?php echo formatDate($return['return_date']); ?></td>
                                 <td><?php echo formatCurrency($return['refund_amount']); ?></td>
                                 <td>
@@ -799,10 +823,19 @@ if (isset($_GET['id'])) {
                                     </span>
                                 </td>
                                 <td>
-                                    <a href="?page=returns&section=returns&id=<?php echo $return['id']; ?>" 
-                                       class="btn btn-info btn-sm" title="عرض">
-                                        <i class="bi bi-eye"></i>
-                                    </a>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <a href="?page=returns&section=returns&id=<?php echo $return['id']; ?>" 
+                                           class="btn btn-info" title="عرض">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+                                        <?php if (in_array($return['status'], ['processed', 'approved']) && !empty($return['invoice_number'])): ?>
+                                            <?php require_once __DIR__ . '/../../includes/path_helper.php'; ?>
+                                            <a href="<?php echo getRelativeUrl('print_return_invoice.php?id=' . $return['id']); ?>" 
+                                               class="btn btn-primary" title="طباعة" target="_blank">
+                                                <i class="bi bi-printer"></i>
+                                            </a>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

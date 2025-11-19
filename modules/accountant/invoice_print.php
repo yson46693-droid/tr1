@@ -7,10 +7,70 @@ if (!defined('ACCESS_ALLOWED')) {
     die('Direct access not allowed');
 }
 
-$invoiceData = $selectedInvoice ?? $invoice ?? null;
+$isReturnDocument = isset($returnDetails) && is_array($returnDetails);
+$returnMetadata = null;
+
+if ($isReturnDocument) {
+    $returnSummary = $returnDetails['summary'] ?? ($returnDetails['return'] ?? null);
+    if (!$returnSummary) {
+        die('المرتجع غير موجود');
+    }
+
+    $returnItems = $returnDetails['items'] ?? [];
+    $normalizedItems = array_map(function ($item) {
+        $quantity = isset($item['quantity']) ? (float)$item['quantity'] : 0;
+        $unitPrice = isset($item['unit_price']) ? (float)$item['unit_price'] : 0;
+        return [
+            'product_name' => $item['product_name'] ?? $item['description'] ?? 'منتج',
+            'description'  => $item['notes'] ?? '',
+            'quantity'     => $quantity,
+            'unit_price'   => $unitPrice,
+            'total_price'  => $item['total_price'] ?? ($quantity * $unitPrice),
+        ];
+    }, $returnItems);
+
+    $invoiceData = [
+        'invoice_number'    => $returnSummary['return_number'] ?? ('RET-' . str_pad($returnSummary['id'] ?? 0, 4, '0', STR_PAD_LEFT)),
+        'date'              => $returnSummary['return_date'] ?? ($returnSummary['created_at'] ?? date('Y-m-d')),
+        'due_date'          => $returnSummary['return_date'] ?? ($returnSummary['created_at'] ?? date('Y-m-d')),
+        'status'            => $returnSummary['status'] ?? 'pending',
+        'customer_name'     => $returnSummary['customer_name'] ?? 'عميل',
+        'customer_phone'    => $returnSummary['customer_phone'] ?? '',
+        'customer_address'  => $returnSummary['customer_address'] ?? '',
+        'sales_rep_name'    => $returnSummary['sales_rep_name'] ?? null,
+        'subtotal'          => $returnSummary['refund_amount'] ?? 0,
+        'discount_amount'   => 0,
+        'total_amount'      => $returnSummary['refund_amount'] ?? 0,
+        'paid_amount'       => $returnSummary['refund_amount'] ?? 0,
+        'notes'             => trim(
+            implode(
+                "\n",
+                array_filter([
+                    !empty($returnSummary['reason']) ? 'سبب الإرجاع: ' . $returnSummary['reason'] : null,
+                    !empty($returnSummary['reason_description']) ? $returnSummary['reason_description'] : null,
+                    $returnSummary['notes'] ?? ''
+                ])
+            )
+        ),
+        'items'             => $normalizedItems,
+        'company_address'   => $returnSummary['company_address'] ?? null,
+        'company_phone'     => $returnSummary['company_phone'] ?? null,
+        'company_email'     => $returnSummary['company_email'] ?? null,
+        'company_tax_number'=> $returnSummary['company_tax_number'] ?? null,
+    ];
+
+    $returnMetadata = [
+        'invoice_reference' => $returnSummary['invoice_number'] ?? null,
+        'refund_method'     => $returnSummary['refund_method'] ?? null,
+        'return_type'       => $returnSummary['return_type'] ?? null,
+        'refund_amount'     => $returnSummary['refund_amount'] ?? 0,
+    ];
+} else {
+    $invoiceData = $selectedInvoice ?? $invoice ?? null;
+}
 
 if (!$invoiceData) {
-    die('الفاتورة غير موجودة');
+    die($isReturnDocument ? 'المرتجع غير موجود' : 'الفاتورة غير موجودة');
 }
 
 $companyName      = COMPANY_NAME;
@@ -43,21 +103,49 @@ $currencyLabel   = CURRENCY . ' ' . CURRENCY_SYMBOL;
 $facebookPageUrl = 'https://www.facebook.com/yourpage'; // يرجى تعديل هذا الرابط
 $qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=' . urlencode($facebookPageUrl);
 
-$statusLabel = [
-    'draft'    => 'مسودة',
-    'approved' => 'معتمدة',
-    'paid'     => 'مدفوعة',
-    'partial'  => 'مدفوع جزئياً',
-    'cancelled'=> 'ملغاة'
-][$status] ?? 'مسودة';
+$statusLabelsMap = [
+    'draft'     => 'مسودة',
+    'approved'  => 'معتمدة',
+    'paid'      => 'مدفوعة',
+    'partial'   => 'مدفوع جزئياً',
+    'cancelled' => 'ملغاة',
+    'pending'   => 'قيد المراجعة',
+    'processed' => 'تمت المعالجة',
+    'completed' => 'مكتمل',
+    'rejected'  => 'مرفوض'
+];
 
-$statusClass = [
-    'draft'    => 'status-draft',
-    'approved' => 'status-approved',
-    'paid'     => 'status-paid',
-    'partial'  => 'status-partial',
-    'cancelled'=> 'status-cancelled'
-][$status] ?? 'status-draft';
+$statusClassesMap = [
+    'draft'     => 'status-draft',
+    'approved'  => 'status-approved',
+    'paid'      => 'status-paid',
+    'partial'   => 'status-partial',
+    'cancelled' => 'status-cancelled',
+    'pending'   => 'status-draft',
+    'processed' => 'status-approved',
+    'completed' => 'status-paid',
+    'rejected'  => 'status-cancelled'
+];
+
+$statusLabel = $statusLabelsMap[$status] ?? 'مسودة';
+$statusClass = $statusClassesMap[$status] ?? 'status-draft';
+
+$documentTitleText = $isReturnDocument ? 'فاتورة مرتجع' : 'فاتورة مبيعات';
+$documentNumberLabel = $isReturnDocument ? 'رقم المرتجع' : 'رقم الفاتورة';
+$summaryTitleText = $isReturnDocument ? 'ملخص المرتجع' : 'ملخص الفاتورة';
+
+$returnRefundLabels = [
+    'cash'             => 'إرجاع نقداً',
+    'credit'           => 'إضافة لرصيد العميل',
+    'exchange'         => 'استبدال منتجات',
+    'company_request'  => 'طلب المبلغ من الشركة'
+];
+$returnTypeLabels = [
+    'full'    => 'مرتجع كامل',
+    'partial' => 'مرتجع جزئي'
+];
+$returnRefundLabel = $isReturnDocument ? ($returnRefundLabels[$returnMetadata['refund_method'] ?? ''] ?? 'غير محدد') : '';
+$returnTypeLabel = $isReturnDocument ? ($returnTypeLabels[$returnMetadata['return_type'] ?? ''] ?? 'غير محدد') : '';
 ?>
 
 <div class="invoice-wrapper" id="invoicePrint">
@@ -74,8 +162,8 @@ $statusClass = [
                 </div>
             </div>
             <div class="invoice-meta">
-                <div class="invoice-title">فاتورة مبيعات</div>
-                <div class="invoice-number">رقم الفاتورة<span><?php echo htmlspecialchars($invoiceData['invoice_number']); ?></span></div>
+                <div class="invoice-title"><?php echo htmlspecialchars($documentTitleText); ?></div>
+                <div class="invoice-number"><?php echo htmlspecialchars($documentNumberLabel); ?><span><?php echo htmlspecialchars($invoiceData['invoice_number']); ?></span></div>
                 <div class="invoice-meta-grid">
                     <div class="meta-item">
                         <span>تاريخ الإصدار</span>
@@ -157,7 +245,7 @@ $statusClass = [
 
         <section class="summary-grid">
             <div class="summary-card">
-                <div class="summary-title">ملخص الفاتورة</div>
+                <div class="summary-title"><?php echo htmlspecialchars($summaryTitleText); ?></div>
                 <div class="summary-row">
                     <span>المجموع الفرعي</span>
                     <strong><?php echo formatCurrency($subtotal); ?></strong>
@@ -183,6 +271,29 @@ $statusClass = [
                     </strong>
                 </div>
             </div>
+            <?php if ($isReturnDocument): ?>
+                <div class="summary-card">
+                    <div class="summary-title">تفاصيل الإرجاع</div>
+                    <?php if (!empty($returnMetadata['invoice_reference'])): ?>
+                        <div class="summary-row">
+                            <span>فاتورة مرتبطة</span>
+                            <strong><?php echo htmlspecialchars($returnMetadata['invoice_reference']); ?></strong>
+                        </div>
+                    <?php endif; ?>
+                    <div class="summary-row">
+                        <span>طريقة الإرجاع</span>
+                        <strong><?php echo htmlspecialchars($returnRefundLabel); ?></strong>
+                    </div>
+                    <div class="summary-row">
+                        <span>نوع المرتجع</span>
+                        <strong><?php echo htmlspecialchars($returnTypeLabel); ?></strong>
+                    </div>
+                    <div class="summary-row">
+                        <span>القيمة المرتجعة</span>
+                        <strong><?php echo formatCurrency($returnMetadata['refund_amount'] ?? 0); ?></strong>
+                    </div>
+                </div>
+            <?php endif; ?>
             <div class="summary-card qr-card">
                 <div class="summary-title">تابعنا على فيسبوك</div>
                 <div class="qr-wrapper">

@@ -256,10 +256,12 @@ function getReturns($filters = [], $limit = 100, $offset = 0) {
     $selectColumns[] = 'c.name as customer_name';
     $selectColumns[] = 'u.full_name as sales_rep_name';
     $selectColumns[] = 'u2.full_name as approved_by_name';
+    $selectColumns[] = 'i.invoice_number';
     
     $sql = "SELECT " . implode(', ', $selectColumns) . "
             FROM returns r
             LEFT JOIN sales s ON r.sale_id = s.id
+            LEFT JOIN invoices i ON r.invoice_id = i.id
             LEFT JOIN customers c ON r.customer_id = c.id
             LEFT JOIN users u ON r.sales_rep_id = u.id
             LEFT JOIN users u2 ON r.approved_by = u2.id
