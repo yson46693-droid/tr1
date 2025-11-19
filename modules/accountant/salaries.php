@@ -992,204 +992,227 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 }
 ?>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;600;700&display=swap');
 
-/* إصلاح مشكلة تجاوز العناصر للشاشة */
 * {
     box-sizing: border-box;
 }
 
-/* Container wrapper للصفحة */
-body .container-fluid,
-body .container {
-    max-width: 100%;
-    overflow-x: hidden;
-    padding-left: 15px;
-    padding-right: 15px;
+body {
+    font-family: 'Tajawal', sans-serif;
 }
 
-/* إصلاح أي عناصر قد تتجاوز العرض */
-.salary-page-header,
-.salary-card,
-.salary-table-wrapper,
-.nav-tabs {
-    max-width: 100%;
-    overflow-x: hidden;
-}
-
+/* Modern Gradient Header */
 .salary-page-header {
-    background: #2d8cf0;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    padding: 20px;
-    border-radius: 12px;
+    padding: 25px 30px;
+    border-radius: 16px;
     margin-bottom: 30px;
-    font-family: 'Cairo', sans-serif;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: hidden;
-    box-sizing: border-box;
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.25);
+    font-family: 'Tajawal', sans-serif;
 }
 
 .salary-page-header h1 {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 700;
     margin: 0;
     color: white;
-    font-family: 'Cairo', sans-serif;
+    font-family: 'Tajawal', sans-serif;
 }
 
 .salary-page-header .header-controls {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 12px;
     flex-wrap: wrap;
-    max-width: 100%;
-    overflow-x: hidden;
 }
 
-.salary-card {
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 30px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    border: 1px solid #e3e8ef;
-    width: 100%;
-    max-width: 100%;
-    overflow-x: auto;
-    box-sizing: border-box;
-}
-
-.salary-card-header {
-    background: #2d8cf0;
+.salary-page-header .header-controls .form-select {
+    background: rgba(255, 255, 255, 0.2);
     color: white;
-    padding: 12px 20px;
-    border-radius: 12px 12px 0 0;
-    margin: -20px -20px 20px -20px;
-    font-family: 'Cairo', sans-serif;
-    font-weight: 700;
-    font-size: 16px;
-    box-sizing: border-box;
-    max-width: calc(100% + 40px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
+    font-weight: 500;
 }
 
-.salary-table-wrapper {
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    border: 1px solid #e3e8ef;
-    overflow-x: auto;
-    overflow-y: visible;
-    -webkit-overflow-scrolling: touch;
-    width: 100%;
-    max-width: 100%;
-    position: relative;
-    box-sizing: border-box;
-}
-
-.salary-table-wrapper::-webkit-scrollbar {
-    height: 8px;
-}
-
-.salary-table-wrapper::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 4px;
-}
-
-.salary-table-wrapper::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 4px;
-}
-
-.salary-table-wrapper::-webkit-scrollbar-thumb:hover {
-    background: #555;
-}
-
-.salary-table-wrapper table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 600px;
-    table-layout: auto;
-    max-width: 100%;
-}
-
-.salary-table-wrapper th,
-.salary-table-wrapper td {
-    padding: 10px 12px;
-    text-align: right;
-    border-bottom: 1px solid #e5e7eb;
-    white-space: normal;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-    max-width: 200px;
-}
-
-.salary-table-wrapper th {
-    background: #f9fafb;
-    font-weight: 600;
-    color: #374151;
-    font-size: 13px;
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    white-space: nowrap;
-    min-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.salary-table-wrapper td {
-    color: #1f2937;
-    font-size: 13px;
-}
-
-.salary-table-wrapper tr:last-child td {
-    border-bottom: none;
-}
-
-.salary-table-wrapper tbody tr:hover {
-    background: #f8f9fc;
-}
-
-.salary-table-wrapper .badge {
-    font-size: 11px;
-    padding: 4px 8px;
-    white-space: nowrap;
-}
-
-.salary-table-wrapper .btn-group-sm .btn {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-}
-
-.btn-primary-salary {
-    background: #2d8cf0;
+.salary-page-header .header-controls .form-select option {
+    background: #667eea;
     color: white;
-    border: none;
-    padding: 10px 20px;
+}
+
+/* Export Buttons */
+.btn-export {
+    background: rgba(255, 255, 255, 0.2);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    padding: 8px 16px;
     border-radius: 8px;
     font-weight: 600;
     font-size: 14px;
-    cursor: pointer;
     transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
 }
 
-.btn-primary-salary:hover {
-    background: #1e7ae6;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(45, 140, 240, 0.3);
+.btn-export:hover {
+    background: rgba(255, 255, 255, 0.3);
     color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.status-badge {
-    padding: 5px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
+/* Employee Cards Grid */
+.employee-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+@media (max-width: 768px) {
+    .employee-cards-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+}
+
+/* Employee Card */
+.employee-card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.employee-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.employee-card-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid #f3f4f6;
+}
+
+/* Profile Icon (WhatsApp-style) */
+.profile-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 24px;
+    font-weight: 700;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.profile-icon.production {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+}
+
+.profile-icon.accountant {
+    background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+}
+
+.profile-icon.sales {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.employee-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.employee-name {
+    font-size: 18px;
+    font-weight: 700;
+    color: #1f2937;
+    margin: 0 0 5px 0;
+    font-family: 'Tajawal', sans-serif;
+}
+
+/* Role Badge */
+.role-badge {
     display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 5px;
 }
 
+.role-badge.production {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.role-badge.accountant {
+    background: #cffafe;
+    color: #0e7490;
+}
+
+.role-badge.sales {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+/* Salary Amount */
+.salary-amount {
+    font-size: 24px;
+    font-weight: 700;
+    color: #059669;
+    margin: 10px 0;
+    font-family: 'Tajawal', sans-serif;
+}
+
+/* Status Badge */
+.status-badge {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    margin: 8px 0;
+}
+
+.status-badge.pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-badge.approved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-badge.paid {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.status-badge.rejected {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.status-badge.not_calculated {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+/* Legacy status classes for advances section */
 .status-pending {
     background: #fef3c7;
     color: #92400e;
@@ -1210,234 +1233,192 @@ body .container {
     color: #991b1b;
 }
 
-/* تحسينات للشاشات المتوسطة */
-@media (max-width: 1200px) {
-    .salary-table-wrapper {
+/* View Details Button */
+.btn-view-details {
+    width: 100%;
+    background: #f9fafb;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+    padding: 10px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 15px;
+}
+
+.btn-view-details:hover {
+    background: #f3f4f6;
+    color: #1f2937;
+    border-color: #d1d5db;
+}
+
+.btn-view-details .arrow-icon {
+    transition: transform 0.3s ease;
+}
+
+.btn-view-details[aria-expanded="true"] .arrow-icon {
+    transform: rotate(180deg);
+}
+
+/* Collapsible Details */
+.salary-details-collapse {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 2px solid #f3f4f6;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.detail-row:last-child {
+    border-bottom: none;
+}
+
+.detail-label {
+    font-weight: 600;
+    color: #6b7280;
+    font-size: 14px;
+}
+
+.detail-value {
+    font-weight: 700;
+    color: #1f2937;
+    font-size: 15px;
+}
+
+.detail-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 15px;
+    flex-wrap: wrap;
+}
+
+.detail-actions .btn {
+    flex: 1;
+    min-width: 80px;
+    font-size: 13px;
+    padding: 8px 12px;
+}
+
+/* Filter Card */
+.filter-card {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 25px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+}
+
+/* Summary Cards for Monthly Report */
+.salary-summary-card {
+    border-radius: 16px;
+    transition: all 0.3s ease;
+    border: none !important;
+}
+
+.salary-summary-card:hover {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 15px 40px rgba(0, 0, 0, 0.25) !important;
+}
+
+.salary-card-blue {
+    background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%) !important;
+}
+
+.salary-card-green {
+    background: linear-gradient(135deg, #059669 0%, #10b981 50%, #34d399 100%) !important;
+}
+
+.salary-card-yellow {
+    background: linear-gradient(135deg, #d97706 0%, #f59e0b 50%, #fbbf24 100%) !important;
+}
+
+/* Button Styles */
+.btn-primary-salary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.btn-primary-salary:hover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    color: white;
+}
+
+/* Advances Section Styling */
+.advances-table-wrapper {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+    overflow-x: auto;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .salary-page-header {
+        padding: 20px;
+    }
+    
+    .salary-page-header h1 {
+        font-size: 22px;
+    }
+    
+    .employee-card {
         padding: 15px;
     }
     
-    .salary-table-wrapper table {
-        min-width: 500px;
-        font-size: 13px;
+    .profile-icon {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
     }
     
-    .salary-table-wrapper th,
-    .salary-table-wrapper td {
-        max-width: 150px;
-        padding: 8px 10px;
-        font-size: 12px;
+    .employee-name {
+        font-size: 16px;
+    }
+    
+    .salary-amount {
+        font-size: 20px;
     }
 }
 
-/* تحسينات للشاشات الصغيرة */
-@media (max-width: 768px) {
+@media (max-width: 576px) {
     .salary-page-header {
         padding: 15px;
-        margin-bottom: 20px;
     }
     
     .salary-page-header h1 {
         font-size: 18px;
     }
     
-    .salary-page-header .header-controls {
-        margin-top: 10px;
+    .header-controls {
         width: 100%;
     }
     
-    .salary-page-header .header-controls .btn,
-    .salary-page-header .header-controls .form-select {
+    .header-controls .form-select,
+    .header-controls .btn-export {
         width: 100%;
-        margin-bottom: 5px;
-    }
-    
-    .salary-card,
-    .salary-table-wrapper {
-        padding: 12px;
-        margin-bottom: 20px;
-        border-radius: 8px;
-    }
-    
-    .salary-table-wrapper {
-        padding: 10px;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-    
-    .salary-table-wrapper table {
-        min-width: 600px;
-        font-size: 12px;
-    }
-    
-    .salary-table-wrapper th,
-    .salary-table-wrapper td {
-        padding: 8px 6px;
-        font-size: 11px;
-        max-width: 120px;
-    }
-    
-    .salary-table-wrapper th {
-        font-size: 11px;
-        white-space: nowrap;
-        min-width: 80px;
-    }
-    
-    .badge {
-        font-size: 10px;
-        padding: 4px 8px;
-    }
-    
-    .salary-table-wrapper .badge {
-        font-size: 9px;
-        padding: 3px 6px;
-    }
-    
-    .salary-table-wrapper .btn-group-sm .btn {
-        padding: 0.2rem 0.4rem;
-        font-size: 0.7rem;
-    }
-    
-    .btn-primary-salary {
-        padding: 8px 15px;
-        font-size: 12px;
-    }
-    
-    /* تحسين بطاقات الملخص */
-    .salary-summary-card h2 {
-        font-size: 1.1rem !important;
-    }
-    
-    .salary-summary-card .card-body {
-        padding: 0.75rem !important;
-    }
-    
-    .salary-summary-card i {
-        font-size: 1.2rem !important;
-    }
-    
-    /* تحسين الفلاتر */
-    .row.g-3 > div {
-        margin-bottom: 10px;
-    }
-    
-    /* تحسين النماذج */
-    .form-select,
-    .form-control {
-        font-size: 14px;
-    }
-    
-    /* تحسين الأزرار */
-    .btn-group {
-        flex-wrap: wrap;
-    }
-    
-    .btn-group .btn {
-        margin-bottom: 5px;
-    }
-}
-
-/* تحسينات للشاشات الصغيرة جداً */
-@media (max-width: 576px) {
-    .salary-page-header {
-        padding: 12px;
-    }
-    
-    .salary-page-header h1 {
-        font-size: 16px;
-    }
-    
-    .salary-card,
-    .salary-table-wrapper {
-        padding: 10px;
-        margin-bottom: 15px;
-    }
-    
-    .salary-table-wrapper table {
-        min-width: 500px;
-        font-size: 11px;
-    }
-    
-    .salary-table-wrapper th,
-    .salary-table-wrapper td {
-        padding: 6px 4px;
-        font-size: 10px;
-        max-width: 100px;
-    }
-    
-    .salary-table-wrapper th {
-        font-size: 10px;
-        min-width: 70px;
-    }
-    
-    .badge {
-        font-size: 9px;
-        padding: 3px 6px;
-    }
-    
-    .salary-table-wrapper .badge {
-        font-size: 8px;
-        padding: 2px 5px;
-    }
-    
-    .salary-table-wrapper .btn-group-sm .btn {
-        padding: 0.15rem 0.3rem;
-        font-size: 0.65rem;
-    }
-    
-    .btn-primary-salary {
-        padding: 6px 12px;
-        font-size: 11px;
-    }
-    
-    /* بطاقات الملخص على الشاشات الصغيرة */
-    .salary-summary-card h2 {
-        font-size: 0.95rem !important;
-    }
-    
-    .salary-summary-card h6 {
-        font-size: 0.65rem !important;
-    }
-    
-    .salary-summary-card .card-body {
-        padding: 0.45rem !important;
-    }
-    
-    .salary-summary-card i {
-        font-size: 1.1rem !important;
-    }
-    
-    /* تحسين النماذج على الشاشات الصغيرة */
-    .form-select,
-    .form-control {
-        font-size: 13px;
-    }
-    
-    /* تحسين الأزرار */
-    .btn {
-        font-size: 11px;
-        padding: 5px 10px;
-    }
-    
-    /* تحسين المجموعات */
-    .btn-group {
-        display: flex;
-        flex-direction: column;
-        width: 100%;
-    }
-    
-    .btn-group .btn {
-        width: 100%;
-        margin-bottom: 5px;
-    }
-    
-    /* تحسين Modals */
-    .modal-dialog {
-        margin: 10px;
-        max-width: calc(100% - 20px);
-    }
-    
-    .modal-content {
-        padding: 15px;
+        margin-bottom: 8px;
     }
 }
 </style>
@@ -1454,7 +1435,7 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
         <div class="d-flex justify-content-between align-items-center flex-wrap">
             <h1>السلف - <?php echo htmlspecialchars($monthName); ?> <?php echo $selectedYear; ?></h1>
             <div class="header-controls">
-                <a href="<?php echo htmlspecialchars($buildViewUrl('list')); ?>" class="btn btn-light">
+                <a href="<?php echo htmlspecialchars($buildViewUrl('list')); ?>" class="btn btn-export">
                     <i class="bi bi-arrow-right me-2"></i>الرجوع
                 </a>
             </div>
@@ -1485,14 +1466,14 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
             <form method="GET" class="d-inline" action="<?php echo htmlspecialchars($currentUrl); ?>">
                 <input type="hidden" name="page" value="salaries">
                 <input type="hidden" name="view" value="<?php echo htmlspecialchars($view); ?>">
-                <select name="month" class="form-select d-inline" style="width: 140px; max-width: 100%; font-size: 14px; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);" onchange="this.form.submit()">
+                <select name="month" class="form-select d-inline" style="width: 140px; max-width: 100%;" onchange="this.form.submit()">
                     <?php for ($m = 1; $m <= 12; $m++): ?>
                         <option value="<?php echo $m; ?>" <?php echo $selectedMonth == $m ? 'selected' : ''; ?>>
                             <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
                         </option>
                     <?php endfor; ?>
                 </select>
-                <select name="year" class="form-select d-inline ms-2" style="width: 100px; max-width: 100%; font-size: 14px; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);" onchange="this.form.submit()">
+                <select name="year" class="form-select d-inline ms-2" style="width: 100px; max-width: 100%;" onchange="this.form.submit()">
                     <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
                         <option value="<?php echo $y; ?>" <?php echo $selectedYear == $y ? 'selected' : ''; ?>>
                             <?php echo $y; ?>
@@ -1500,6 +1481,15 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
                     <?php endfor; ?>
                 </select>
             </form>
+            <button type="button" class="btn btn-export" onclick="window.print()" title="طباعة">
+                <i class="bi bi-printer me-1"></i>طباعة
+            </button>
+            <button type="button" class="btn btn-export" onclick="exportToPDF()" title="تصدير PDF">
+                <i class="bi bi-file-pdf me-1"></i>PDF
+            </button>
+            <button type="button" class="btn btn-export" onclick="exportToExcel()" title="تصدير Excel">
+                <i class="bi bi-file-excel me-1"></i>Excel
+            </button>
         </div>
     </div>
 </div>
@@ -1946,195 +1936,202 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
 <!-- تبويب قائمة الرواتب -->
 <div id="listTab" class="tab-content">
     <!-- فلترة -->
-    <div class="salary-card mb-4">
-        <div>
-            <form method="GET" class="row g-3" action="<?php echo htmlspecialchars($currentUrl); ?>">
-                <input type="hidden" name="page" value="salaries">
-                <input type="hidden" name="view" value="list">
-                <div class="col-md-3">
-                    <label class="form-label">الشهر</label>
-                    <select name="month" class="form-select" onchange="this.form.submit()">
-                        <?php for ($m = 1; $m <= 12; $m++): ?>
-                            <option value="<?php echo $m; ?>" <?php echo $selectedMonth == $m ? 'selected' : ''; ?>>
-                                <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
-                            </option>
-                        <?php endfor; ?>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">السنة</label>
-                    <select name="year" class="form-select" onchange="this.form.submit()">
-                        <?php for ($y = date('Y'); $y >= date('Y') - 2; $y--): ?>
-                            <option value="<?php echo $y; ?>" <?php echo $selectedYear == $y ? 'selected' : ''; ?>>
-                                <?php echo $y; ?>
-                            </option>
-                        <?php endfor; ?>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">المستخدم</label>
-                    <select name="user_id" class="form-select" onchange="this.form.submit()">
-                        <option value="0">جميع المستخدمين</option>
-                        <?php 
-                        require_once __DIR__ . '/../../includes/path_helper.php';
-                        $selectedUserIdValid = isValidSelectValue($selectedUserId, $users, 'id');
-                        foreach ($users as $user): ?>
-                            <option value="<?php echo $user['id']; ?>" <?php echo $selectedUserIdValid && $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($user['full_name'] ?? $user['username']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">&nbsp;</label>
-                    <button type="button" class="btn btn-primary-salary w-100" onclick="showMonthlyReport()">
-                        <i class="bi bi-file-earmark-text me-2"></i>تقرير شهري شامل
-                    </button>
-                </div>
-            </form>
-        </div>
+    <div class="filter-card">
+        <form method="GET" class="row g-3" action="<?php echo htmlspecialchars($currentUrl); ?>">
+            <input type="hidden" name="page" value="salaries">
+            <input type="hidden" name="view" value="list">
+            <div class="col-md-3">
+                <label class="form-label">الشهر</label>
+                <select name="month" class="form-select" onchange="this.form.submit()">
+                    <?php for ($m = 1; $m <= 12; $m++): ?>
+                        <option value="<?php echo $m; ?>" <?php echo $selectedMonth == $m ? 'selected' : ''; ?>>
+                            <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">السنة</label>
+                <select name="year" class="form-select" onchange="this.form.submit()">
+                    <?php for ($y = date('Y'); $y >= date('Y') - 2; $y--): ?>
+                        <option value="<?php echo $y; ?>" <?php echo $selectedYear == $y ? 'selected' : ''; ?>>
+                            <?php echo $y; ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">المستخدم</label>
+                <select name="user_id" class="form-select" onchange="this.form.submit()">
+                    <option value="0">جميع المستخدمين</option>
+                    <?php 
+                    require_once __DIR__ . '/../../includes/path_helper.php';
+                    $selectedUserIdValid = isValidSelectValue($selectedUserId, $users, 'id');
+                    foreach ($users as $user): ?>
+                        <option value="<?php echo $user['id']; ?>" <?php echo $selectedUserIdValid && $selectedUserId == $user['id'] ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($user['full_name'] ?? $user['username']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <button type="button" class="btn btn-primary-salary w-100" onclick="showMonthlyReport()">
+                    <i class="bi bi-file-earmark-text me-2"></i>تقرير شهري شامل
+                </button>
+            </div>
+        </form>
     </div>
 
-    <!-- قائمة الرواتب -->
-    <div class="salary-card">
-        <div class="salary-card-header">
-            <h5 class="mb-0">رواتب <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?></h5>
+    <!-- قائمة الرواتب - Employee Cards -->
+    <?php if (empty($salaries)): ?>
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+            <h5>لا توجد رواتب مسجلة</h5>
         </div>
-        <div class="salary-table-wrapper">
-            <table class="table table-hover align-middle">
-                    <thead>
-                        <tr>
-                            <th>المستخدم</th>
-                            <th>سعر الساعة</th>
-                            <th>عدد الساعات</th>
-                            <th>الراتب الأساسي</th>
-                            <th>مكافأة</th>
-                            <th>خصومات</th>
-                            <th>الإجمالي</th>
-                            <th>المبلغ التراكمي</th>
-                            <th>المبلغ المدفوع</th>
-                            <th>المتبقي</th>
-                            <th>الحالة</th>
-                            <th>الإجراءات</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($salaries)): ?>
-                            <tr>
-                                <td colspan="12" class="text-center text-muted">لا توجد رواتب مسجلة</td>
-                            </tr>
-                        <?php else: ?>
-                            <?php foreach ($salaries as $salary): ?>
-                                <?php 
-                                $hasSalaryId = !empty($salary['id']);
-                                $roleLabels = [
-                                    'production' => 'إنتاج',
-                                    'accountant' => 'محاسب',
-                                    'sales' => 'مندوب مبيعات'
-                                ];
-                                $roleLabel = $roleLabels[$salary['role']] ?? $salary['role'];
-                                ?>
-                                <tr>
-                                    <td data-label="المستخدم">
-                                        <strong><?php echo htmlspecialchars($salary['full_name'] ?? $salary['username']); ?></strong>
-                                        <br><small class="text-muted"><?php echo htmlspecialchars($roleLabel); ?></small>
-                                    </td>
-                                    <td data-label="سعر الساعة"><?php echo formatCurrency($salary['hourly_rate'] ?? $salary['current_hourly_rate'] ?? 0); ?></td>
-                                    <td data-label="عدد الساعات"><?php echo number_format($salary['total_hours'] ?? 0, 2); ?> ساعة</td>
-                                    <td data-label="الراتب الأساسي"><?php echo formatCurrency($salary['base_amount'] ?? 0); ?></td>
-                                    <td data-label="مكافأة">
-                                        <?php 
-                                        $bonusAmount = $salary['bonus'] ?? 0;
-                                        if (isset($salary['collections_bonus']) && $salary['collections_bonus'] > 0) {
-                                            echo formatCurrency($bonusAmount);
-                                            echo '<br><small class="text-info">(2% من التحصيلات: ' . formatCurrency($salary['collections_bonus']) . ')</small>';
-                                        } else {
-                                            echo formatCurrency($bonusAmount);
-                                        }
-                                        ?>
-                                    </td>
-                                    <td data-label="خصومات"><?php echo formatCurrency($salary['deductions'] ?? 0); ?></td>
-                                    <td data-label="الإجمالي"><strong><?php echo formatCurrency($salary['total_amount'] ?? 0); ?></strong></td>
-                                    <td data-label="المبلغ التراكمي">
-                                        <strong class="text-primary"><?php echo formatCurrency($salary['accumulated_amount'] ?? $salary['total_amount'] ?? 0); ?></strong>
-                                    </td>
-                                    <td data-label="المبلغ المدفوع">
-                                        <strong class="text-success"><?php echo formatCurrency($salary['paid_amount'] ?? 0); ?></strong>
-                                    </td>
-                                    <td data-label="المتبقي">
-                                        <?php 
-                                        $accumulated = floatval($salary['accumulated_amount'] ?? $salary['total_amount'] ?? 0);
-                                        $paid = floatval($salary['paid_amount'] ?? 0);
-                                        $remaining = max(0, $accumulated - $paid);
-                                        ?>
-                                        <strong class="<?php echo $remaining > 0 ? 'text-warning' : 'text-success'; ?>">
-                                            <?php echo formatCurrency($remaining); ?>
-                                        </strong>
-                                    </td>
-                                    <td data-label="الحالة">
-                                        <span class="badge bg-<?php 
-                                            $status = $salary['status'] ?? 'not_calculated';
-                                            echo $status === 'approved' ? 'success' : 
-                                                ($status === 'rejected' ? 'danger' : 
-                                                ($status === 'paid' ? 'info' : 
-                                                ($status === 'not_calculated' ? 'secondary' : 'warning'))); 
-                                        ?>">
-                                            <?php 
-                                            $statusLabels = [
-                                                'pending' => 'معلق',
-                                                'approved' => 'موافق عليه',
-                                                'rejected' => 'مرفوض',
-                                                'paid' => 'مدفوع',
-                                                'not_calculated' => 'غير محسوب'
-                                            ];
-                                            echo $statusLabels[$status] ?? 'غير محدد';
-                                            ?>
-                                        </span>
-                                    </td>
-                                    <td data-label="الإجراءات">
-                                        <?php if ($hasSalaryId): ?>
-                                        <div class="btn-group btn-group-sm" role="group">
-                                            <button class="btn btn-info" 
-                                                    onclick="viewSalaryDetails(<?php echo $salary['id']; ?>)" 
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#salaryDetailsModal"
-                                                    data-salary-id="<?php echo $salary['id']; ?>"
-                                                    title="تفاصيل">
-                                                <i class="bi bi-eye"></i>
-                                            </button>
-                                            <button class="btn btn-warning" 
-                                                    onclick="openModifyModal(<?php echo $salary['id']; ?>, <?php echo htmlspecialchars(json_encode($salary), ENT_QUOTES); ?>)" 
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#modifySalaryModal"
-                                                    title="تعديل">
-                                                <i class="bi bi-pencil"></i>
-                                            </button>
-                                            <?php 
-                                            $accumulated = floatval($salary['accumulated_amount'] ?? $salary['total_amount'] ?? 0);
-                                            $paid = floatval($salary['paid_amount'] ?? 0);
-                                            $remaining = max(0, $accumulated - $paid);
-                                            if ($remaining > 0):
-                                            ?>
-                                            <button class="btn btn-success" 
-                                                    onclick="openSettleModal(<?php echo $salary['id']; ?>, <?php echo htmlspecialchars(json_encode($salary), ENT_QUOTES); ?>, <?php echo $remaining; ?>)" 
-                                                    data-bs-toggle="modal" 
-                                                    data-bs-target="#settleSalaryModal"
-                                                    title="تسوية مستحقات">
-                                                <i class="bi bi-cash-coin"></i>
-                                            </button>
-                                            <?php endif; ?>
-                                        </div>
-                                        <?php else: ?>
-                                        <span class="text-muted small">غير متاح</span>
-                                        <?php endif; ?>
-                                    </td>
-                                </tr>
-                            <?php endforeach; ?>
+    <?php else: ?>
+        <div class="employee-cards-grid">
+            <?php foreach ($salaries as $salary): ?>
+                <?php 
+                $hasSalaryId = !empty($salary['id']);
+                $roleLabels = [
+                    'production' => 'إنتاج',
+                    'accountant' => 'محاسب',
+                    'sales' => 'مندوب مبيعات'
+                ];
+                $roleLabel = $roleLabels[$salary['role']] ?? $salary['role'];
+                $roleClass = $salary['role'] ?? 'production';
+                $employeeName = htmlspecialchars($salary['full_name'] ?? $salary['username']);
+                $firstName = mb_substr($employeeName, 0, 1, 'UTF-8');
+                $status = $salary['status'] ?? 'not_calculated';
+                $accumulated = floatval($salary['accumulated_amount'] ?? $salary['total_amount'] ?? 0);
+                $paid = floatval($salary['paid_amount'] ?? 0);
+                $remaining = max(0, $accumulated - $paid);
+                $totalAmount = floatval($salary['total_amount'] ?? 0);
+                $collapseId = 'collapse_' . ($salary['id'] ?? 'temp_' . uniqid());
+                ?>
+                <div class="employee-card">
+                    <div class="employee-card-header">
+                        <div class="profile-icon <?php echo $roleClass; ?>">
+                            <?php echo $firstName; ?>
+                        </div>
+                        <div class="employee-info">
+                            <h3 class="employee-name"><?php echo $employeeName; ?></h3>
+                            <span class="role-badge <?php echo $roleClass; ?>"><?php echo htmlspecialchars($roleLabel); ?></span>
+                        </div>
+                    </div>
+                    
+                    <div class="salary-amount">
+                        <?php echo formatCurrency($totalAmount); ?>
+                    </div>
+                    
+                    <div>
+                        <span class="status-badge <?php 
+                            echo $status === 'approved' ? 'approved' : 
+                                ($status === 'rejected' ? 'rejected' : 
+                                ($status === 'paid' ? 'paid' : 
+                                ($status === 'not_calculated' ? 'not_calculated' : 'pending'))); 
+                        ?>">
+                            <?php 
+                            $statusLabels = [
+                                'pending' => 'معلق',
+                                'approved' => 'موافق عليه',
+                                'rejected' => 'مرفوض',
+                                'paid' => 'مدفوع',
+                                'not_calculated' => 'غير محسوب'
+                            ];
+                            echo $statusLabels[$status] ?? 'غير محدد';
+                            ?>
+                        </span>
+                        <?php if ($remaining > 0): ?>
+                            <span class="status-badge pending ms-2">
+                                متبقي: <?php echo formatCurrency($remaining); ?>
+                            </span>
                         <?php endif; ?>
-                    </tbody>
-            </table>
+                    </div>
+                    
+                    <button class="btn btn-view-details" type="button" data-bs-toggle="collapse" data-bs-target="#<?php echo $collapseId; ?>" aria-expanded="false" aria-controls="<?php echo $collapseId; ?>">
+                        <span>عرض التفاصيل</span>
+                        <i class="bi bi-chevron-down arrow-icon"></i>
+                    </button>
+                    
+                    <div class="collapse salary-details-collapse" id="<?php echo $collapseId; ?>">
+                        <div class="detail-row">
+                            <span class="detail-label">سعر الساعة:</span>
+                            <span class="detail-value"><?php echo formatCurrency($salary['hourly_rate'] ?? $salary['current_hourly_rate'] ?? 0); ?></span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">عدد الساعات:</span>
+                            <span class="detail-value"><?php echo number_format($salary['total_hours'] ?? 0, 2); ?> ساعة</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">الراتب الأساسي:</span>
+                            <span class="detail-value"><?php echo formatCurrency($salary['base_amount'] ?? 0); ?></span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">مكافأة:</span>
+                            <span class="detail-value">
+                                <?php 
+                                $bonusAmount = $salary['bonus'] ?? 0;
+                                echo formatCurrency($bonusAmount);
+                                if (isset($salary['collections_bonus']) && $salary['collections_bonus'] > 0) {
+                                    echo ' <small class="text-info">(2% من التحصيلات: ' . formatCurrency($salary['collections_bonus']) . ')</small>';
+                                }
+                                ?>
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">خصومات:</span>
+                            <span class="detail-value"><?php echo formatCurrency($salary['deductions'] ?? 0); ?></span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">المبلغ التراكمي:</span>
+                            <span class="detail-value text-primary"><?php echo formatCurrency($accumulated); ?></span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">المبلغ المدفوع:</span>
+                            <span class="detail-value text-success"><?php echo formatCurrency($paid); ?></span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">المتبقي:</span>
+                            <span class="detail-value <?php echo $remaining > 0 ? 'text-warning' : 'text-success'; ?>">
+                                <?php echo formatCurrency($remaining); ?>
+                            </span>
+                        </div>
+                        
+                        <?php if ($hasSalaryId): ?>
+                        <div class="detail-actions">
+                            <button class="btn btn-info btn-sm" 
+                                    onclick="viewSalaryDetails(<?php echo $salary['id']; ?>)" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#salaryDetailsModal"
+                                    data-salary-id="<?php echo $salary['id']; ?>"
+                                    title="تفاصيل">
+                                <i class="bi bi-eye me-1"></i>عرض
+                            </button>
+                            <button class="btn btn-warning btn-sm" 
+                                    onclick="openModifyModal(<?php echo $salary['id']; ?>, <?php echo htmlspecialchars(json_encode($salary), ENT_QUOTES); ?>)" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#modifySalaryModal"
+                                    title="تعديل">
+                                <i class="bi bi-pencil me-1"></i>تعديل
+                            </button>
+                            <?php if ($remaining > 0): ?>
+                            <button class="btn btn-success btn-sm" 
+                                    onclick="openSettleModal(<?php echo $salary['id']; ?>, <?php echo htmlspecialchars(json_encode($salary), ENT_QUOTES); ?>, <?php echo $remaining; ?>)" 
+                                    data-bs-toggle="modal" 
+                                    data-bs-target="#settleSalaryModal"
+                                    title="تسوية مستحقات">
+                                <i class="bi bi-cash-coin me-1"></i>تسوية
+                            </button>
+                            <?php endif; ?>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            <?php endforeach; ?>
         </div>
-    </div>
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 
@@ -2260,14 +2257,12 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
 <?php if ($view === 'advances'): ?>
 <!-- قسم السلف - جدول طلبات السلف فقط -->
 <?php if (empty($advances)): ?>
-    <div class="salary-card">
-        <div class="text-center text-muted py-5">
-            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-            <h5>لا توجد طلبات سلف</h5>
-        </div>
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+        <h5>لا توجد طلبات سلف</h5>
     </div>
 <?php else: ?>
-    <div class="salary-table-wrapper">
+    <div class="advances-table-wrapper">
         <table class="table align-middle">
                     <thead>
                         <tr>
@@ -2450,6 +2445,33 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
 <?php endif; ?>
 
 <script>
+// Export Functions
+function exportToPDF() {
+    // Placeholder for PDF export - can be connected to backend handler
+    alert('تصدير PDF - سيتم إضافة هذه الوظيفة قريباً');
+    // Example: window.location.href = '<?php echo $currentUrl; ?>?page=salaries&export=pdf&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>';
+}
+
+function exportToExcel() {
+    // Placeholder for Excel export - can be connected to backend handler
+    alert('تصدير Excel - سيتم إضافة هذه الوظيفة قريباً');
+    // Example: window.location.href = '<?php echo $currentUrl; ?>?page=salaries&export=excel&month=<?php echo $selectedMonth; ?>&year=<?php echo $selectedYear; ?>';
+}
+
+// Arrow rotation on collapse toggle
+document.addEventListener('DOMContentLoaded', function() {
+    const collapseButtons = document.querySelectorAll('.btn-view-details[data-bs-toggle="collapse"]');
+    collapseButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const arrowIcon = this.querySelector('.arrow-icon');
+            if (arrowIcon) {
+                // Bootstrap will handle the aria-expanded attribute
+                // CSS will handle the rotation based on aria-expanded
+            }
+        });
+    });
+});
+
 function calculateAllSalaries() {
     if (confirm('هل تريد حساب رواتب جميع المستخدمين للشهر الحالي؟')) {
         const form = document.createElement('form');
