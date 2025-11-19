@@ -361,9 +361,9 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                 <i class="bi bi-cart-check"></i>
                             </div>
                         </div>
-                        <div class="stat-card-title">Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª Ø§Ù„Ø´Ù‡Ø±ÙŠØ©</div>
+                        <div class="stat-card-title">المبيعات الشهرية</div>
                         <div class="stat-card-value"><?php echo formatCurrency($monthlySales['total'] ?? 0); ?></div>
-                        <div class="stat-card-description">Ù‡Ø°Ø§ Ø§Ù„Ø´Ù‡Ø±</div>
+                        <div class="stat-card-description">هذا الشهر</div>
                     </div>
                 </div>
 
@@ -380,7 +380,7 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                             Ø§Ø±Ø¬Ø§Ø¹ ÙØ§ØªÙˆØ±Ù‡
                         </button>
                         <button type="button" class="btn btn-danger btn-lg px-5" id="damagedReturnButton">
-                            Ø§Ø±Ø¬Ø§Ø¹ ØªÙˆØ§Ù„Ù
+                            ارجاع توالف
                         </button>
                     </div>
                 </div>
@@ -410,23 +410,23 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
 
                                 <div id="invoiceLookupResults" class="d-none mt-4">
                                     <div class="mb-3">
-                                        <span class="text-muted d-block mb-1">Ø§Ø³Ù… Ø§Ù„Ø¹Ù…ÙŠÙ„</span>
+                                        <span class="text-muted d-block mb-1">اسم العميل</span>
                                         <strong id="invoiceCustomerName">-</strong>
                                     </div>
                                     <div class="table-responsive rounded border">
                                         <table class="table table-sm align-middle mb-0">
                                             <thead class="table-light">
                                                 <tr>
-                                                    <th>Ø§Ø³Ù… Ø§Ù„Ù…Ù†ØªØ¬</th>
-                                                    <th class="text-center">Ø§Ù„ÙƒÙ…ÙŠØ© Ø§Ù„Ù…Ø¨Ø§Ø¹Ø©</th>
-                                                    <th class="text-center">Ø³Ø¹Ø± Ø§Ù„ÙˆØ­Ø¯Ø©</th>
-                                                    <th class="text-center">Ø§Ù„ÙƒÙ…ÙŠØ© Ø§Ù„Ù…Ø±ØªØ¬Ø¹Ø©</th>
-                                                    <th class="text-center">Ø¥Ø¬Ù…Ø§Ù„ÙŠ Ø§Ù„Ù…Ø±ØªØ¬Ø¹</th>
+                                                    <th>اسم المنتج</th>
+                                                    <th class="text-center">الكمية المباعة</th>
+                                                    <th class="text-center">سعر الوحدة</th>
+                                                    <th class="text-center">الكمية المرتجعة</th>
+                                                    <th class="text-center">إجمالي المرتجع</th>
                                                 </tr>
                                             </thead>
                                             <tbody id="invoiceItemsBody">
                                                 <tr>
-                                                    <td colspan="5" class="text-center text-muted py-3">Ø¬Ø§Ø±ÙŠ Ø§Ù„ØªØ¬Ù‡ÙŠØ²...</td>
+                                                    <td colspan="5" class="text-center text-muted py-3">جاري التجهيز...</td>
                                                 </tr>
                                             </tbody>
                                         </table>
@@ -436,12 +436,12 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                         <span class="fw-bold" id="invoiceTotalAmount">0.00</span>
                                     </div>
                                     <div class="d-flex justify-content-between align-items-center mt-2">
-                                        <span class="fw-semibold">Ø§Ù„Ù…Ø¨Ù„Øº Ø§Ù„Ù…Ø±ØªØ¬Ø¹</span>
+                                        <span class="fw-semibold">المبلغ المرتجع</span>
                                         <span class="fw-bold fs-5 text-primary" id="selectedReturnTotal">0.00</span>
                                     </div>
 
                                     <div class="mt-4">
-                                    <span class="fw-semibold d-block mb-2">Ø·Ø±ÙŠÙ‚Ø© Ø§Ø±Ø¬Ø§Ø¹ Ø§Ù„Ù…Ø¨Ù„Øº</span>
+                                    <span class="fw-semibold d-block mb-2">طريقة ارجاع المبلغ</span>
                                         <div class="refund-method-options d-flex flex-column gap-2">
                                             <label class="refund-option border rounded px-3 py-2 d-flex align-items-start gap-2">
                                                 <input type="radio" class="form-check-input mt-1 refund-method-input" name="refundMethod" value="credit">
@@ -453,8 +453,8 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                             <label class="refund-option border rounded px-3 py-2 d-flex align-items-start gap-2">
                                                 <input type="radio" class="form-check-input mt-1 refund-method-input" name="refundMethod" value="cash">
                                                 <div>
-                                                    <div class="fw-semibold">Ø¥Ø±Ø¬Ø§Ø¹ Ù†Ù‚Ø¯Ø§Ù‹</div>
-                                                    <div class="text-muted small">ØªØ³ØªØ±Ø¯ Ø§Ù„Ù…Ø¨Ù„Øº Ù…Ù† Ø®Ø²Ù†Ø© Ø§Ù„Ù…Ù†Ø¯ÙˆØ¨.</div>
+                                                    <div class="fw-semibold">ارجاع نقداً</div>
+                                                    <div class="text-muted small">تسترجع المبلغ من خزنة المندوب.</div>
                                                 </div>
                                             </label>
                                             <label class="refund-option border rounded px-3 py-2 d-flex align-items-start gap-2 position-relative">
@@ -474,7 +474,7 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                                         <div id="invoiceSubmitFeedback" class="alert d-none mb-3" role="alert"></div>
                                         <div class="d-flex flex-column flex-sm-row gap-2">
                                             <button type="button" class="btn btn-success flex-fill" id="submitReturnButton">
-                                                <i class="bi bi-arrow-counterclockwise me-1"></i>ØªØ³Ø¬ÙŠÙ„ Ø§Ù„Ù…Ø±ØªØ¬Ø¹
+                                                <i class="bi bi-arrow-counterclockwise me-1"></i>تسجيل المرتجع
                                             </button>
                                             <a href="#" class="btn btn-outline-primary flex-fill d-none" id="printReturnButton" target="_blank" rel="noopener">
                                                 <i class="bi bi-printer me-1"></i>Ø·Ø¨Ø§Ø¹Ø© ÙØ§ØªÙˆØ±Ø© Ø§Ù„Ù…Ø±ØªØ¬Ø¹
@@ -488,7 +488,7 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 </div>
 
             <?php elseif ($page === 'audit'): ?>
-                <h2><i class="bi bi-journal-text me-2"></i><?php echo isset($lang['audit_logs']) ? $lang['audit_logs'] : 'Ø³Ø¬Ù„ Ø§Ù„ØªØ¯Ù‚ÙŠÙ‚'; ?></h2>
+                <h2><i class="bi bi-journal-text me-2"></i><?php echo isset($lang['audit_logs']) ? $lang['audit_logs'] : 'سجل التدقيق'; ?></h2>
                 
                 <?php
                 // Pagination
@@ -502,23 +502,23 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 
                 <div class="card shadow-sm">
                     <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">Ø³Ø¬Ù„ Ø§Ù„ØªØ¯Ù‚ÙŠÙ‚ (<?php echo $totalLogs; ?> Ø³Ø¬Ù„)</h5>
+                        <h5 class="mb-0">سجل التدقيق (<?php echo $totalLogs; ?> سجل)</h5>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive dashboard-table-wrapper">
                             <table class="table dashboard-table align-middle">
                                 <thead>
                                     <tr>
-                                        <th>Ø§Ù„Ù…Ø³ØªØ®Ø¯Ù…</th>
-                                        <th>Ø§Ù„Ø¥Ø¬Ø±Ø§Ø¡</th>
-                                        <th>Ø§Ù„Ù†ÙˆØ¹</th>
-                                        <th>Ø§Ù„ØªØ§Ø±ÙŠØ®</th>
+                                        <th>المستخدم</th>
+                                        <th>الإجراء</th>
+                                        <th>النوع</th>
+                                        <th>التاريخ</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php if (empty($logs)): ?>
                                         <tr>
-                                            <td colspan="4" class="text-center text-muted">Ù„Ø§ ØªÙˆØ¬Ø¯ Ø³Ø¬Ù„Ø§Øª</td>
+                                            <td colspan="4" class="text-center text-muted">لا توجد سجلات</td>
                                         </tr>
                                     <?php else: ?>
                                         <?php foreach ($logs as $log): ?>
@@ -581,8 +581,8 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 
             <?php elseif ($page === 'reports'): ?>
                 <div class="page-header mb-4">
-                    <h2 class="mb-1"><i class="bi bi-file-earmark-text me-2"></i><?php echo isset($lang['reports']) ? $lang['reports'] : 'Ø§Ù„ØªÙ‚Ø§Ø±ÙŠØ±'; ?></h2>
-                    <p class="text-muted mb-0">Ø§Ø®ØªØ± Ù‚Ø³Ù… Ø§Ù„ØªÙ‚Ø§Ø±ÙŠØ± Ø§Ù„Ù…Ø·Ù„ÙˆØ¨ Ø¨Ø§Ø³ØªØ®Ø¯Ø§Ù… Ø§Ù„Ø£Ø²Ø±Ø§Ø± Ø§Ù„Ø¹Ù„ÙˆÙŠØ©.</p>
+                    <h2 class="mb-1"><i class="bi bi-file-earmark-text me-2"></i><?php echo isset($lang['reports']) ? $lang['reports'] : 'التقارير'; ?></h2>
+                    <p class="text-muted mb-0">اختر قسم التقارير المطلوب باستخدام الأزرار العلوية.</p>
                 </div>
 
                 <div class="card shadow-sm mb-4">

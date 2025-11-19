@@ -991,10 +991,187 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
     exit;
 }
 ?>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+
+.salary-page-header {
+    background: #2d8cf0;
+    color: white;
+    padding: 25px 30px;
+    border-radius: 12px;
+    margin-bottom: 30px;
+    font-family: 'Cairo', sans-serif;
+}
+
+.salary-page-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 0;
+    color: white;
+    font-family: 'Cairo', sans-serif;
+}
+
+.salary-page-header .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.salary-card {
+    background: white;
+    border-radius: 12px;
+    padding: 25px;
+    margin-bottom: 30px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid #e3e8ef;
+}
+
+.salary-card-header {
+    background: #2d8cf0;
+    color: white;
+    padding: 15px 25px;
+    border-radius: 12px 12px 0 0;
+    margin: -25px -25px 20px -25px;
+    font-family: 'Cairo', sans-serif;
+    font-weight: 700;
+    font-size: 18px;
+}
+
+.salary-table-wrapper {
+    background: white;
+    border-radius: 12px;
+    padding: 25px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid #e3e8ef;
+    overflow-x: auto;
+}
+
+.salary-table-wrapper table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.salary-table-wrapper th,
+.salary-table-wrapper td {
+    padding: 12px 15px;
+    text-align: right;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.salary-table-wrapper th {
+    background: #f9fafb;
+    font-weight: 600;
+    color: #374151;
+    font-size: 14px;
+}
+
+.salary-table-wrapper td {
+    color: #1f2937;
+    font-size: 14px;
+}
+
+.salary-table-wrapper tr:last-child td {
+    border-bottom: none;
+}
+
+.salary-table-wrapper tbody tr:hover {
+    background: #f8f9fc;
+}
+
+.btn-primary-salary {
+    background: #2d8cf0;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-primary-salary:hover {
+    background: #1e7ae6;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(45, 140, 240, 0.3);
+    color: white;
+}
+
+.status-badge {
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.status-pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-approved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-accountant {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.status-rejected {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+@media (max-width: 768px) {
+    .salary-page-header {
+        padding: 20px;
+    }
+    
+    .salary-page-header h1 {
+        font-size: 22px;
+    }
+    
+    .salary-card,
+    .salary-table-wrapper {
+        padding: 15px;
+    }
+    
+    .salary-table-wrapper table {
+        font-size: 13px;
+    }
+    
+    .salary-table-wrapper th,
+    .salary-table-wrapper td {
+        padding: 8px 10px;
+    }
+}
+</style>
+
+<?php 
+$monthName = date('F', mktime(0, 0, 0, $selectedMonth, 1));
+$pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? 'طلبات معلقة' : 'الرواتب');
+?>
+
 <?php if ($view === 'advances'): ?>
     <!-- صفحة السلف - عرض جدول طلبات السلف فقط -->
+    <!-- Header للشهر والسنة -->
+    <div class="salary-page-header">
+        <div class="d-flex justify-content-between align-items-center flex-wrap">
+            <h1>السلف - <?php echo htmlspecialchars($monthName); ?> <?php echo $selectedYear; ?></h1>
+            <div class="header-controls">
+                <a href="<?php echo htmlspecialchars($buildViewUrl('list')); ?>" class="btn btn-light">
+                    <i class="bi bi-arrow-right me-2"></i>الرجوع
+                </a>
+            </div>
+        </div>
+    </div>
+    
     <?php if ($error): ?>
-        <div class="alert alert-danger alert-dismissible fade show" id="errorAlert" data-auto-refresh="true">
+        <div class="alert alert-danger alert-dismissible fade show mb-4" id="errorAlert" data-auto-refresh="true">
             <i class="bi bi-exclamation-triangle-fill me-2"></i>
             <?php echo htmlspecialchars($error); ?>
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
@@ -1002,63 +1179,43 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
     <?php endif; ?>
 
     <?php if ($success): ?>
-        <div class="alert alert-success alert-dismissible fade show" id="successAlert" data-auto-refresh="true">
+        <div class="alert alert-success alert-dismissible fade show mb-4" id="successAlert" data-auto-refresh="true">
             <i class="bi bi-check-circle-fill me-2"></i>
             <?php echo htmlspecialchars($success); ?>
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
     <?php endif; ?>
-    
-    <!-- زر الرجوع -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="mb-0"><i class="bi bi-cash-coin me-2"></i>السلف</h2>
-        <a href="<?php echo htmlspecialchars($buildViewUrl('list')); ?>" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-right me-2"></i>الرجوع
-        </a>
-    </div>
 <?php else: ?>
-<?php if ($error): ?>
-    <div class="alert alert-danger alert-dismissible fade show" id="errorAlert" data-auto-refresh="true">
-        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-        <?php echo htmlspecialchars($error); ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-<?php endif; ?>
-
-<?php if ($success): ?>
-    <div class="alert alert-success alert-dismissible fade show" id="successAlert" data-auto-refresh="true">
-        <i class="bi bi-check-circle-fill me-2"></i>
-        <?php echo htmlspecialchars($success); ?>
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    </div>
-<?php endif; ?>
-
-<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap">
-    <h2 class="mb-0"><i class="bi bi-currency-dollar me-2"></i><?php echo isset($lang['salaries']) ? $lang['salaries'] : 'الرواتب'; ?></h2>
-    <div class="d-flex align-items-center gap-3 mt-2 mt-md-0">
-        <form method="GET" class="d-inline" action="<?php echo htmlspecialchars($currentUrl); ?>">
-            <input type="hidden" name="page" value="salaries">
-            <input type="hidden" name="view" value="<?php echo htmlspecialchars($view); ?>">
-            <select name="month" class="form-select d-inline" style="width: auto;" onchange="this.form.submit()">
-                <?php for ($m = 1; $m <= 12; $m++): ?>
-                    <option value="<?php echo $m; ?>" <?php echo $selectedMonth == $m ? 'selected' : ''; ?>>
-                        <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
-                    </option>
-                <?php endfor; ?>
-            </select>
-            <select name="year" class="form-select d-inline ms-2" style="width: auto;" onchange="this.form.submit()">
-                <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
-                    <option value="<?php echo $y; ?>" <?php echo $selectedYear == $y ? 'selected' : ''; ?>>
-                        <?php echo $y; ?>
-                    </option>
-                <?php endfor; ?>
-            </select>
-        </form>
+<!-- Header للشهر والسنة -->
+<div class="salary-page-header">
+    <div class="d-flex justify-content-between align-items-center flex-wrap">
+        <h1><?php echo htmlspecialchars($pageTitle); ?> - <?php echo htmlspecialchars($monthName); ?> <?php echo $selectedYear; ?></h1>
+        <div class="header-controls">
+            <form method="GET" class="d-inline" action="<?php echo htmlspecialchars($currentUrl); ?>">
+                <input type="hidden" name="page" value="salaries">
+                <input type="hidden" name="view" value="<?php echo htmlspecialchars($view); ?>">
+                <select name="month" class="form-select d-inline" style="width: auto; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);" onchange="this.form.submit()">
+                    <?php for ($m = 1; $m <= 12; $m++): ?>
+                        <option value="<?php echo $m; ?>" <?php echo $selectedMonth == $m ? 'selected' : ''; ?>>
+                            <?php echo date('F', mktime(0, 0, 0, $m, 1)); ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+                <select name="year" class="form-select d-inline ms-2" style="width: auto; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3);" onchange="this.form.submit()">
+                    <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
+                        <option value="<?php echo $y; ?>" <?php echo $selectedYear == $y ? 'selected' : ''; ?>>
+                            <?php echo $y; ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </form>
+        </div>
     </div>
 </div>
 
+<!-- رسائل النجاح والخطأ -->
 <?php if ($error): ?>
-    <div class="alert alert-danger alert-dismissible fade show">
+    <div class="alert alert-danger alert-dismissible fade show mb-4" id="errorAlert" data-auto-refresh="true">
         <i class="bi bi-exclamation-triangle-fill me-2"></i>
         <?php echo htmlspecialchars($error); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
@@ -1066,7 +1223,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 <?php endif; ?>
 
 <?php if ($success): ?>
-    <div class="alert alert-success alert-dismissible fade show">
+    <div class="alert alert-success alert-dismissible fade show mb-4" id="successAlert" data-auto-refresh="true">
         <i class="bi bi-check-circle-fill me-2"></i>
         <?php echo htmlspecialchars($success); ?>
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
@@ -1109,9 +1266,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 
 <?php if ($view !== 'advances' && $showReport && $monthlyReport): ?>
 <!-- تقرير رواتب شهري -->
-<div class="card shadow-sm mb-4">
-    <div class="card-header salary-header-gradient text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
-        <h5 class="mb-0 fw-bold">
+<div class="salary-card mb-4">
+    <div class="salary-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <h5 class="mb-0">
             <i class="bi bi-file-earmark-text me-2"></i>
             تقرير رواتب شهري - <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?>
         </h5>
@@ -1121,7 +1278,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
             </a>
         </div>
     </div>
-    <div class="card-body">
+    <div>
         <!-- ملخص التقرير -->
         <div class="row mb-3 g-2">
             <div class="col-lg-3 col-md-6 col-sm-6">
@@ -1160,8 +1317,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
         </div>
         
         <!-- جدول الرواتب -->
-        <div class="table-responsive dashboard-table-wrapper">
-            <table class="table table-hover dashboard-table align-middle salary-report-table">
+        <div class="salary-table-wrapper">
+            <table class="table table-hover align-middle">
                 <thead>
                     <tr>
                         <th>#</th>
@@ -1497,8 +1654,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 <!-- تبويب قائمة الرواتب -->
 <div id="listTab" class="tab-content">
     <!-- فلترة -->
-    <div class="card shadow-sm mb-4">
-        <div class="card-body">
+    <div class="salary-card mb-4">
+        <div>
             <form method="GET" class="row g-3" action="<?php echo htmlspecialchars($currentUrl); ?>">
                 <input type="hidden" name="page" value="salaries">
                 <input type="hidden" name="view" value="list">
@@ -1547,13 +1704,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
     </div>
 
     <!-- قائمة الرواتب -->
-    <div class="card shadow-sm">
-        <div class="card-header salary-header-gradient text-white">
-            <h5 class="mb-0 fw-bold">رواتب <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?></h5>
+    <div class="salary-card">
+        <div class="salary-card-header">
+            <h5 class="mb-0">رواتب <?php echo date('F', mktime(0, 0, 0, $selectedMonth, 1)); ?> <?php echo $selectedYear; ?></h5>
         </div>
-        <div class="card-body">
-            <div class="table-responsive dashboard-table-wrapper">
-                <table class="table table-hover dashboard-table align-middle salary-report-table">
+        <div class="salary-table-wrapper">
+            <table class="table table-hover align-middle">
                     <thead>
                         <tr>
                             <th>المستخدم</th>
@@ -1684,8 +1840,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                             <?php endforeach; ?>
                         <?php endif; ?>
                     </tbody>
-                </table>
-            </div>
+            </table>
         </div>
     </div>
 </div>
@@ -1694,13 +1849,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 <!-- تبويب الطلبات المعلقة (للمدير فقط) -->
 <?php if ($view !== 'advances' && $currentUser['role'] === 'manager' && !empty($pendingModifications)): ?>
 <div id="pendingTab" class="tab-content" style="display: <?php echo $view === 'pending' ? 'block' : 'none'; ?>;">
-    <div class="card shadow-sm border-warning">
-        <div class="card-header bg-warning text-dark">
+    <div class="salary-card">
+        <div class="salary-card-header" style="background: #f59e0b;">
             <h5 class="mb-0"><i class="bi bi-hourglass-split me-2"></i>طلبات تعديل رواتب معلقة (<?php echo count($pendingModifications); ?>)</h5>
         </div>
-        <div class="card-body">
-            <div class="table-responsive dashboard-table-wrapper">
-                <table class="table dashboard-table dashboard-table--compact align-middle">
+        <div class="salary-table-wrapper">
+            <table class="table align-middle">
                     <thead>
                         <tr>
                             <th>المستخدم</th>
@@ -1729,8 +1883,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
-                </table>
-            </div>
+            </table>
         </div>
     </div>
 </div>
@@ -1815,13 +1968,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
 <?php if ($view === 'advances'): ?>
 <!-- قسم السلف - جدول طلبات السلف فقط -->
 <?php if (empty($advances)): ?>
-    <div class="text-center text-muted py-5">
-        <i class="bi bi-inbox fs-1 d-block mb-3"></i>
-        <h5>لا توجد طلبات سلف</h5>
+    <div class="salary-card">
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+            <h5>لا توجد طلبات سلف</h5>
+        </div>
     </div>
 <?php else: ?>
-    <div class="table-responsive dashboard-table-wrapper">
-        <table class="table dashboard-table align-middle">
+    <div class="salary-table-wrapper">
+        <table class="table align-middle">
                     <thead>
                         <tr>
                             <th>#</th>
@@ -1854,14 +2009,23 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                                 <td><?php echo date('Y-m-d', strtotime($advance['request_date'])); ?></td>
                                 <td>
                                     <?php
-                                    $statusBadges = [
-                                        'pending' => '<span class="badge bg-warning text-dark">قيد الانتظار</span>',
-                                        'accountant_approved' => '<span class="badge bg-info">تم الاستلام</span>',
-                                        'manager_approved' => '<span class="badge bg-success">تمت الموافقة</span>',
-                                        'rejected' => '<span class="badge bg-danger">مرفوض</span>'
+                                    $status = $advance['status'] ?? 'pending';
+                                    $statusLabels = [
+                                        'pending' => 'قيد الانتظار',
+                                        'accountant_approved' => 'قيد مراجعة المحاسب',
+                                        'manager_approved' => 'تمت الموافقة',
+                                        'rejected' => 'مرفوض'
                                     ];
-                                    echo $statusBadges[$advance['status']] ?? $advance['status'];
+                                    $statusClasses = [
+                                        'pending' => 'status-pending',
+                                        'accountant_approved' => 'status-accountant',
+                                        'manager_approved' => 'status-approved',
+                                        'rejected' => 'status-rejected'
+                                    ];
+                                    $statusLabel = $statusLabels[$status] ?? 'غير معروف';
+                                    $statusClass = $statusClasses[$status] ?? 'status-pending';
                                     ?>
+                                    <span class="status-badge <?php echo $statusClass; ?>"><?php echo $statusLabel; ?></span>
                                 </td>
                                 <td>
                                     <?php if ($currentUser['role'] === 'accountant' && $advance['status'] === 'pending'): ?>
@@ -1897,7 +2061,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] == '1' && $salaryId > 0) {
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
-                </table>
+        </table>
     </div>
 <?php endif; ?>
 
