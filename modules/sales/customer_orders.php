@@ -722,14 +722,59 @@ if (isset($_GET['id'])) {
     
     if ($selectedOrder) {
         $orderItemsTable = getOrderItemsTableName($db);
-        $selectedOrder['items'] = $db->query(
-            "SELECT oi.*, p.name as product_name
+        
+        // جلب العناصر مع اسم القالب
+        $items = $db->query(
+            "SELECT oi.*, oi.template_id
              FROM {$orderItemsTable} oi
-             LEFT JOIN products p ON oi.product_id = p.id
              WHERE oi.order_id = ?
              ORDER BY oi.id",
             [$orderId]
         );
+        
+        // جلب أسماء القوالب
+        foreach ($items as &$item) {
+            $templateName = '-';
+            if (!empty($item['template_id'])) {
+                // البحث في unified_product_templates
+                $unifiedCheck = $db->queryOne("SHOW TABLES LIKE 'unified_product_templates'");
+                if (!empty($unifiedCheck)) {
+                    $template = $db->queryOne(
+                        "SELECT COALESCE(product_name, CONCAT('قالب #', id)) as name 
+                         FROM unified_product_templates 
+                         WHERE id = ?",
+                        [$item['template_id']]
+                    );
+                    if ($template) {
+                        $templateName = $template['name'];
+                    }
+                }
+                
+                // إذا لم يُعثر عليه، البحث في product_templates
+                if ($templateName === '-') {
+                    $productTemplatesCheck = $db->queryOne("SHOW TABLES LIKE 'product_templates'");
+                    if (!empty($productTemplatesCheck)) {
+                        $template = $db->queryOne(
+                            "SELECT COALESCE(product_name, CONCAT('قالب #', id)) as name 
+                             FROM product_templates 
+                             WHERE id = ?",
+                            [$item['template_id']]
+                        );
+                        if ($template) {
+                            $templateName = $template['name'];
+                        }
+                    }
+                }
+            }
+            $item['product_name'] = $templateName;
+            // التأكد من وجود production_status
+            if (!isset($item['production_status'])) {
+                $item['production_status'] = 'pending';
+            }
+        }
+        unset($item);
+        
+        $selectedOrder['items'] = $items;
     }
 }
 ?>
@@ -838,14 +883,6 @@ if (isset($_GET['id'])) {
                                 </span>
                             </td>
                         </tr>
-                        <tr>
-                            <th>المجموع الفرعي:</th>
-                            <td><?php echo formatCurrency($selectedOrder['subtotal']); ?></td>
-                        </tr>
-                        <tr>
-                            <th>الإجمالي:</th>
-                            <td><strong><?php echo formatCurrency($selectedOrder['total_amount']); ?></strong></td>
-                        </tr>
                     </table>
                 </div>
             </div>
@@ -856,35 +893,15 @@ if (isset($_GET['id'])) {
                     <table class="table dashboard-table dashboard-table--compact align-middle">
                         <thead>
                             <tr>
-                                <th>المنتج</th>
+                                <th>القالب</th>
                                 <th>الكمية</th>
-                                <th>سعر الوحدة</th>
-                                <th>الإجمالي</th>
-                                <th>حالة الإنتاج</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($selectedOrder['items'] as $item): ?>
                                 <tr>
-                                    <td><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
-                                    <td><?php echo number_format($item['quantity'], 2); ?></td>
-                                    <td><?php echo formatCurrency($item['unit_price']); ?></td>
-                                    <td><?php echo formatCurrency($item['total_price']); ?></td>
-                                    <td>
-                                        <span class="badge bg-<?php 
-                                            echo $item['production_status'] === 'completed' ? 'success' : 
-                                                ($item['production_status'] === 'in_production' ? 'info' : 'warning'); 
-                                        ?>">
-                                            <?php 
-                                            $prodStatuses = [
-                                                'pending' => 'معلق',
-                                                'in_production' => 'قيد الإنتاج',
-                                                'completed' => 'مكتمل'
-                                            ];
-                                            echo $prodStatuses[$item['production_status']] ?? $item['production_status'];
-                                            ?>
-                                        </span>
-                                    </td>
+                                    <td data-label="القالب"><?php echo htmlspecialchars($item['product_name'] ?? '-'); ?></td>
+                                    <td data-label="الكمية"><?php echo number_format($item['quantity'], 2); ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -996,7 +1013,6 @@ if (isset($_GET['id'])) {
                         <th>العميل</th>
                         <th>تاريخ الطلب</th>
                         <th>تاريخ التسليم</th>
-                        <th>المبلغ الإجمالي</th>
                         <?php if (!$isSalesUser): ?>
                             <th>المندوب</th>
                         <?php endif; ?>
@@ -1008,7 +1024,7 @@ if (isset($_GET['id'])) {
                 <tbody>
                     <?php if (empty($orders)): ?>
                         <tr>
-                            <td colspan="<?php echo $isSalesUser ? 8 : 9; ?>" class="text-center text-muted">لا توجد طلبات</td>
+                            <td colspan="<?php echo $isSalesUser ? 7 : 8; ?>" class="text-center text-muted">لا توجد طلبات</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($orders as $order): ?>
@@ -1021,7 +1037,6 @@ if (isset($_GET['id'])) {
                                 <td><?php echo htmlspecialchars($order['customer_name'] ?? '-'); ?></td>
                                 <td><?php echo formatDate($order['order_date']); ?></td>
                                 <td><?php echo $order['delivery_date'] ? formatDate($order['delivery_date']) : '-'; ?></td>
-                                <td><?php echo formatCurrency($order['total_amount']); ?></td>
                                 <?php if (!$isSalesUser): ?>
                                 <td><?php echo htmlspecialchars($order['sales_rep_name'] ?? '-'); ?></td>
                                 <?php endif; ?>
