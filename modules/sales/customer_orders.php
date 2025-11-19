@@ -26,7 +26,9 @@ $success = '';
 function getOrderItemsTableName($db) {
     $tableNames = ['order_items', 'customer_order_items'];
     foreach ($tableNames as $tableName) {
-        $tableCheck = $db->queryOne("SHOW TABLES LIKE ?", [$tableName]);
+        // استخدام escape للاسم الآمن
+        $escapedTableName = $db->escape($tableName);
+        $tableCheck = $db->queryOne("SHOW TABLES LIKE '{$escapedTableName}'");
         if (!empty($tableCheck)) {
             return $tableName;
         }
@@ -219,7 +221,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $orderItemsTable = null;
                 $tableNames = ['order_items', 'customer_order_items'];
                 foreach ($tableNames as $tableName) {
-                    $tableCheck = $db->queryOne("SHOW TABLES LIKE ?", [$tableName]);
+                    // استخدام escape للاسم الآمن
+                    $escapedTableName = $db->escape($tableName);
+                    $tableCheck = $db->queryOne("SHOW TABLES LIKE '{$escapedTableName}'");
                     if (!empty($tableCheck)) {
                         $orderItemsTable = $tableName;
                         break;
