@@ -40,7 +40,7 @@ if (empty($tableCheck)) {
             CREATE TABLE IF NOT EXISTS `returns` (
               `id` int(11) NOT NULL AUTO_INCREMENT,
               `return_number` varchar(50) NOT NULL,
-              `sale_id` int(11) NOT NULL,
+              `sale_id` int(11) DEFAULT NULL,
               `invoice_id` int(11) DEFAULT NULL,
               `customer_id` int(11) NOT NULL,
               `sales_rep_id` int(11) DEFAULT NULL,
@@ -94,6 +94,16 @@ if (empty($tableCheck)) {
             ");
         }
         
+        // تعديل sale_id ليكون nullable للجداول الموجودة
+        try {
+            $saleIdColumn = $db->queryOne("SHOW COLUMNS FROM returns LIKE 'sale_id'");
+            if (!empty($saleIdColumn) && strtoupper($saleIdColumn['Null'] ?? '') === 'NO') {
+                $db->execute("ALTER TABLE returns MODIFY `sale_id` int(11) DEFAULT NULL");
+            }
+        } catch (Exception $e) {
+            error_log("Error modifying sale_id column: " . $e->getMessage());
+        }
+        
         // إضافة Foreign Keys إذا لم تكن موجودة (بعد إنشاء الجداول)
         try {
             $db->execute("
@@ -128,9 +138,19 @@ if (empty($tableCheck)) {
             error_log("Foreign key constraint may already exist: " . $e->getMessage());
         }
         
+        } catch (Exception $e) {
+            error_log("Error creating returns table: " . $e->getMessage());
+            $error = 'حدث خطأ في إنشاء الجدول المطلوب. يرجى التحقق من قاعدة البيانات.';
+        }
+} else {
+    // تعديل sale_id ليكون nullable للجداول الموجودة
+    try {
+        $saleIdColumn = $db->queryOne("SHOW COLUMNS FROM returns LIKE 'sale_id'");
+        if (!empty($saleIdColumn) && strtoupper($saleIdColumn['Null'] ?? '') === 'NO') {
+            $db->execute("ALTER TABLE returns MODIFY `sale_id` int(11) DEFAULT NULL");
+        }
     } catch (Exception $e) {
-        error_log("Error creating returns table: " . $e->getMessage());
-        $error = 'حدث خطأ في إنشاء الجدول المطلوب. يرجى التحقق من قاعدة البيانات.';
+        error_log("Error modifying sale_id column: " . $e->getMessage());
     }
 }
 
@@ -200,6 +220,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $success = 'تم إنشاء المرتجع بنجاح: ' . $result['return_number'];
             } else {
                 $error = $result['message'];
+                // في حالة وجود تفاصيل إضافية للخطأ، أضفها للسجل
+                if (isset($result['error_details'])) {
+                    error_log("Return creation error details: " . $result['error_details']);
+                }
             }
         }
     } elseif ($action === 'approve_return') {
@@ -900,7 +924,7 @@ if (isset($_GET['id'])) {
                 <div class="modal-body">
                     <!-- خطوة 1: إدخال رقم الفاتورة -->
                     <div id="invoiceSearchStep">
-                        <div class="row mb-3">
+                    <div class="row mb-3">
                             <div class="col-md-8">
                                 <label class="form-label">رقم الفاتورة <span class="text-danger">*</span></label>
                                 <div class="input-group">
@@ -909,9 +933,9 @@ if (isset($_GET['id'])) {
                                     <button type="button" class="btn btn-primary" id="fetchInvoiceBtn">
                                         <i class="bi bi-search me-2"></i>جلب بيانات الفاتورة
                                     </button>
-                                </div>
+                        </div>
                                 <div class="invalid-feedback" id="invoiceError"></div>
-                            </div>
+                        </div>
                         </div>
                         <div id="invoiceLoading" class="text-center" style="display: none;">
                             <div class="spinner-border text-primary" role="status">
@@ -977,60 +1001,60 @@ if (isset($_GET['id'])) {
                         </div>
                         
                         <div class="row mb-3">
-                            <div class="col-md-2">
-                                <label class="form-label">تاريخ المرتجع <span class="text-danger">*</span></label>
-                                <input type="date" class="form-control" name="return_date" value="<?php echo date('Y-m-d'); ?>" required>
-                            </div>
-                            <div class="col-md-2">
-                                <label class="form-label">نوع المرتجع</label>
+                        <div class="col-md-2">
+                            <label class="form-label">تاريخ المرتجع <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control" name="return_date" value="<?php echo date('Y-m-d'); ?>" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">نوع المرتجع</label>
                                 <select class="form-select" name="return_type" id="returnType">
-                                    <option value="full">كامل</option>
-                                    <option value="partial">جزئي</option>
-                                </select>
-                            </div>
+                                <option value="full">كامل</option>
+                                <option value="partial">جزئي</option>
+                            </select>
+                        </div>
                             <div class="col-md-3">
-                                <label class="form-label">السبب</label>
-                                <select class="form-select" name="reason">
-                                    <option value="customer_request">طلب العميل</option>
-                                    <option value="defective">منتج معيب</option>
-                                    <option value="wrong_item">منتج خاطئ</option>
-                                    <option value="other">أخرى</option>
-                                </select>
-                            </div>
+                            <label class="form-label">السبب</label>
+                            <select class="form-select" name="reason">
+                                <option value="customer_request">طلب العميل</option>
+                                <option value="defective">منتج معيب</option>
+                                <option value="wrong_item">منتج خاطئ</option>
+                                <option value="other">أخرى</option>
+                            </select>
+                        </div>
                             <div class="col-md-3">
-                                <label class="form-label">طريقة الاسترداد</label>
-                                <select class="form-select" name="refund_method">
-                                    <option value="cash">نقدي</option>
-                                    <option value="credit">رصيد</option>
-                                    <option value="exchange">استبدال</option>
-                                </select>
-                            </div>
+                            <label class="form-label">طريقة الاسترداد</label>
+                            <select class="form-select" name="refund_method">
+                                <option value="cash">نقدي</option>
+                                <option value="credit">رصيد</option>
+                                <option value="exchange">استبدال</option>
+                            </select>
+                        </div>
                         </div>
                         
                         <div class="row mb-3">
                             <div class="col-md-6">
-                                <label class="form-label">وصف السبب</label>
-                                <textarea class="form-control" name="reason_description" rows="2"></textarea>
-                            </div>
+                            <label class="form-label">وصف السبب</label>
+                            <textarea class="form-control" name="reason_description" rows="2"></textarea>
+                        </div>
                             <div class="col-md-6">
                                 <label class="form-label">ملاحظات</label>
                                 <textarea class="form-control" name="notes" rows="2"></textarea>
                             </div>
-                        </div>
-                        
+                    </div>
+                    
                         <div class="alert alert-info">
                             <strong>إجمالي المرتجع:</strong> <span id="totalReturnAmount">0.00</span> ج.م
-                        </div>
-                    </div>
-                </div>
+                                </div>
+                                </div>
+                                </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
                     <button type="button" class="btn btn-outline-secondary" id="backToSearchBtn" style="display: none;">
                         <i class="bi bi-arrow-right me-2"></i>رجوع
-                    </button>
+                                    </button>
                     <button type="submit" class="btn btn-primary" id="submitReturnBtn" style="display: none;">
                         <i class="bi bi-check-circle me-2"></i>إنشاء مرتجع
-                    </button>
+                        </button>
                 </div>
             </form>
         </div>
@@ -1175,11 +1199,11 @@ if (isset($_GET['id'])) {
                 <td>
                     <select class="form-select form-select-sm item-condition" 
                             data-index="${index}" ${isDisabled ? 'disabled' : ''}>
-                        <option value="new">جديد</option>
-                        <option value="used">مستعمل</option>
-                        <option value="damaged">تالف</option>
-                        <option value="defective">معيب</option>
-                    </select>
+                <option value="new">جديد</option>
+                <option value="used">مستعمل</option>
+                <option value="damaged">تالف</option>
+                <option value="defective">معيب</option>
+            </select>
                 </td>
                 <td>
                     <input type="number" step="0.01" min="0" max="${item.remaining_quantity}" 
@@ -1325,12 +1349,12 @@ if (isset($_GET['id'])) {
         
         // إرسال النموذج
         this.submit();
-    });
-    
-    // إعادة تعيين النموذج عند إغلاق المودال
-    const addReturnModalElement = document.getElementById('addReturnModal');
-    if (addReturnModalElement && typeof bootstrap !== 'undefined') {
-        addReturnModalElement.addEventListener('hidden.bs.modal', function() {
+});
+
+// إعادة تعيين النموذج عند إغلاق المودال
+const addReturnModalElement = document.getElementById('addReturnModal');
+if (addReturnModalElement && typeof bootstrap !== 'undefined') {
+    addReturnModalElement.addEventListener('hidden.bs.modal', function() {
             invoiceSearchStep.style.display = 'block';
             invoiceDetailsStep.style.display = 'none';
             backToSearchBtn.style.display = 'none';

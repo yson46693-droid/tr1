@@ -160,8 +160,17 @@ function createReturn($saleId, $customerId, $salesRepId, $returnDate, $returnTyp
         return ['success' => true, 'return_id' => $returnId, 'return_number' => $returnNumber];
         
     } catch (Exception $e) {
-        error_log("Return Creation Error: " . $e->getMessage());
-        return ['success' => false, 'message' => 'حدث خطأ في إنشاء المرتجع'];
+        $errorMessage = $e->getMessage();
+        error_log("Return Creation Error: " . $errorMessage);
+        error_log("Return Creation Error - Stack trace: " . $e->getTraceAsString());
+        
+        // عرض رسالة خطأ أكثر تفصيلاً في وضع التطوير
+        $message = 'حدث خطأ في إنشاء المرتجع';
+        if (defined('DEBUG_MODE') && DEBUG_MODE) {
+            $message .= ': ' . $errorMessage;
+        }
+        
+        return ['success' => false, 'message' => $message, 'error_details' => $errorMessage];
     }
 }
 
