@@ -1055,6 +1055,7 @@ if (isset($_GET['id'])) {
     
     let invoiceData = null;
     let selectedItems = {};
+    let currentInvoiceItems = [];
     
     // تنسيق العملة
     function formatCurrency(amount) {
@@ -1080,7 +1081,14 @@ if (isset($_GET['id'])) {
         invoiceLoading.style.display = 'block';
         fetchInvoiceBtn.disabled = true;
         
-        fetch('api/get_invoice_for_return.php?invoice_number=' + encodeURIComponent(invoiceNumber))
+        // حساب المسار الصحيح للـ API
+        const currentPath = window.location.pathname;
+        const pathParts = currentPath.split('/').filter(p => p);
+        const dashboardIndex = pathParts.indexOf('dashboard');
+        const basePath = dashboardIndex !== -1 ? '/' + pathParts.slice(0, dashboardIndex).join('/') : '';
+        const apiPath = (basePath + '/api/get_invoice_for_return.php').replace(/\/+/g, '/');
+        
+        fetch(apiPath + '?invoice_number=' + encodeURIComponent(invoiceNumber))
             .then(response => response.json())
             .then(data => {
                 invoiceLoading.style.display = 'none';
@@ -1132,9 +1140,10 @@ if (isset($_GET['id'])) {
     function displayInvoiceItems(items) {
         invoiceItemsTable.innerHTML = '';
         selectedItems = {};
+        currentInvoiceItems = items;
         
         if (items.length === 0) {
-            invoiceItemsTable.innerHTML = '<tr><td colspan="8" class="text-center text-muted">لا توجد عناصر في هذه الفاتورة</td></tr>';
+            invoiceItemsTable.innerHTML = '<tr><td colspan="9" class="text-center text-muted">لا توجد عناصر في هذه الفاتورة</td></tr>';
             return;
         }
         
@@ -1215,7 +1224,7 @@ if (isset($_GET['id'])) {
                     const index = parseInt(cb.getAttribute('data-index'));
                     const row = cb.closest('tr');
                     const quantityInput = row.querySelector('.item-quantity');
-                    const item = items[index];
+                    const item = currentInvoiceItems[index];
                     updateItemSelection(index, true, quantityInput.value, item);
                 } else {
                     const index = parseInt(cb.getAttribute('data-index'));
