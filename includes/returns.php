@@ -327,40 +327,66 @@ function approveReturn($returnId, $approvedBy = null) {
         // حساب مبلغ المرتجع الفعلي
         $refundAmount = (float)($return['refund_amount'] ?? 0);
         
+        // جلب رصيد العميل الحالي
+        $customer = $db->queryOne("SELECT balance FROM customers WHERE id = ? FOR UPDATE", [$customerId]);
+        $currentBalance = (float)($customer['balance'] ?? 0);
+        
+        // حساب الرصيد المدين (إذا كان الرصيد موجب، فهذا يعني رصيد مدين = العميل مدين للشركة)
+        $debtorBalance = $currentBalance > 0 ? $currentBalance : 0;
+        
+        // المبلغ المتبقي بعد استخدام الرصيد المدين
+        $remainingRefund = $refundAmount;
+        $debtorUsed = 0;
+        
         if ($invoice && $invoicePaidAmount > 0) {
             // الفاتورة مدفوعة (كلياً أو جزئياً)
             // المبلغ الذي يجب إرجاعه = الحد الأدنى بين المبلغ المدفوع وقيمة المرتجعات
             $amountToRefund = min($invoicePaidAmount, $refundAmount);
             
-            if ($return['refund_method'] === 'cash') {
-                // طريقة الإرجاع: نقداً
-                // خصم المبلغ المدفوع من خزينة المندوب (من خلال collections)
-                if ($salesRepId > 0 && $amountToRefund > 0) {
-                    require_once __DIR__ . '/approval_system.php';
-                    
-                    // التحقق من رصيد خزنة المندوب
-                    $cashBalance = calculateSalesRepCashBalance($salesRepId);
-                    if ($cashBalance + 0.0001 < $amountToRefund) {
-                        throw new Exception('رصيد خزنة المندوب لا يغطي قيمة المرتجع المطلوبة. الرصيد الحالي: ' . number_format($cashBalance, 2) . ' ج.م');
+            // إذا كان المرتجع مدفوعاً وكان للعميل رصيد مدين، استخدم الرصيد المدين أولاً
+            if ($amountToRefund > 0.0001 && $debtorBalance > 0.0001) {
+                // استخدام الرصيد المدين للمبلغ المدفوع فقط
+                $debtorUsed = min($debtorBalance, $amountToRefund);
+                $remainingRefund = round($refundAmount - $debtorUsed, 2);
+                
+                // تحديث رصيد العميل (خصم الرصيد المدين المستخدم)
+                $newBalance = round($currentBalance - $debtorUsed, 2);
+                $db->execute("UPDATE customers SET balance = ? WHERE id = ?", [$newBalance, $customerId]);
+            } else {
+                $newBalance = $currentBalance;
+            }
+            
+            // إذا كان هناك مبلغ متبقي بعد استخدام الرصيد المدين
+            if ($remainingRefund > 0.0001) {
+                // استخدام المبلغ الأصغر بين المبلغ المتبقي والمبلغ المدفوع
+                $amountToProcess = min($remainingRefund, $amountToRefund);
+                
+                if ($return['refund_method'] === 'cash') {
+                    // طريقة الإرجاع: نقداً
+                    // خصم المبلغ المتبقي من خزينة المندوب (من خلال collections)
+                    if ($salesRepId > 0 && $amountToProcess > 0) {
+                        require_once __DIR__ . '/approval_system.php';
+                        
+                        // التحقق من رصيد خزنة المندوب
+                        $cashBalance = calculateSalesRepCashBalance($salesRepId);
+                        if ($cashBalance + 0.0001 < $amountToProcess) {
+                            throw new Exception('رصيد خزنة المندوب لا يغطي قيمة المرتجع المتبقية. الرصيد الحالي: ' . number_format($cashBalance, 2) . ' ج.م والمبلغ المطلوب: ' . number_format($amountToProcess, 2) . ' ج.م');
+                        }
+                        
+                        // خصم المبلغ من خزينة المندوب
+                        insertNegativeCollection($customerId, $salesRepId, $amountToProcess, $return['return_number'], $approvedBy);
                     }
-                    
-                    // خصم المبلغ من خزينة المندوب
-                    insertNegativeCollection($customerId, $salesRepId, $amountToRefund, $return['return_number'], $approvedBy);
-                }
-            } elseif ($return['refund_method'] === 'credit') {
-                // طريقة الإرجاع: رصيد للعميل
-                // إضافة المبلغ المدفوع إلى رصيد العميل الدائن (تقليل الدين)
-                $customer = $db->queryOne("SELECT balance FROM customers WHERE id = ? FOR UPDATE", [$customerId]);
-                if ($customer) {
-                    $currentBalance = (float)($customer['balance'] ?? 0);
-                    $newBalance = $currentBalance - $amountToRefund; // تقليل الدين (الرصيد المدين)
+                } elseif ($return['refund_method'] === 'credit') {
+                    // طريقة الإرجاع: رصيد للعميل
+                    // إضافة المبلغ المتبقي إلى رصيد العميل الدائن (تقليل الدين)
+                    $finalBalance = round($newBalance - $amountToProcess, 2);
                     $db->execute(
                         "UPDATE customers SET balance = ? WHERE id = ?",
-                        [$newBalance, $customerId]
+                        [$finalBalance, $customerId]
                     );
                 }
-                // لا يتم خصم من خزينة المندوب
             }
+            // إذا تم استخدام الرصيد المدين بالكامل، لا حاجة لخصم من خزنة المندوب
             
             // خصم 2% من عمولة المندوب من المبلغ المدفوع
             if ($salesRepId > 0 && $amountToRefund > 0) {
@@ -450,17 +476,28 @@ function approveReturn($returnId, $approvedBy = null) {
                             $params
                         );
                         
-                        // تحديث ملاحظات الراتب لتوثيق الخصم
-                        $currentNotes = $salary['notes'] ?? '';
+                        // تحديث ملاحظات الراتب لتوثيق الخصم (إذا كان عمود notes موجوداً)
+                        $hasNotesColumn = false;
+                        foreach ($columns as $column) {
+                            $field = $column['Field'] ?? '';
+                            if ($field === 'notes') {
+                                $hasNotesColumn = true;
+                                break;
+                            }
+                        }
+                        
+                        if ($hasNotesColumn) {
+                            $currentNotes = $salary['notes'] ?? '';
                             $deductionNote = "\n[خصم عمولة مرتجع]: تم خصم " . number_format($commissionDeduction, 2) . 
                                             " ج.م (2% من المبلغ المدفوع " . number_format($amountToRefund, 2) . 
                                             " ج.م) - مرتجع رقم {$return['return_number']}";
-                        $newNotes = $currentNotes . $deductionNote;
-                        
-                        $db->execute(
-                            "UPDATE salaries SET notes = ? WHERE id = ?",
-                            [$newNotes, $salaryId]
-                        );
+                            $newNotes = $currentNotes . $deductionNote;
+                            
+                            $db->execute(
+                                "UPDATE salaries SET notes = ? WHERE id = ?",
+                                [$newNotes, $salaryId]
+                            );
+                        }
                         
                         // تسجيل سجل التدقيق
                         logAudit($approvedBy, 'return_commission_deduction', 'salary', $salaryId, null, [
@@ -475,17 +512,34 @@ function approveReturn($returnId, $approvedBy = null) {
             }
         } else {
             // الفاتورة غير مدفوعة أو العميل ما زال عليه رصيد مدين
-            // خصم قيمة المرتجعات بالكامل من رصيد العميل المدين
-            $customer = $db->queryOne("SELECT balance FROM customers WHERE id = ? FOR UPDATE", [$customerId]);
-            if ($customer) {
-                $currentBalance = (float)($customer['balance'] ?? 0);
-                $newBalance = max(0, $currentBalance - $refundAmount); // تقليل الدين
-                $db->execute(
-                    "UPDATE customers SET balance = ? WHERE id = ?",
-                    [$newBalance, $customerId]
-                );
+            // إذا كان هناك مبلغ متبقي بعد استخدام الرصيد المدين
+            if ($remainingRefund > 0.0001) {
+                if ($return['refund_method'] === 'cash') {
+                    // طريقة الإرجاع: نقداً
+                    // خصم المبلغ المتبقي من خزينة المندوب
+                    if ($salesRepId > 0 && $remainingRefund > 0) {
+                        require_once __DIR__ . '/approval_system.php';
+                        
+                        // التحقق من رصيد خزنة المندوب
+                        $cashBalance = calculateSalesRepCashBalance($salesRepId);
+                        if ($cashBalance + 0.0001 < $remainingRefund) {
+                            throw new Exception('رصيد خزنة المندوب لا يغطي قيمة المرتجع المتبقية. الرصيد الحالي: ' . number_format($cashBalance, 2) . ' ج.م والمبلغ المطلوب: ' . number_format($remainingRefund, 2) . ' ج.م');
+                        }
+                        
+                        // خصم المبلغ من خزينة المندوب
+                        insertNegativeCollection($customerId, $salesRepId, $remainingRefund, $return['return_number'], $approvedBy);
+                    }
+                } elseif ($return['refund_method'] === 'credit') {
+                    // طريقة الإرجاع: رصيد للعميل
+                    // إضافة المبلغ المتبقي إلى رصيد العميل الدائن (تقليل الدين)
+                    $finalBalance = round($newBalance - $remainingRefund, 2);
+                    $db->execute(
+                        "UPDATE customers SET balance = ? WHERE id = ?",
+                        [$finalBalance, $customerId]
+                    );
+                }
             }
-            // لا يتم خصم أي مبلغ من خزينة المندوب
+            // إذا تم استخدام الرصيد المدين بالكامل، لا حاجة لخصم من خزنة المندوب
         }
         
         $db->getConnection()->commit();
