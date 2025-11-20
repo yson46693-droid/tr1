@@ -28,9 +28,6 @@ if (!$invoice) {
 $selectedInvoice = $invoice;
 $invoiceData = $invoice;
 
-// تعريف ACCESS_ALLOWED لـ invoice_print.php
-define('ACCESS_ALLOWED', true);
-
 $companyName = COMPANY_NAME;
 ?>
 <!DOCTYPE html>

@@ -490,6 +490,119 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
                 [$status, $approvedBy, $entityId]
             );
             
+            // إذا تمت الموافقة، إرجاع المنتجات إلى مخزن سيارة المندوب
+            if ($status === 'approved' && !empty($return['sales_rep_id'])) {
+                require_once __DIR__ . '/vehicle_inventory.php';
+                require_once __DIR__ . '/inventory_movements.php';
+                
+                $salesRepId = (int)$return['sales_rep_id'];
+                $returnNumber = $return['return_number'] ?? 'RET-' . $entityId;
+                
+                // الحصول على vehicle_id من sales_rep_id
+                $vehicle = $db->queryOne(
+                    "SELECT id FROM vehicles WHERE driver_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1",
+                    [$salesRepId]
+                );
+                
+                if (!$vehicle) {
+                    throw new Exception('لا يوجد سيارة نشطة مرتبطة بهذا المندوب');
+                }
+                
+                $vehicleId = (int)$vehicle['id'];
+                
+                // الحصول على أو إنشاء مخزن السيارة
+                $vehicleWarehouse = getVehicleWarehouse($vehicleId);
+                if (!$vehicleWarehouse) {
+                    $createWarehouse = createVehicleWarehouse($vehicleId);
+                    if (empty($createWarehouse['success'])) {
+                        throw new Exception('تعذر تجهيز مخزن السيارة لاستلام المرتجع');
+                    }
+                    $vehicleWarehouse = getVehicleWarehouse($vehicleId);
+                }
+                
+                $warehouseId = $vehicleWarehouse['id'] ?? null;
+                if (!$warehouseId) {
+                    throw new Exception('تعذر تحديد مخزن السيارة');
+                }
+                
+                // الحصول على عناصر المرتجع
+                $returnItems = $db->query(
+                    "SELECT * FROM return_items WHERE return_id = ?",
+                    [$entityId]
+                );
+                
+                if (empty($returnItems)) {
+                    throw new Exception('لا توجد منتجات في المرتجع');
+                }
+                
+                // التحقق من وجود حركات مخزون سابقة لهذا المرتجع لتجنب الإضافة المكررة
+                $existingMovements = $db->query(
+                    "SELECT product_id, SUM(quantity) as total_quantity 
+                     FROM inventory_movements 
+                     WHERE reference_type = 'invoice_return' AND reference_id = ? AND movement_type = 'in'
+                     GROUP BY product_id",
+                    [$entityId]
+                );
+                
+                $alreadyAdded = [];
+                foreach ($existingMovements as $movement) {
+                    $alreadyAdded[(int)$movement['product_id']] = (float)$movement['total_quantity'];
+                }
+                
+                // إضافة كل منتج إلى مخزن السيارة (فقط إذا لم يُضف من قبل)
+                foreach ($returnItems as $item) {
+                    $productId = (int)$item['product_id'];
+                    $quantity = (float)$item['quantity'];
+                    
+                    // التحقق من أن المنتج لم يُضف بالفعل
+                    $alreadyAddedQuantity = $alreadyAdded[$productId] ?? 0;
+                    if ($alreadyAddedQuantity >= $quantity - 0.0001) {
+                        // المنتج تم إضافته بالفعل، نتخطاه
+                        continue;
+                    }
+                    
+                    // حساب الكمية المتبقية التي يجب إضافتها
+                    $remainingQuantity = $quantity - $alreadyAddedQuantity;
+                    if ($remainingQuantity <= 0) {
+                        continue;
+                    }
+                    
+                    // الحصول على الكمية الحالية في مخزن السيارة
+                    $inventoryRow = $db->queryOne(
+                        "SELECT id, quantity FROM vehicle_inventory WHERE vehicle_id = ? AND product_id = ? FOR UPDATE",
+                        [$vehicleId, $productId]
+                    );
+                    
+                    $currentQuantity = (float)($inventoryRow['quantity'] ?? 0);
+                    $newQuantity = round($currentQuantity + $remainingQuantity, 3);
+                    
+                    // تحديث مخزون السيارة
+                    $updateResult = updateVehicleInventory($vehicleId, $productId, $newQuantity, $approvedBy);
+                    if (empty($updateResult['success'])) {
+                        throw new Exception($updateResult['message'] ?? 'تعذر تحديث مخزون السيارة');
+                    }
+                    
+                    // تسجيل حركة المخزون
+                    $invoice = $db->queryOne("SELECT invoice_number FROM invoices WHERE id = ?", [$return['invoice_id'] ?? null]);
+                    $invoiceNumber = $invoice['invoice_number'] ?? 'غير معروف';
+                    
+                    $movementResult = recordInventoryMovement(
+                        $productId,
+                        $warehouseId,
+                        'in',
+                        $remainingQuantity,
+                        'invoice_return',
+                        $entityId,
+                        'إرجاع فاتورة #' . $invoiceNumber . ' - مرتجع ' . $returnNumber,
+                        $approvedBy
+                    );
+                    
+                    if (empty($movementResult['success'])) {
+                        throw new Exception($movementResult['message'] ?? 'تعذر تسجيل حركة المخزون');
+                    }
+                }
+            }
+            
             // إذا تمت الموافقة وكانت طريقة الإرجاع نقداً، خصم المبلغ من خزنة المندوب
             if ($status === 'approved' && $return['refund_method'] === 'cash' && !empty($return['sales_rep_id']) && !empty($return['refund_amount'])) {
                 $salesRepId = (int)$return['sales_rep_id'];
