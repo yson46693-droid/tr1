@@ -2004,10 +2004,31 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
                 $employeeName = htmlspecialchars($salary['full_name'] ?? $salary['username']);
                 $firstName = mb_substr($employeeName, 0, 1, 'UTF-8');
                 $status = $salary['status'] ?? 'not_calculated';
-                $accumulated = floatval($salary['accumulated_amount'] ?? $salary['total_amount'] ?? 0);
+                
+                // حساب الإجمالي الصحيح مع تضمين نسبة التحصيلات للمندوبين
+                $userId = intval($salary['user_id'] ?? 0);
+                $baseAmount = cleanFinancialValue($salary['base_amount'] ?? 0);
+                $bonus = cleanFinancialValue($salary['bonus'] ?? 0);
+                $deductions = cleanFinancialValue($salary['deductions'] ?? 0);
+                $collectionsBonus = cleanFinancialValue($salary['collections_bonus'] ?? 0);
+                
+                // إذا كان مندوب مبيعات، أعد حساب نسبة التحصيلات
+                if ($roleClass === 'sales') {
+                    $recalculatedCollectionsAmount = calculateSalesCollections($userId, $selectedMonth, $selectedYear);
+                    $recalculatedCollectionsBonus = round($recalculatedCollectionsAmount * 0.02, 2);
+                    
+                    // استخدم القيمة المحسوبة حديثاً إذا كانت أكبر من القيمة المحفوظة
+                    if ($recalculatedCollectionsBonus > $collectionsBonus || $collectionsBonus == 0) {
+                        $collectionsBonus = $recalculatedCollectionsBonus;
+                    }
+                }
+                
+                // حساب الراتب الإجمالي الصحيح
+                $totalAmount = $baseAmount + $bonus + $collectionsBonus - $deductions;
+                
+                $accumulated = floatval($salary['accumulated_amount'] ?? $totalAmount);
                 $paid = floatval($salary['paid_amount'] ?? 0);
                 $remaining = max(0, $accumulated - $paid);
-                $totalAmount = floatval($salary['total_amount'] ?? 0);
                 $collapseId = 'collapse_' . ($salary['id'] ?? 'temp_' . uniqid());
                 ?>
                 <div class="employee-card">
