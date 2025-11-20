@@ -238,59 +238,100 @@ $returnTypeLabel = $isReturnDocument ? ($returnTypeLabels[$returnMetadata['retur
             <table>
                 <thead>
                     <tr>
-                        <th>المنتج</th>
-                        <th>الوصف</th>
-                        <th style="width: 120px; text-align: center;">الكمية</th>
-                        <th style="width: 150px; text-align: end;">سعر الوحدة</th>
-                        <th style="width: 160px; text-align: end;">الإجمالي</th>
+                        <th style="width: 30%;">المنتج</th>
+                        <?php if ($isReturnDocument): ?>
+                            <th style="width: 15%; text-align: center;">الحالة</th>
+                        <?php else: ?>
+                            <th style="width: 20%;">الوصف</th>
+                        <?php endif; ?>
+                        <?php if ($isReturnDocument && !empty($invoiceData['items']) && !empty(array_filter(array_column($invoiceData['items'], 'batch_number')))): ?>
+                            <th style="width: 15%; text-align: center;">رقم التشغيلة</th>
+                        <?php endif; ?>
+                        <th style="width: 12%; text-align: center;">الكمية</th>
+                        <th style="width: 15%; text-align: end;">سعر الوحدة</th>
+                        <th style="width: 15%; text-align: end;">الإجمالي</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php 
-                    foreach ($invoiceData['items'] as $item): 
-                        $quantity   = isset($item['quantity']) ? number_format($item['quantity'], 2) : '0.00';
-                        $unitPrice  = isset($item['unit_price']) ? formatCurrency($item['unit_price']) : formatCurrency(0);
-                        $totalPrice = isset($item['total_price']) ? formatCurrency($item['total_price']) : formatCurrency(0);
-                        $description = trim((string)($item['description'] ?? ''));
+                    if (empty($invoiceData['items']) || !is_array($invoiceData['items'])) {
+                        echo '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #64748b;">لا توجد منتجات في هذا المرتجع</td></tr>';
+                    } else {
+                        foreach ($invoiceData['items'] as $item): 
+                            $quantity   = isset($item['quantity']) ? number_format($item['quantity'], 2) : '0.00';
+                            $unitPrice  = isset($item['unit_price']) ? formatCurrency($item['unit_price']) : formatCurrency(0);
+                            $totalPrice = isset($item['total_price']) ? formatCurrency($item['total_price']) : formatCurrency(0);
+                            $description = trim((string)($item['description'] ?? ''));
+                            $batchNumber = $item['batch_number'] ?? null;
+                            $condition = $item['condition'] ?? null;
+                            $notes = trim((string)($item['notes'] ?? ''));
                     ?>
                     <tr>
                         <td>
-                            <div class="product-name"><?php echo htmlspecialchars($item['product_name'] ?? 'منتج'); ?></div>
-                            <?php if ($isReturnDocument && !empty($item['batch_number'])): ?>
+                            <div class="product-name" style="font-weight: 600; margin-bottom: 4px;">
+                                <?php echo htmlspecialchars($item['product_name'] ?? 'منتج'); ?>
+                            </div>
+                            <?php if ($notes && !$isReturnDocument): ?>
                                 <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
-                                    <strong>رقم التشغيلة:</strong> <?php echo htmlspecialchars($item['batch_number']); ?>
+                                    <?php echo nl2br(htmlspecialchars($notes)); ?>
                                 </div>
                             <?php endif; ?>
-                            <?php if ($isReturnDocument && !empty($item['condition'])): ?>
-                                <?php
-                                $conditionLabels = [
-                                    'new' => ['label' => 'جديد', 'color' => '#10b981'],
-                                    'used' => ['label' => 'مستعمل', 'color' => '#f59e0b'],
-                                    'damaged' => ['label' => 'تالف', 'color' => '#ef4444'],
-                                    'defective' => ['label' => 'معيب', 'color' => '#dc2626']
-                                ];
-                                $conditionInfo = $conditionLabels[$item['condition']] ?? ['label' => $item['condition'], 'color' => '#64748b'];
-                                ?>
-                                <div style="font-size: 12px; margin-top: 4px;">
-                                    <strong>الحالة:</strong> 
-                                    <span style="color: <?php echo $conditionInfo['color']; ?>; font-weight: 600;">
+                        </td>
+                        <?php if ($isReturnDocument): ?>
+                            <td style="text-align: center; vertical-align: middle;">
+                                <?php if (!empty($condition)): ?>
+                                    <?php
+                                    $conditionLabels = [
+                                        'new' => ['label' => 'جديد', 'color' => '#10b981', 'bg' => '#d1fae5'],
+                                        'used' => ['label' => 'مستعمل', 'color' => '#f59e0b', 'bg' => '#fef3c7'],
+                                        'damaged' => ['label' => 'تالف', 'color' => '#ef4444', 'bg' => '#fee2e2'],
+                                        'defective' => ['label' => 'معيب', 'color' => '#dc2626', 'bg' => '#fecaca']
+                                    ];
+                                    $conditionInfo = $conditionLabels[$condition] ?? ['label' => $condition, 'color' => '#64748b', 'bg' => '#f1f5f9'];
+                                    ?>
+                                    <span style="display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; color: <?php echo $conditionInfo['color']; ?>; background: <?php echo $conditionInfo['bg']; ?>;">
                                         <?php echo htmlspecialchars($conditionInfo['label']); ?>
                                     </span>
-                                </div>
-                            <?php endif; ?>
+                                <?php else: ?>
+                                    <span style="color: #9ca3af;">-</span>
+                                <?php endif; ?>
+                            </td>
+                        <?php else: ?>
+                            <td>
+                                <?php if ($description): ?>
+                                    <div style="font-size: 13px; color: #475569; line-height: 1.5;">
+                                        <?php echo nl2br(htmlspecialchars($description)); ?>
+                                    </div>
+                                <?php else: ?>
+                                    <span class="muted" style="color: #9ca3af; font-size: 13px;">لا يوجد وصف</span>
+                                <?php endif; ?>
+                            </td>
+                        <?php endif; ?>
+                        <?php if ($isReturnDocument && !empty($invoiceData['items']) && !empty(array_filter(array_column($invoiceData['items'], 'batch_number')))): ?>
+                            <td style="text-align: center; vertical-align: middle;">
+                                <?php if (!empty($batchNumber)): ?>
+                                    <span style="font-size: 12px; color: #0f4c81; font-weight: 600; background: #e0f2fe; padding: 4px 8px; border-radius: 6px; display: inline-block;">
+                                        <?php echo htmlspecialchars($batchNumber); ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span style="color: #9ca3af;">-</span>
+                                <?php endif; ?>
+                            </td>
+                        <?php endif; ?>
+                        <td style="text-align: center; vertical-align: middle; font-weight: 600;">
+                            <?php echo $quantity; ?>
                         </td>
-                        <td>
-                            <?php if ($description): ?>
-                                <?php echo nl2br(htmlspecialchars($description)); ?>
-                            <?php else: ?>
-                                <span class="muted">لا يوجد وصف</span>
-                            <?php endif; ?>
+                        <td style="text-align: end; vertical-align: middle;">
+                            <?php echo $unitPrice; ?>
                         </td>
-                        <td style="text-align: center; vertical-align: middle;"><?php echo $quantity; ?></td>
-                        <td style="text-align: end; vertical-align: middle;"><?php echo $unitPrice; ?></td>
-                        <td style="text-align: end; vertical-align: middle;"><?php echo $totalPrice; ?></td>
+                        <td style="text-align: end; vertical-align: middle; font-weight: 600; color: #0f4c81;">
+                            <?php echo $totalPrice; ?>
+                        </td>
                     </tr>
-                    <?php endforeach; ?>
+                    <?php 
+                        endforeach;
+                    }
+                    ?>
                 </tbody>
             </table>
         </section>
@@ -563,11 +604,12 @@ $returnTypeLabel = $isReturnDocument ? ($returnTypeLabels[$returnMetadata['retur
 }
 
 .items-table th {
-    padding: 14px;
+    padding: 14px 12px;
     font-size: 13px;
     color: #0f4c81;
     text-align: right;
     border-bottom: 1px solid rgba(15, 76, 129, 0.12);
+    font-weight: 600;
 }
 
 .items-table th:first-child {
@@ -575,7 +617,7 @@ $returnTypeLabel = $isReturnDocument ? ($returnTypeLabels[$returnMetadata['retur
 }
 
 .items-table td {
-    padding: 16px 14px;
+    padding: 16px 12px;
     font-size: 14px;
     color: #1f2937;
     border-bottom: 1px solid rgba(148, 163, 184, 0.25);
@@ -587,9 +629,14 @@ $returnTypeLabel = $isReturnDocument ? ($returnTypeLabels[$returnMetadata['retur
     border-bottom: none;
 }
 
+.items-table tbody tr:hover {
+    background-color: rgba(15, 76, 129, 0.02);
+}
+
 .items-table .product-name {
     font-weight: 600;
     margin-bottom: 6px;
+    color: #0f172a;
 }
 
 .items-table .product-unit {

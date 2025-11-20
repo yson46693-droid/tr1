@@ -630,10 +630,10 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
                 
                 // التحقق من عدم تطبيق الخصم مسبقاً (منع الخصم المكرر)
                 $existingDeduction = $db->queryOne(
-                    "SELECT id FROM audit_log 
+                    "SELECT id FROM audit_logs 
                      WHERE action = 'return_deduction' 
                      AND entity_type = 'salary' 
-                     AND metadata LIKE ?",
+                     AND new_value LIKE ?",
                     ['%"return_id":' . $entityId . '%']
                 );
                 
