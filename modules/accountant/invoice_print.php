@@ -254,8 +254,17 @@ $returnTypeLabel = $isReturnDocument ? ($returnTypeLabels[$returnMetadata['retur
                 </thead>
                 <tbody>
                     <?php 
+                    // حساب عدد الأعمدة
+                    $colspan = 5; // المنتج، الوصف/الحالة، الكمية، سعر الوحدة، الإجمالي
+                    if ($isReturnDocument) {
+                        $colspan = 5; // المنتج، الحالة، الكمية، سعر الوحدة، الإجمالي
+                        if (!empty($invoiceData['items']) && !empty(array_filter(array_column($invoiceData['items'], 'batch_number')))) {
+                            $colspan = 6; // إضافة عمود رقم التشغيلة
+                        }
+                    }
+                    
                     if (empty($invoiceData['items']) || !is_array($invoiceData['items'])) {
-                        echo '<tr><td colspan="6" style="text-align: center; padding: 20px; color: #64748b;">لا توجد منتجات في هذا المرتجع</td></tr>';
+                        echo '<tr><td colspan="' . $colspan . '" style="text-align: center; padding: 20px; color: #64748b;">لا توجد منتجات في هذا المرتجع</td></tr>';
                     } else {
                         foreach ($invoiceData['items'] as $item): 
                             $quantity   = isset($item['quantity']) ? number_format($item['quantity'], 2) : '0.00';
