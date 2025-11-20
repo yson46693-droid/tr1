@@ -965,14 +965,38 @@ async function updateApprovalBadge() {
         const apiPath = basePath + '/api/approvals.php';
         const response = await fetch(apiPath, {
             credentials: 'same-origin',
-            cache: 'no-cache'
+            cache: 'no-cache',
+            headers: {
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
+            }
         });
         
         if (!response.ok) {
             return;
         }
         
-        const data = await response.json();
+        // التحقق من content-type قبل parse JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            console.warn('updateApprovalBadge: Expected JSON but got', contentType);
+            return;
+        }
+        
+        const text = await response.text();
+        if (!text || text.trim().startsWith('<')) {
+            console.warn('updateApprovalBadge: Received HTML instead of JSON');
+            return;
+        }
+        
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseError) {
+            console.warn('updateApprovalBadge: Failed to parse JSON:', parseError);
+            return;
+        }
+        
         if (data && data.success && typeof data.count === 'number') {
             const badge = document.getElementById('approvalBadge');
             if (badge) {
@@ -987,7 +1011,10 @@ async function updateApprovalBadge() {
             }
         }
     } catch (error) {
-        console.error('Error updating approval badge:', error);
+        // تجاهل الأخطاء بصمت لتجنب إزعاج المستخدم
+        if (error.name !== 'SyntaxError') {
+            console.error('Error updating approval badge:', error);
+        }
     }
 }
 
