@@ -474,10 +474,38 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
             break;
 
         case 'invoice_return_company':
+            // الحصول على بيانات المرتجع
+            $return = $db->queryOne(
+                "SELECT * FROM returns WHERE id = ?",
+                [$entityId]
+            );
+            
+            if (!$return) {
+                throw new Exception('المرتجع غير موجود');
+            }
+            
+            // تحديث حالة المرتجع
             $db->execute(
                 "UPDATE returns SET status = ?, approved_by = ?, approved_at = NOW() WHERE id = ?",
                 [$status, $approvedBy, $entityId]
             );
+            
+            // إذا تمت الموافقة وكانت طريقة الإرجاع نقداً، خصم المبلغ من خزنة المندوب
+            if ($status === 'approved' && $return['refund_method'] === 'cash' && !empty($return['sales_rep_id']) && !empty($return['refund_amount'])) {
+                $salesRepId = (int)$return['sales_rep_id'];
+                $refundAmount = (float)$return['refund_amount'];
+                $customerId = (int)$return['customer_id'];
+                $returnNumber = $return['return_number'] ?? 'RET-' . $entityId;
+                
+                // التحقق من رصيد خزنة المندوب
+                $cashBalance = calculateSalesRepCashBalance($salesRepId);
+                if ($cashBalance + 0.0001 < $refundAmount) {
+                    throw new Exception('رصيد خزنة المندوب لا يغطي قيمة المرتجع المطلوبة. الرصيد الحالي: ' . number_format($cashBalance, 2));
+                }
+                
+                // خصم المبلغ من خزنة المندوب
+                insertNegativeCollection($customerId, $salesRepId, $refundAmount, $returnNumber, $approvedBy);
+            }
             break;
     }
 }
@@ -619,5 +647,101 @@ function getApproval($approvalId) {
          WHERE a.id = ?",
         [$approvalId]
     );
+}
+
+/**
+ * حساب رصيد خزنة المندوب
+ */
+function calculateSalesRepCashBalance($salesRepId) {
+    $db = db();
+    $cashBalance = 0.0;
+
+    $invoicesExists = $db->queryOne("SHOW TABLES LIKE 'invoices'");
+    $collectionsExists = $db->queryOne("SHOW TABLES LIKE 'collections'");
+
+    $totalCollections = 0.0;
+    if (!empty($collectionsExists)) {
+        $collectionsResult = $db->queryOne(
+            "SELECT COALESCE(SUM(amount), 0) as total_collections
+             FROM collections
+             WHERE collected_by = ?",
+            [$salesRepId]
+        );
+        $totalCollections = (float)($collectionsResult['total_collections'] ?? 0);
+    }
+
+    $fullyPaidSales = 0.0;
+    if (!empty($invoicesExists)) {
+        $fullyPaidResult = $db->queryOne(
+            "SELECT COALESCE(SUM(total_amount), 0) as fully_paid
+             FROM invoices
+             WHERE sales_rep_id = ?
+               AND status = 'paid'
+               AND paid_amount >= total_amount",
+            [$salesRepId]
+        );
+        $fullyPaidSales = (float)($fullyPaidResult['fully_paid'] ?? 0);
+    }
+
+    return $totalCollections + $fullyPaidSales;
+}
+
+/**
+ * إدراج تحصيل سالب لخصم المبلغ من خزنة المندوب
+ */
+function insertNegativeCollection($customerId, $salesRepId, $amount, $returnNumber, $approvedBy) {
+    $db = db();
+    $columns = $db->query("SHOW COLUMNS FROM collections") ?? [];
+    $columnNames = [];
+    foreach ($columns as $column) {
+        if (!empty($column['Field'])) {
+            $columnNames[] = $column['Field'];
+        }
+    }
+
+    $hasStatus = in_array('status', $columnNames, true);
+    $hasApprovedBy = in_array('approved_by', $columnNames, true);
+    $hasApprovedAt = in_array('approved_at', $columnNames, true);
+
+    $fields = [];
+    $placeholders = [];
+    $values = [];
+
+    $baseData = [
+        'customer_id' => $customerId,
+        'amount' => $amount * -1,
+        'date' => date('Y-m-d'),
+        'payment_method' => 'cash',
+        'reference_number' => 'REFUND-' . $returnNumber,
+        'notes' => 'صرف نقدي - مرتجع فاتورة ' . $returnNumber,
+        'collected_by' => $salesRepId,
+    ];
+
+    foreach ($baseData as $column => $value) {
+        $fields[] = $column;
+        $placeholders[] = '?';
+        $values[] = $value;
+    }
+
+    if ($hasStatus) {
+        $fields[] = 'status';
+        $placeholders[] = '?';
+        $values[] = 'approved';
+    }
+
+    if ($hasApprovedBy) {
+        $fields[] = 'approved_by';
+        $placeholders[] = '?';
+        $values[] = $approvedBy;
+    }
+
+    if ($hasApprovedAt) {
+        $fields[] = 'approved_at';
+        $placeholders[] = 'NOW()';
+    }
+
+    $sql = "INSERT INTO collections (" . implode(',', $fields) . ") VALUES (" . implode(',', $placeholders) . ")";
+
+    $db->execute($sql, $values);
 }
 
