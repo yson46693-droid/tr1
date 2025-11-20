@@ -79,6 +79,19 @@ try {
         ];
     }
     
+    // حساب معلومات الدفع
+    $paidAmount = (float)($invoice['paid_amount'] ?? 0);
+    $remainingAmount = (float)($invoice['remaining_amount'] ?? 0);
+    $totalAmount = (float)($invoice['total_amount'] ?? 0);
+    
+    // تحديد حالة الدفع
+    $paymentStatus = 'unpaid'; // غير مدفوع
+    if ($paidAmount >= $totalAmount) {
+        $paymentStatus = 'fully_paid'; // مدفوع بالكامل
+    } elseif ($paidAmount > 0) {
+        $paymentStatus = 'partially_paid'; // مدفوع جزئياً
+    }
+    
     $response = [
         'success' => true,
         'invoice' => [
@@ -91,7 +104,10 @@ try {
             'sales_rep_name' => $invoice['sales_rep_name'] ?? '',
             'date' => $invoice['date'],
             'status' => $invoice['status'],
-            'total_amount' => (float)$invoice['total_amount'],
+            'total_amount' => $totalAmount,
+            'paid_amount' => $paidAmount,
+            'remaining_amount' => $remainingAmount,
+            'payment_status' => $paymentStatus,
         ],
         'items' => $items,
     ];

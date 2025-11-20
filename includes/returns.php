@@ -207,28 +207,285 @@ function approveReturn($returnId, $approvedBy = null) {
             [$approvedBy, $returnId]
         );
         
-        // إرجاع المنتجات للمخزون
+        // جلب بيانات الفاتورة إذا كان المرتجع مرتبط بفاتورة
+        $invoice = null;
+        $invoicePaidAmount = 0.0;
+        $invoiceTotalAmount = 0.0;
+        $invoiceRemainingAmount = 0.0;
+        
+        if (!empty($return['invoice_id'])) {
+            $invoice = $db->queryOne(
+                "SELECT id, invoice_number, customer_id, sales_rep_id, total_amount, paid_amount, remaining_amount, status 
+                 FROM invoices WHERE id = ?",
+                [$return['invoice_id']]
+            );
+            
+            if ($invoice) {
+                $invoicePaidAmount = (float)($invoice['paid_amount'] ?? 0);
+                $invoiceTotalAmount = (float)($invoice['total_amount'] ?? 0);
+                $invoiceRemainingAmount = (float)($invoice['remaining_amount'] ?? 0);
+            }
+        }
+        
+        // حساب مبلغ المرتجع
+        $refundAmount = (float)($return['refund_amount'] ?? 0);
+        
+        // جلب عناصر المرتجع
         $items = $db->query(
             "SELECT * FROM return_items WHERE return_id = ?",
             [$returnId]
         );
         
-        foreach ($items as $item) {
-            recordInventoryMovement(
-                $item['product_id'],
-                'in',
-                $item['quantity'],
-                null,
-                'return',
-                $returnId,
-                "إرجاع مرتجع رقم {$return['return_number']}",
-                $approvedBy
+        // الحصول على سيارة المندوب ومخزن السيارة
+        $salesRepId = (int)($return['sales_rep_id'] ?? 0);
+        $vehicle = null;
+        $vehicleWarehouse = null;
+        
+        if ($salesRepId > 0) {
+            // البحث عن سيارة المندوب
+            $vehicle = $db->queryOne(
+                "SELECT v.id, v.vehicle_number 
+                 FROM vehicles v 
+                 WHERE v.driver_id = ? AND v.status = 'active' 
+                 LIMIT 1",
+                [$salesRepId]
             );
+            
+            if ($vehicle) {
+                // البحث عن مخزن السيارة
+                $vehicleWarehouse = $db->queryOne(
+                    "SELECT w.id, w.name 
+                     FROM warehouses w 
+                     WHERE w.vehicle_id = ? AND w.warehouse_type = 'vehicle' AND w.status = 'active' 
+                     LIMIT 1",
+                    [$vehicle['id']]
+                );
+            }
         }
         
-        // معالجة الاسترداد
-        if ($return['refund_method'] === 'cash' || $return['refund_method'] === 'credit') {
-            // يمكن إضافة منطق معالجة الاسترداد هنا
+        // إرجاع المنتجات إلى مخزن سيارة المندوب
+        if ($vehicle && $vehicleWarehouse) {
+            require_once __DIR__ . '/vehicle_inventory.php';
+            
+            foreach ($items as $item) {
+                $productId = (int)$item['product_id'];
+                $quantity = (float)$item['quantity'];
+                
+                // الحصول على الكمية الحالية في vehicle_inventory
+                $existingInventory = $db->queryOne(
+                    "SELECT quantity FROM vehicle_inventory 
+                     WHERE vehicle_id = ? AND product_id = ?",
+                    [$vehicle['id'], $productId]
+                );
+                
+                $currentQuantity = $existingInventory ? (float)$existingInventory['quantity'] : 0;
+                $newQuantity = $currentQuantity + $quantity;
+                
+                // استخدام دالة updateVehicleInventory لإضافة المنتج
+                $updateResult = updateVehicleInventory(
+                    $vehicle['id'],
+                    $productId,
+                    $newQuantity,
+                    $approvedBy
+                );
+                
+                if (!$updateResult['success']) {
+                    throw new Exception('تعذر إرجاع المنتج إلى مخزن السيارة: ' . ($updateResult['message'] ?? 'خطأ غير معروف'));
+                }
+                
+                // تسجيل حركة المخزون
+                recordInventoryMovement(
+                    $productId,
+                    'in',
+                    $quantity,
+                    $vehicleWarehouse['id'],
+                    'return',
+                    $returnId,
+                    "إرجاع مرتجع رقم {$return['return_number']} إلى مخزن سيارة المندوب",
+                    $approvedBy
+                );
+            }
+        } else {
+            // إذا لم توجد سيارة للمندوب، إرجاع المنتجات للمخزون الرئيسي
+            foreach ($items as $item) {
+                recordInventoryMovement(
+                    $item['product_id'],
+                    'in',
+                    $item['quantity'],
+                    null,
+                    'return',
+                    $returnId,
+                    "إرجاع مرتجع رقم {$return['return_number']}",
+                    $approvedBy
+                );
+            }
+        }
+        
+        // معالجة المالية حسب حالة دفع الفاتورة
+        $customerId = (int)($return['customer_id'] ?? 0);
+        
+        // حساب مبلغ المرتجع الفعلي
+        $refundAmount = (float)($return['refund_amount'] ?? 0);
+        
+        if ($invoice && $invoicePaidAmount > 0) {
+            // الفاتورة مدفوعة (كلياً أو جزئياً)
+            // المبلغ الذي يجب إرجاعه = الحد الأدنى بين المبلغ المدفوع وقيمة المرتجعات
+            $amountToRefund = min($invoicePaidAmount, $refundAmount);
+            
+            if ($return['refund_method'] === 'cash') {
+                // طريقة الإرجاع: نقداً
+                // خصم المبلغ المدفوع من خزينة المندوب (من خلال collections)
+                if ($salesRepId > 0 && $amountToRefund > 0) {
+                    require_once __DIR__ . '/approval_system.php';
+                    
+                    // التحقق من رصيد خزنة المندوب
+                    $cashBalance = calculateSalesRepCashBalance($salesRepId);
+                    if ($cashBalance + 0.0001 < $amountToRefund) {
+                        throw new Exception('رصيد خزنة المندوب لا يغطي قيمة المرتجع المطلوبة. الرصيد الحالي: ' . number_format($cashBalance, 2) . ' ج.م');
+                    }
+                    
+                    // خصم المبلغ من خزينة المندوب
+                    insertNegativeCollection($customerId, $salesRepId, $amountToRefund, $return['return_number'], $approvedBy);
+                }
+            } elseif ($return['refund_method'] === 'credit') {
+                // طريقة الإرجاع: رصيد للعميل
+                // إضافة المبلغ المدفوع إلى رصيد العميل الدائن (تقليل الدين)
+                $customer = $db->queryOne("SELECT balance FROM customers WHERE id = ? FOR UPDATE", [$customerId]);
+                if ($customer) {
+                    $currentBalance = (float)($customer['balance'] ?? 0);
+                    $newBalance = $currentBalance - $amountToRefund; // تقليل الدين (الرصيد المدين)
+                    $db->execute(
+                        "UPDATE customers SET balance = ? WHERE id = ?",
+                        [$newBalance, $customerId]
+                    );
+                }
+                // لا يتم خصم من خزينة المندوب
+            }
+            
+            // خصم 2% من عمولة المندوب من المبلغ المدفوع
+            if ($salesRepId > 0 && $amountToRefund > 0) {
+                require_once __DIR__ . '/salary_calculator.php';
+                
+                $commissionDeduction = round($amountToRefund * 0.02, 2); // 2% من المبلغ المدفوع
+                
+                // التحقق من عدم تطبيق الخصم مسبقاً (منع الخصم المكرر)
+                $existingDeduction = $db->queryOne(
+                    "SELECT id FROM audit_log 
+                     WHERE action = 'return_commission_deduction' 
+                     AND entity_type = 'salary' 
+                     AND metadata LIKE ?",
+                    ['%"return_id":' . $returnId . '%']
+                );
+                
+                if (empty($existingDeduction) && $commissionDeduction > 0) {
+                    // تحديد الشهر والسنة من تاريخ المرتجع
+                    $returnDate = $return['return_date'] ?? date('Y-m-d');
+                    $timestamp = strtotime($returnDate) ?: time();
+                    $month = (int)date('n', $timestamp);
+                    $year = (int)date('Y', $timestamp);
+                    
+                    // الحصول على أو إنشاء سجل الراتب
+                    $summary = getSalarySummary($salesRepId, $month, $year);
+                    
+                    if (!$summary['exists']) {
+                        $creation = createOrUpdateSalary($salesRepId, $month, $year);
+                        if (!($creation['success'] ?? false)) {
+                            error_log('Failed to create salary for return commission deduction: ' . ($creation['message'] ?? 'unknown error'));
+                            throw new Exception('تعذر إنشاء سجل الراتب لخصم عمولة المرتجع');
+                        }
+                        $summary = getSalarySummary($salesRepId, $month, $year);
+                        if (!($summary['exists'] ?? false)) {
+                            throw new Exception('لم يتم العثور على سجل الراتب بعد إنشائه');
+                        }
+                    }
+                    
+                    $salary = $summary['salary'];
+                    $salaryId = (int)($salary['id'] ?? 0);
+                    
+                    if ($salaryId <= 0) {
+                        throw new Exception('تعذر تحديد سجل الراتب لخصم عمولة المرتجع');
+                    }
+                    
+                    // الحصول على أسماء الأعمدة في جدول الرواتب
+                    $columns = $db->query("SHOW COLUMNS FROM salaries");
+                    $columnMap = [
+                        'deductions' => null,
+                        'total_amount' => null,
+                        'updated_at' => null
+                    ];
+                    
+                    foreach ($columns as $column) {
+                        $field = $column['Field'] ?? '';
+                        if ($field === 'deductions' || $field === 'total_deductions') {
+                            $columnMap['deductions'] = $field;
+                        } elseif ($field === 'total_amount' || $field === 'amount' || $field === 'net_total') {
+                            $columnMap['total_amount'] = $field;
+                        } elseif ($field === 'updated_at' || $field === 'modified_at' || $field === 'last_updated') {
+                            $columnMap['updated_at'] = $field;
+                        }
+                    }
+                    
+                    // بناء استعلام التحديث
+                    $updates = [];
+                    $params = [];
+                    
+                    if ($columnMap['deductions'] !== null) {
+                        $updates[] = "{$columnMap['deductions']} = COALESCE({$columnMap['deductions']}, 0) + ?";
+                        $params[] = $commissionDeduction;
+                    }
+                    
+                    if ($columnMap['total_amount'] !== null) {
+                        $updates[] = "{$columnMap['total_amount']} = GREATEST(COALESCE({$columnMap['total_amount']}, 0) - ?, 0)";
+                        $params[] = $commissionDeduction;
+                    }
+                    
+                    if ($columnMap['updated_at'] !== null) {
+                        $updates[] = "{$columnMap['updated_at']} = NOW()";
+                    }
+                    
+                    if (!empty($updates)) {
+                        $params[] = $salaryId;
+                        $db->execute(
+                            "UPDATE salaries SET " . implode(', ', $updates) . " WHERE id = ?",
+                            $params
+                        );
+                        
+                        // تحديث ملاحظات الراتب لتوثيق الخصم
+                        $currentNotes = $salary['notes'] ?? '';
+                            $deductionNote = "\n[خصم عمولة مرتجع]: تم خصم " . number_format($commissionDeduction, 2) . 
+                                            " ج.م (2% من المبلغ المدفوع " . number_format($amountToRefund, 2) . 
+                                            " ج.م) - مرتجع رقم {$return['return_number']}";
+                        $newNotes = $currentNotes . $deductionNote;
+                        
+                        $db->execute(
+                            "UPDATE salaries SET notes = ? WHERE id = ?",
+                            [$newNotes, $salaryId]
+                        );
+                        
+                        // تسجيل سجل التدقيق
+                        logAudit($approvedBy, 'return_commission_deduction', 'salary', $salaryId, null, [
+                            'return_id' => $returnId,
+                            'return_number' => $return['return_number'],
+                            'paid_amount' => $amountToRefund,
+                            'deduction_amount' => $commissionDeduction,
+                            'sales_rep_id' => $salesRepId
+                        ]);
+                    }
+                }
+            }
+        } else {
+            // الفاتورة غير مدفوعة أو العميل ما زال عليه رصيد مدين
+            // خصم قيمة المرتجعات بالكامل من رصيد العميل المدين
+            $customer = $db->queryOne("SELECT balance FROM customers WHERE id = ? FOR UPDATE", [$customerId]);
+            if ($customer) {
+                $currentBalance = (float)($customer['balance'] ?? 0);
+                $newBalance = max(0, $currentBalance - $refundAmount); // تقليل الدين
+                $db->execute(
+                    "UPDATE customers SET balance = ? WHERE id = ?",
+                    [$newBalance, $customerId]
+                );
+            }
+            // لا يتم خصم أي مبلغ من خزينة المندوب
         }
         
         $db->getConnection()->commit();
@@ -240,9 +497,12 @@ function approveReturn($returnId, $approvedBy = null) {
         return ['success' => true, 'message' => 'تم الموافقة على المرتجع بنجاح'];
         
     } catch (Exception $e) {
-        $db->getConnection()->rollback();
+        if ($db->getConnection()->in_transaction) {
+            $db->getConnection()->rollback();
+        }
         error_log("Return Approval Error: " . $e->getMessage());
-        return ['success' => false, 'message' => 'حدث خطأ في الموافقة على المرتجع'];
+        error_log("Return Approval Error - Stack trace: " . $e->getTraceAsString());
+        return ['success' => false, 'message' => 'حدث خطأ في الموافقة على المرتجع: ' . $e->getMessage()];
     }
 }
 

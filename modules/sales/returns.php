@@ -970,6 +970,28 @@ if (isset($_GET['id'])) {
                                         <div id="displayTotalAmount">-</div>
                                     </div>
                                 </div>
+                                <!-- معلومات الدفع -->
+                                <div class="row mt-3" id="paymentInfoRow" style="display: none;">
+                                    <div class="col-12">
+                                        <div class="alert alert-info mb-0">
+                                            <h6 class="mb-2"><i class="bi bi-info-circle me-2"></i>معلومات الدفع:</h6>
+                                            <div class="row">
+                                                <div class="col-md-4">
+                                                    <strong>المبلغ المدفوع:</strong>
+                                                    <div id="displayPaidAmount" class="text-success">-</div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <strong>المتبقي للعميل:</strong>
+                                                    <div id="displayRemainingAmount" class="text-warning">-</div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <strong>حالة الدفع:</strong>
+                                                    <div id="displayPaymentStatus">-</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         
@@ -1154,6 +1176,37 @@ if (isset($_GET['id'])) {
         document.getElementById('displayCustomerName').textContent = data.invoice.customer_name;
         document.getElementById('displaySalesRep').textContent = data.invoice.sales_rep_name || '-';
         document.getElementById('displayTotalAmount').textContent = formatCurrency(data.invoice.total_amount) + ' ج.م';
+        
+        // عرض معلومات الدفع
+        const paidAmount = parseFloat(data.invoice.paid_amount || 0);
+        const remainingAmount = parseFloat(data.invoice.remaining_amount || 0);
+        const paymentStatus = data.invoice.payment_status || 'unpaid';
+        
+        if (paidAmount > 0 || paymentStatus !== 'unpaid') {
+            document.getElementById('displayPaidAmount').textContent = formatCurrency(paidAmount) + ' ج.م';
+            document.getElementById('displayRemainingAmount').textContent = formatCurrency(remainingAmount) + ' ج.م';
+            
+            let statusText = '';
+            let statusClass = '';
+            if (paymentStatus === 'fully_paid') {
+                statusText = 'مدفوع بالكامل';
+                statusClass = 'text-success';
+            } else if (paymentStatus === 'partially_paid') {
+                statusText = 'مدفوع جزئياً';
+                statusClass = 'text-warning';
+            } else {
+                statusText = 'غير مدفوع';
+                statusClass = 'text-danger';
+            }
+            
+            const statusDiv = document.getElementById('displayPaymentStatus');
+            statusDiv.textContent = statusText;
+            statusDiv.className = statusClass;
+            
+            document.getElementById('paymentInfoRow').style.display = 'block';
+        } else {
+            document.getElementById('paymentInfoRow').style.display = 'none';
+        }
         
         // عرض العناصر
         displayInvoiceItems(data.items);
