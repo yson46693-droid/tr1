@@ -55,8 +55,8 @@ $basePath = getBasePath();
                         <!-- Step 1: Customer Selection -->
                         <div class="mb-4">
                             <h5 class="mb-3"><i class="bi bi-person me-2"></i>اختيار العميل</h5>
-            <div class="row">
-                <div class="col-md-6">
+                            <div class="row">
+                                <div class="col-md-6">
                                     <label for="customerSearch" class="form-label">ابحث واختر العميل</label>
                                     <div class="position-relative">
                                         <input type="text" 
@@ -66,20 +66,20 @@ $basePath = getBasePath();
                                                autocomplete="off">
                                         <div id="customerDropdown" class="list-group position-absolute w-100 mt-1" 
                                              style="display: none; max-height: 400px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #dee2e6; border-radius: 0.375rem;">
-                </div>
-                </div>
+                                        </div>
+                                    </div>
                                     <small class="text-muted">ابدأ الكتابة للبحث أو انقر لعرض جميع العملاء</small>
-            </div>
+                                </div>
                                 <div class="col-md-6">
                                     <label class="form-label">العميل المحدد</label>
                                     <div id="selectedCustomer" class="alert alert-info" style="display: none;">
                                         <strong id="selectedCustomerName"></strong><br>
                                         <small id="selectedCustomerInfo"></small>
-                </div>
-                </div>
-                </div>
+                                    </div>
+                                </div>
+                            </div>
                             <input type="hidden" id="customerId" name="customer_id">
-            </div>
+                        </div>
                         
                         <!-- Step 2: Purchase History -->
                         <div class="mb-4" id="purchaseHistorySection" style="display: none;">
@@ -155,47 +155,58 @@ let selectedCustomerId = null;
 let purchaseHistory = [];
 let selectedReturnItems = [];
 let allCustomers = [];
+let customerSearchInput = null;
+let customerDropdown = null;
 
-// Load customers on page load
+// Initialize elements after DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    loadCustomers();
-});
-
-const customerSearchInput = document.getElementById('customerSearch');
-const customerDropdown = document.getElementById('customerDropdown');
-
-// Customer Search - Show dropdown on focus or input
-customerSearchInput.addEventListener('focus', function() {
-    if (allCustomers.length > 0) {
-        displayCustomerDropdown(allCustomers);
-    } else {
-        loadCustomers();
-    }
-});
-
-customerSearchInput.addEventListener('input', function() {
-    const searchTerm = this.value.trim().toLowerCase();
+    customerSearchInput = document.getElementById('customerSearch');
+    customerDropdown = document.getElementById('customerDropdown');
     
-    if (searchTerm.length === 0) {
-        displayCustomerDropdown(allCustomers);
+    if (!customerSearchInput || !customerDropdown) {
+        console.error('Customer search elements not found');
         return;
     }
     
-    const filtered = allCustomers.filter(customer => {
-        const nameMatch = customer.name.toLowerCase().includes(searchTerm);
-        const phoneMatch = customer.phone && customer.phone.toLowerCase().includes(searchTerm);
-        return nameMatch || phoneMatch;
-    });
+    // Load customers on page load
+    loadCustomers();
     
-    displayCustomerDropdown(filtered);
+    // Customer Search - Show dropdown on focus or input
+    customerSearchInput.addEventListener('focus', function() {
+        if (allCustomers.length > 0) {
+            displayCustomerDropdown(allCustomers);
+        } else {
+            loadCustomers();
+        }
+    });
+
+    customerSearchInput.addEventListener('input', function() {
+        const searchTerm = this.value.trim().toLowerCase();
+        
+        if (searchTerm.length === 0) {
+            displayCustomerDropdown(allCustomers);
+            return;
+        }
+        
+        const filtered = allCustomers.filter(customer => {
+            const nameMatch = customer.name.toLowerCase().includes(searchTerm);
+            const phoneMatch = customer.phone && customer.phone.toLowerCase().includes(searchTerm);
+            return nameMatch || phoneMatch;
+        });
+        
+        displayCustomerDropdown(filtered);
+    });
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(event) {
+        if (customerSearchInput && customerDropdown) {
+            if (!customerSearchInput.contains(event.target) && !customerDropdown.contains(event.target)) {
+                customerDropdown.style.display = 'none';
+            }
+        }
+    });
 });
 
-// Close dropdown when clicking outside
-document.addEventListener('click', function(event) {
-    if (!customerSearchInput.contains(event.target) && !customerDropdown.contains(event.target)) {
-        customerDropdown.style.display = 'none';
-    }
-});
 
 function loadCustomers() {
     fetch(basePath + '/api/return_requests.php?action=get_customers', {
@@ -261,31 +272,59 @@ function displayCustomerDropdown(customers) {
 }
 
 function selectCustomer(customerId, customerName, debt, credit) {
-    selectedCustomerId = customerId;
-    const customerIdInput = document.getElementById('customerId');
-    const selectedDiv = document.getElementById('selectedCustomer');
-    const nameDiv = document.getElementById('selectedCustomerName');
-    const infoDiv = document.getElementById('selectedCustomerInfo');
-    
-    if (!customerIdInput || !selectedDiv || !nameDiv || !infoDiv) {
-        console.error('Required elements not found');
+    try {
+        selectedCustomerId = customerId;
+        const customerIdInput = document.getElementById('customerId');
+        const selectedDiv = document.getElementById('selectedCustomer');
+        const nameDiv = document.getElementById('selectedCustomerName');
+        const infoDiv = document.getElementById('selectedCustomerInfo');
+        
+        if (!customerIdInput) {
+            console.error('customerId input not found');
             return;
         }
         
-    customerIdInput.value = customerId;
-    
-    nameDiv.textContent = customerName;
-    const balanceText = debt > 0 
-        ? `دين: ${parseFloat(debt).toFixed(2)} ج.م`
-        : credit > 0 
-            ? `رصيد دائن: ${parseFloat(credit).toFixed(2)} ج.م`
-            : 'صفر';
-    infoDiv.textContent = balanceText;
-    
-    selectedDiv.style.display = 'block';
-    
-    // Load purchase history
-    loadPurchaseHistory(customerId);
+        if (!selectedDiv) {
+            console.error('selectedCustomer div not found');
+            return;
+        }
+        
+        if (!nameDiv) {
+            console.error('selectedCustomerName not found');
+            return;
+        }
+        
+        if (!infoDiv) {
+            console.error('selectedCustomerInfo not found');
+            return;
+        }
+        
+        customerIdInput.value = customerId;
+        
+        if (customerSearchInput) {
+            customerSearchInput.value = customerName;
+        }
+        
+        if (customerDropdown) {
+            customerDropdown.style.display = 'none';
+        }
+        
+        nameDiv.textContent = customerName;
+        const balanceText = debt > 0 
+            ? `دين: ${parseFloat(debt).toFixed(2)} ج.م`
+            : credit > 0 
+                ? `رصيد دائن: ${parseFloat(credit).toFixed(2)} ج.م`
+                : 'صفر';
+        infoDiv.textContent = balanceText;
+        
+        selectedDiv.style.display = 'block';
+        
+        // Load purchase history
+        loadPurchaseHistory(customerId);
+    } catch (error) {
+        console.error('Error in selectCustomer:', error);
+        alert('حدث خطأ أثناء اختيار العميل. يرجى المحاولة مرة أخرى.');
+    }
 }
 
 function loadPurchaseHistory(customerId) {
