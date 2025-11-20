@@ -619,6 +619,126 @@ function updateEntityStatus($type, $entityId, $status, $approvedBy) {
                 // خصم المبلغ من خزنة المندوب
                 insertNegativeCollection($customerId, $salesRepId, $refundAmount, $returnNumber, $approvedBy);
             }
+            
+            // إذا تمت الموافقة، خصم 2% من إجمالي مبلغ المرتجع من راتب المندوب
+            if ($status === 'approved' && !empty($return['sales_rep_id']) && !empty($return['refund_amount'])) {
+                require_once __DIR__ . '/salary_calculator.php';
+                
+                $salesRepId = (int)$return['sales_rep_id'];
+                $refundAmount = (float)$return['refund_amount'];
+                $returnNumber = $return['return_number'] ?? 'RET-' . $entityId;
+                
+                // التحقق من عدم تطبيق الخصم مسبقاً (منع الخصم المكرر)
+                $existingDeduction = $db->queryOne(
+                    "SELECT id FROM audit_log 
+                     WHERE action = 'return_deduction' 
+                     AND entity_type = 'salary' 
+                     AND metadata LIKE ?",
+                    ['%"return_id":' . $entityId . '%']
+                );
+                
+                if (!empty($existingDeduction)) {
+                    // الخصم تم تطبيقه مسبقاً، نتخطى
+                    error_log("Return deduction already applied for return ID: {$entityId}");
+                } else {
+                    // حساب 2% من إجمالي مبلغ المرتجع
+                    $deductionAmount = round($refundAmount * 0.02, 2);
+                    
+                    if ($deductionAmount > 0) {
+                        // تحديد الشهر والسنة من تاريخ المرتجع
+                        $returnDate = $return['return_date'] ?? date('Y-m-d');
+                        $timestamp = strtotime($returnDate) ?: time();
+                        $month = (int)date('n', $timestamp);
+                        $year = (int)date('Y', $timestamp);
+                        
+                        // الحصول على أو إنشاء سجل الراتب
+                        $summary = getSalarySummary($salesRepId, $month, $year);
+                        
+                        if (!$summary['exists']) {
+                            $creation = createOrUpdateSalary($salesRepId, $month, $year);
+                            if (!($creation['success'] ?? false)) {
+                                error_log('Failed to create salary for return deduction: ' . ($creation['message'] ?? 'unknown error'));
+                                throw new Exception('تعذر إنشاء سجل الراتب لخصم المرتجع');
+                            }
+                            $summary = getSalarySummary($salesRepId, $month, $year);
+                            if (!($summary['exists'] ?? false)) {
+                                throw new Exception('لم يتم العثور على سجل الراتب بعد إنشائه');
+                            }
+                        }
+                        
+                        $salary = $summary['salary'];
+                        $salaryId = (int)($salary['id'] ?? 0);
+                        
+                        if ($salaryId <= 0) {
+                            throw new Exception('تعذر تحديد سجل الراتب لخصم المرتجع');
+                        }
+                        
+                        // الحصول على أسماء الأعمدة في جدول الرواتب
+                        $columns = $db->query("SHOW COLUMNS FROM salaries");
+                        $columnMap = [
+                            'deductions' => null,
+                            'total_amount' => null,
+                            'updated_at' => null
+                        ];
+                        
+                        foreach ($columns as $column) {
+                            $field = $column['Field'] ?? '';
+                            if ($field === 'deductions' || $field === 'total_deductions') {
+                                $columnMap['deductions'] = $field;
+                            } elseif ($field === 'total_amount' || $field === 'amount' || $field === 'net_total') {
+                                $columnMap['total_amount'] = $field;
+                            } elseif ($field === 'updated_at' || $field === 'modified_at' || $field === 'last_updated') {
+                                $columnMap['updated_at'] = $field;
+                            }
+                        }
+                        
+                        // بناء استعلام التحديث
+                        $updates = [];
+                        $params = [];
+                        
+                        if ($columnMap['deductions'] !== null) {
+                            $updates[] = "{$columnMap['deductions']} = COALESCE({$columnMap['deductions']}, 0) + ?";
+                            $params[] = $deductionAmount;
+                        }
+                        
+                        if ($columnMap['total_amount'] !== null) {
+                            $updates[] = "{$columnMap['total_amount']} = GREATEST(COALESCE({$columnMap['total_amount']}, 0) - ?, 0)";
+                            $params[] = $deductionAmount;
+                        }
+                        
+                        if ($columnMap['updated_at'] !== null) {
+                            $updates[] = "{$columnMap['updated_at']} = NOW()";
+                        }
+                        
+                        if (!empty($updates)) {
+                            $params[] = $salaryId;
+                            $db->execute(
+                                "UPDATE salaries SET " . implode(', ', $updates) . " WHERE id = ?",
+                                $params
+                            );
+                            
+                            // تحديث ملاحظات الراتب لتوثيق الخصم
+                            $currentNotes = $salary['notes'] ?? '';
+                            $deductionNote = "\n[خصم مرتجع]: تم خصم " . number_format($deductionAmount, 2) . " ج.م (2% من مرتجع {$returnNumber} بقيمة " . number_format($refundAmount, 2) . " ج.م)";
+                            $newNotes = $currentNotes . $deductionNote;
+                            
+                            $db->execute(
+                                "UPDATE salaries SET notes = ? WHERE id = ?",
+                                [$newNotes, $salaryId]
+                            );
+                            
+                            // تسجيل سجل التدقيق
+                            logAudit($approvedBy, 'return_deduction', 'salary', $salaryId, null, [
+                                'return_id' => $entityId,
+                                'return_number' => $returnNumber,
+                                'refund_amount' => $refundAmount,
+                                'deduction_amount' => $deductionAmount,
+                                'sales_rep_id' => $salesRepId
+                            ]);
+                        }
+                    }
+                }
+            }
             break;
     }
 }
