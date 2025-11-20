@@ -46,6 +46,13 @@ switch ($role) {
                 'badge' => '<span class="badge" id="approvalBadge">0</span>'
             ],
             [
+                'title' => 'الفواتير',
+                'icon' => 'bi-receipt',
+                'url' => $baseUrl . 'manager.php?page=invoices',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'invoices'),
+                'badge' => null
+            ],
+            [
                 'title' => isset($lang['menu_reports']) ? $lang['menu_reports'] : 'التقارير',
                 'icon' => 'bi-file-earmark-text',
                 'url' => $baseUrl . 'manager.php?page=reports',
