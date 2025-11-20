@@ -390,14 +390,35 @@ function handleCreateReturnRequest(): void
             }
             
             // Check already returned quantity
-            $alreadyReturned = $db->queryOne(
-                "SELECT COALESCE(SUM(ri.quantity), 0) AS returned_quantity
-                 FROM return_items ri
-                 INNER JOIN returns r ON r.id = ri.return_id
-                 WHERE ri.invoice_item_id = ?
-                   AND r.status IN ('pending', 'approved', 'processed', 'completed')",
-                [$invoiceItemId]
-            );
+            // Check if invoice_item_id column exists
+            $hasInvoiceItemIdCol = false;
+            try {
+                $colCheck = $db->queryOne("SHOW COLUMNS FROM return_items LIKE 'invoice_item_id'");
+                $hasInvoiceItemIdCol = !empty($colCheck);
+            } catch (Throwable $e) {
+                $hasInvoiceItemIdCol = false;
+            }
+            
+            if ($hasInvoiceItemIdCol) {
+                $alreadyReturned = $db->queryOne(
+                    "SELECT COALESCE(SUM(ri.quantity), 0) AS returned_quantity
+                     FROM return_items ri
+                     INNER JOIN returns r ON r.id = ri.return_id
+                     WHERE ri.invoice_item_id = ?
+                       AND r.status IN ('pending', 'approved', 'processed', 'completed')",
+                    [$invoiceItemId]
+                );
+            } else {
+                // Fallback: check by invoice_id and product_id
+                $alreadyReturned = $db->queryOne(
+                    "SELECT COALESCE(SUM(ri.quantity), 0) AS returned_quantity
+                     FROM return_items ri
+                     INNER JOIN returns r ON r.id = ri.return_id
+                     WHERE r.invoice_id = ? AND ri.product_id = ?
+                       AND r.status IN ('pending', 'approved', 'processed', 'completed')",
+                    [$invoiceItem['invoice_id'], $invoiceItem['product_id']]
+                );
+            }
             
             $returnedQty = (float)($alreadyReturned['returned_quantity'] ?? 0);
             $purchasedQty = (float)$invoiceItem['quantity'];
