@@ -60,6 +60,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => 'خزنة الشركة',
+                'icon' => 'bi-bank',
+                'url' => $baseUrl . 'manager.php?page=company_cash',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'company_cash'),
+                'badge' => null
+            ],
+            [
                 'title' => isset($lang['menu_security']) ? $lang['menu_security'] : 'الأمان',
                 'icon' => 'bi-lock',
                 'url' => $baseUrl . 'manager.php?page=security',
@@ -128,6 +135,13 @@ switch ($role) {
                 'icon' => 'bi-people',
                 'url' => $baseUrl . 'manager.php?page=customers',
                 'active' => ($currentPage === 'manager.php' && $currentPageParam === 'customers'),
+                'badge' => null
+            ],
+            [
+                'title' => 'السيارات',
+                'icon' => 'bi-truck',
+                'url' => $baseUrl . 'manager.php?page=vehicles',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'vehicles'),
                 'badge' => null
             ],
             [
