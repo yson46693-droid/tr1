@@ -260,92 +260,99 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if ($amount <= 0) {
         $error = 'يجب إدخال مبلغ صحيح أكبر من الصفر';
         $sendAdvanceAjaxResponse(false, $error);
-    } else {
-        // حساب الراتب الحالي
-        $salaryData = getSalarySummary($currentUser['id'], $month, $year);
+        exit;
+    }
+    
+    // حساب الراتب الحالي
+    $salaryData = getSalarySummary($currentUser['id'], $month, $year);
+    
+    if (!$salaryData['exists'] && (!isset($salaryData['calculation']) || !$salaryData['calculation']['success'])) {
+        $error = 'لا يوجد راتب محسوب لهذا الشهر. يرجى الانتظار حتى يتم حساب الراتب.';
+        $sendAdvanceAjaxResponse(false, $error);
+        exit;
+    }
+    
+    $currentSalary = $salaryData['exists'] ? $salaryData['salary']['total_amount'] : $salaryData['calculation']['total_amount'];
+    $maxAdvance = $currentSalary * 0.5; // نصف الراتب
+    
+    if ($amount > $maxAdvance) {
+        $error = 'قيمة السلفة لا يمكن أن تتجاوز نصف الراتب الحالي (' . formatCurrency($maxAdvance) . ')';
+        $sendAdvanceAjaxResponse(false, $error);
+        exit;
+    }
+    
+    if (!ensureSalaryAdvancesTable($db)) {
+        $error = 'تعذر الوصول إلى جدول السلف. يرجى التواصل مع الإدارة للتأكد من إعداد قاعدة البيانات.';
+        $sendAdvanceAjaxResponse(false, $error);
+        exit;
+    }
+    
+    // التحقق من وجود طلب سلفة معلق بعد التأكد من الجدول
+    $existingRequest = $db->queryOne(
+        "SELECT id FROM salary_advances 
+         WHERE user_id = ? AND status = 'pending'",
+        [$currentUser['id']]
+    );
+    
+    if ($existingRequest) {
+        $error = 'يوجد طلب سلفة معلق بالفعل';
+        $sendAdvanceAjaxResponse(false, $error);
+        exit;
+    }
+    
+    try {
+        // إنشاء طلب السلفة
+        $result = $db->execute(
+            "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
+             VALUES (?, ?, ?, ?, 'pending')",
+            [$currentUser['id'], $amount, $reason ?: null, date('Y-m-d')]
+        );
         
-        if (!$salaryData['exists'] && (!isset($salaryData['calculation']) || !$salaryData['calculation']['success'])) {
-            $error = 'لا يوجد راتب محسوب لهذا الشهر. يرجى الانتظار حتى يتم حساب الراتب.';
-            $sendAdvanceAjaxResponse(false, $error);
-        } else {
-            $currentSalary = $salaryData['exists'] ? $salaryData['salary']['total_amount'] : $salaryData['calculation']['total_amount'];
-            $maxAdvance = $currentSalary * 0.5; // نصف الراتب
-            
-            if ($amount > $maxAdvance) {
-                $error = 'قيمة السلفة لا يمكن أن تتجاوز نصف الراتب الحالي (' . formatCurrency($maxAdvance) . ')';
-                $sendAdvanceAjaxResponse(false, $error);
-            } else {
-                if (!ensureSalaryAdvancesTable($db)) {
-                    $error = 'تعذر الوصول إلى جدول السلف. يرجى التواصل مع الإدارة للتأكد من إعداد قاعدة البيانات.';
-                    $sendAdvanceAjaxResponse(false, $error);
-                } else {
-                    // التحقق من وجود طلب سلفة معلق بعد التأكد من الجدول
-                    $existingRequest = $db->queryOne(
-                        "SELECT id FROM salary_advances 
-                         WHERE user_id = ? AND status = 'pending'",
-                        [$currentUser['id']]
-                    );
-                    
-                    if ($existingRequest) {
-                        $error = 'يوجد طلب سلفة معلق بالفعل';
-                        $sendAdvanceAjaxResponse(false, $error);
-                    } else {
-                        try {
-                            // إنشاء طلب السلفة
-                            $result = $db->execute(
-                                "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
-                                 VALUES (?, ?, ?, ?, 'pending')",
-                                [$currentUser['id'], $amount, $reason ?: null, date('Y-m-d')]
-                            );
-                            
-                            $requestId = $result['insert_id'];
-                            
-                            // إرسال إشعار للمحاسب
-                            $accountants = $db->query("SELECT id FROM users WHERE role = 'accountant' AND status = 'active'");
-                            foreach ($accountants as $accountant) {
-                                createNotification(
-                                    $accountant['id'],
-                                    'طلب سلفة جديد',
-                                    'طلب سلفة من ' . ($currentUser['full_name'] ?? $currentUser['username']) . ' بقيمة ' . formatCurrency($amount),
-                                    'warning',
-                                    getDashboardUrl('accountant') . '?page=salaries&view=advances',
-                                    false
-                                );
-                            }
-                            
-                            logAudit($currentUser['id'], 'request_advance', 'salary_advance', $requestId, null, [
-                                'amount' => $amount
-                            ]);
-                            
-                            // منع التكرار باستخدام redirect
-                            $successMessage = 'تم إرسال طلب السلفة بنجاح. سيتم مراجعته من قبل المحاسب والمدير.';
-                            $redirectParams = [
-                                'page' => 'my_salary',
-                                'month' => $month,
-                                'year' => $year
-                            ];
-                            $redirectUrl = getDashboardUrl($currentUser['role']) . '?' . http_build_query($redirectParams);
-                            
-                            // حفظ رسالة النجاح للواجهة الأمامية ولجلسة المستخدم
-                            $_SESSION['success_message'] = $successMessage;
-                            if ($sendAdvanceAjaxResponse(true, $successMessage, $redirectUrl) === false) {
-                                preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
-                            }
-                        } catch (Exception $e) {
-                            error_log("Salary advance insert error: " . $e->getMessage());
-                            
-                            // محاولة معالجة الأخطاء الشائعة وتقديم رسالة مفيدة للمستخدم
-                            if (stripos($e->getMessage(), 'salary_advances') !== false) {
-                                $error = 'تعذر حفظ طلب السلفة بسبب عدم جاهزية قاعدة البيانات. يرجى إبلاغ المحاسب للتأكد من إنشاء جدول السلف.';
-                            } else {
-                                $error = 'حدث خطأ أثناء حفظ طلب السلفة. يرجى المحاولة مرة أخرى، وإذا استمرت المشكلة تواصل مع الإدارة.';
-                            }
-                            $sendAdvanceAjaxResponse(false, $error);
-                        }
-                    }
-                }
-            }
+        $requestId = $result['insert_id'];
+        
+        // إرسال إشعار للمحاسب
+        $accountants = $db->query("SELECT id FROM users WHERE role = 'accountant' AND status = 'active'");
+        foreach ($accountants as $accountant) {
+            createNotification(
+                $accountant['id'],
+                'طلب سلفة جديد',
+                'طلب سلفة من ' . ($currentUser['full_name'] ?? $currentUser['username']) . ' بقيمة ' . formatCurrency($amount),
+                'warning',
+                getDashboardUrl('accountant') . '?page=salaries&view=advances',
+                false
+            );
         }
+        
+        logAudit($currentUser['id'], 'request_advance', 'salary_advance', $requestId, null, [
+            'amount' => $amount
+        ]);
+        
+        // منع التكرار باستخدام redirect
+        $successMessage = 'تم إرسال طلب السلفة بنجاح. سيتم مراجعته من قبل المحاسب والمدير.';
+        $redirectParams = [
+            'page' => 'my_salary',
+            'month' => $month,
+            'year' => $year
+        ];
+        $redirectUrl = getDashboardUrl($currentUser['role']) . '?' . http_build_query($redirectParams);
+        
+        // حفظ رسالة النجاح للواجهة الأمامية ولجلسة المستخدم
+        $_SESSION['success_message'] = $successMessage;
+        if ($sendAdvanceAjaxResponse(true, $successMessage, $redirectUrl) === false) {
+            preventDuplicateSubmission($successMessage, $redirectParams, null, $currentUser['role']);
+        }
+        exit;
+    } catch (Exception $e) {
+        error_log("Salary advance insert error: " . $e->getMessage());
+        
+        // محاولة معالجة الأخطاء الشائعة وتقديم رسالة مفيدة للمستخدم
+        if (stripos($e->getMessage(), 'salary_advances') !== false) {
+            $error = 'تعذر حفظ طلب السلفة بسبب عدم جاهزية قاعدة البيانات. يرجى إبلاغ المحاسب للتأكد من إنشاء جدول السلف.';
+        } else {
+            $error = 'حدث خطأ أثناء حفظ طلب السلفة. يرجى المحاولة مرة أخرى، وإذا استمرت المشكلة تواصل مع الإدارة.';
+        }
+        $sendAdvanceAjaxResponse(false, $error);
+        exit;
     }
 }
 
