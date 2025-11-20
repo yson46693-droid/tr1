@@ -288,14 +288,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
     
     // التحقق من وجود طلب سلفة معلق بعد التأكد من الجدول
+    // التحقق من الطلبات المعلقة (pending) أو الموافق عليها من المحاسب (accountant_approved)
     $existingRequest = $db->queryOne(
         "SELECT id FROM salary_advances 
-         WHERE user_id = ? AND status = 'pending'",
+         WHERE user_id = ? AND status IN ('pending', 'accountant_approved')",
         [$currentUser['id']]
     );
     
     if ($existingRequest) {
-        $error = 'يوجد طلب سلفة معلق بالفعل';
+        $error = 'يوجد طلب سلفة معلق بالفعل في انتظار الموافقة النهائية';
         $sendAdvanceAjaxResponse(false, $error);
         exit;
     }

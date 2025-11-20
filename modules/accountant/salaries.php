@@ -421,21 +421,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($amount <= 0) {
             $error = 'يجب إدخال مبلغ السلفة';
         } else {
-            try {
-                $result = $db->execute(
-                    "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
-                     VALUES (?, ?, ?, ?, 'pending')",
-                    [$userId, $amount, $reason ?: null, $requestDate]
-                );
-                
-                logAudit($currentUser['id'], 'request_advance', 'salary_advance', $result['insert_id'], null, [
-                    'user_id' => $userId,
-                    'amount' => $amount
-                ]);
-                
-                $success = 'تم إرسال طلب السلفة بنجاح. في انتظار موافقة المحاسب.';
-            } catch (Exception $e) {
-                $error = 'حدث خطأ في إرسال الطلب: ' . $e->getMessage();
+            // التحقق من وجود طلب سلفة معلق (pending أو accountant_approved)
+            $existingRequest = $db->queryOne(
+                "SELECT id FROM salary_advances 
+                 WHERE user_id = ? AND status IN ('pending', 'accountant_approved')",
+                [$userId]
+            );
+            
+            if ($existingRequest) {
+                $error = 'يوجد طلب سلفة معلق بالفعل لهذا الموظف في انتظار الموافقة النهائية';
+            } else {
+                try {
+                    $result = $db->execute(
+                        "INSERT INTO salary_advances (user_id, amount, reason, request_date, status) 
+                         VALUES (?, ?, ?, ?, 'pending')",
+                        [$userId, $amount, $reason ?: null, $requestDate]
+                    );
+                    
+                    logAudit($currentUser['id'], 'request_advance', 'salary_advance', $result['insert_id'], null, [
+                        'user_id' => $userId,
+                        'amount' => $amount
+                    ]);
+                    
+                    $success = 'تم إرسال طلب السلفة بنجاح. في انتظار موافقة المحاسب.';
+                } catch (Exception $e) {
+                    $error = 'حدث خطأ في إرسال الطلب: ' . $e->getMessage();
+                }
             }
         }
     }

@@ -699,13 +699,17 @@ function calculateTotal() {
         subtotal += parseFloat(input.value) || 0;
     });
     
-    const discountAmount = parseFloat(form.querySelector('[name="discount_amount"]').value) || 0;
+    const discountAmount = parseFloat(form.querySelector('[name="discount_amount"]')?.value) || 0;
     
     const total = subtotal - discountAmount;
     
-    document.getElementById('subtotal').textContent = subtotal.toFixed(2) + ' ج.م';
-    document.getElementById('discountDisplay').textContent = discountAmount.toFixed(2) + ' ج.م';
-    document.getElementById('totalAmount').textContent = total.toFixed(2) + ' ج.م';
+    const subtotalEl = document.getElementById('subtotal');
+    const discountDisplayEl = document.getElementById('discountDisplay');
+    const totalAmountEl = document.getElementById('totalAmount');
+    
+    if (subtotalEl) subtotalEl.textContent = subtotal.toFixed(2) + ' ج.م';
+    if (discountDisplayEl) discountDisplayEl.textContent = discountAmount.toFixed(2) + ' ج.م';
+    if (totalAmountEl) totalAmountEl.textContent = total.toFixed(2) + ' ج.م';
 }
 
 // ربط الأحداث للعناصر الموجودة

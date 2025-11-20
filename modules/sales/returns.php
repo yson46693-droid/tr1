@@ -1117,9 +1117,11 @@ if (isset($_GET['id'])) {
         const invoiceNumber = invoiceNumberInput.value.trim();
         
         if (!invoiceNumber) {
-            invoiceError.textContent = 'يرجى إدخال رقم الفاتورة';
-            invoiceError.style.display = 'block';
-            invoiceNumberInput.classList.add('is-invalid');
+            if (invoiceError) {
+                invoiceError.textContent = 'يرجى إدخال رقم الفاتورة';
+                invoiceError.style.display = 'block';
+            }
+            if (invoiceNumberInput) invoiceNumberInput.classList.add('is-invalid');
             return;
         }
         
@@ -1148,17 +1150,21 @@ if (isset($_GET['id'])) {
                     invoiceData = data;
                     displayInvoiceDetails(data);
                 } else {
-                    invoiceError.textContent = data.message || 'حدث خطأ في جلب بيانات الفاتورة';
-                    invoiceError.style.display = 'block';
-                    invoiceNumberInput.classList.add('is-invalid');
+                    if (invoiceError) {
+                        invoiceError.textContent = data.message || 'حدث خطأ في جلب بيانات الفاتورة';
+                        invoiceError.style.display = 'block';
+                    }
+                    if (invoiceNumberInput) invoiceNumberInput.classList.add('is-invalid');
                 }
             })
             .catch(error => {
-                invoiceLoading.style.display = 'none';
-                fetchInvoiceBtn.disabled = false;
-                invoiceError.textContent = 'حدث خطأ في الاتصال بالخادم: ' + (error.message || 'خطأ غير معروف');
-                invoiceError.style.display = 'block';
-                invoiceNumberInput.classList.add('is-invalid');
+                if (invoiceLoading) invoiceLoading.style.display = 'none';
+                if (fetchInvoiceBtn) fetchInvoiceBtn.disabled = false;
+                if (invoiceError) {
+                    invoiceError.textContent = 'حدث خطأ في الاتصال بالخادم: ' + (error.message || 'خطأ غير معروف');
+                    invoiceError.style.display = 'block';
+                }
+                if (invoiceNumberInput) invoiceNumberInput.classList.add('is-invalid');
                 console.error('Error fetching invoice:', error);
                 console.error('API URL attempted:', fullUrl);
             });
@@ -1167,45 +1173,61 @@ if (isset($_GET['id'])) {
     // عرض بيانات الفاتورة
     function displayInvoiceDetails(data) {
         // تحديث الحقول المخفية
-        document.getElementById('invoiceId').value = data.invoice.id;
-        document.getElementById('customerId').value = data.invoice.customer_id;
-        document.getElementById('salesRepId').value = data.invoice.sales_rep_id || '';
+        const invoiceIdEl = document.getElementById('invoiceId');
+        const customerIdEl = document.getElementById('customerId');
+        const salesRepIdEl = document.getElementById('salesRepId');
+        
+        if (invoiceIdEl) invoiceIdEl.value = data.invoice.id;
+        if (customerIdEl) customerIdEl.value = data.invoice.customer_id;
+        if (salesRepIdEl) salesRepIdEl.value = data.invoice.sales_rep_id || '';
         
         // عرض بيانات الفاتورة
-        document.getElementById('displayInvoiceNumber').textContent = data.invoice.invoice_number;
-        document.getElementById('displayCustomerName').textContent = data.invoice.customer_name;
-        document.getElementById('displaySalesRep').textContent = data.invoice.sales_rep_name || '-';
-        document.getElementById('displayTotalAmount').textContent = formatCurrency(data.invoice.total_amount) + ' ج.م';
+        const invoiceNumberEl = document.getElementById('displayInvoiceNumber');
+        const customerNameEl = document.getElementById('displayCustomerName');
+        const salesRepEl = document.getElementById('displaySalesRep');
+        const totalAmountEl = document.getElementById('displayTotalAmount');
+        
+        if (invoiceNumberEl) invoiceNumberEl.textContent = data.invoice.invoice_number;
+        if (customerNameEl) customerNameEl.textContent = data.invoice.customer_name;
+        if (salesRepEl) salesRepEl.textContent = data.invoice.sales_rep_name || '-';
+        if (totalAmountEl) totalAmountEl.textContent = formatCurrency(data.invoice.total_amount) + ' ج.م';
         
         // عرض معلومات الدفع
         const paidAmount = parseFloat(data.invoice.paid_amount || 0);
         const remainingAmount = parseFloat(data.invoice.remaining_amount || 0);
         const paymentStatus = data.invoice.payment_status || 'unpaid';
         
+        const paymentInfoRowEl = document.getElementById('paymentInfoRow');
+        
         if (paidAmount > 0 || paymentStatus !== 'unpaid') {
-            document.getElementById('displayPaidAmount').textContent = formatCurrency(paidAmount) + ' ج.م';
-            document.getElementById('displayRemainingAmount').textContent = formatCurrency(remainingAmount) + ' ج.م';
+            const paidAmountEl = document.getElementById('displayPaidAmount');
+            const remainingAmountEl = document.getElementById('displayRemainingAmount');
+            const statusDiv = document.getElementById('displayPaymentStatus');
             
-            let statusText = '';
-            let statusClass = '';
-            if (paymentStatus === 'fully_paid') {
-                statusText = 'مدفوع بالكامل';
-                statusClass = 'text-success';
-            } else if (paymentStatus === 'partially_paid') {
-                statusText = 'مدفوع جزئياً';
-                statusClass = 'text-warning';
-            } else {
-                statusText = 'غير مدفوع';
-                statusClass = 'text-danger';
+            if (paidAmountEl) paidAmountEl.textContent = formatCurrency(paidAmount) + ' ج.م';
+            if (remainingAmountEl) remainingAmountEl.textContent = formatCurrency(remainingAmount) + ' ج.م';
+            
+            if (statusDiv) {
+                let statusText = '';
+                let statusClass = '';
+                if (paymentStatus === 'fully_paid') {
+                    statusText = 'مدفوع بالكامل';
+                    statusClass = 'text-success';
+                } else if (paymentStatus === 'partially_paid') {
+                    statusText = 'مدفوع جزئياً';
+                    statusClass = 'text-warning';
+                } else {
+                    statusText = 'غير مدفوع';
+                    statusClass = 'text-danger';
+                }
+                
+                statusDiv.textContent = statusText;
+                statusDiv.className = statusClass;
             }
             
-            const statusDiv = document.getElementById('displayPaymentStatus');
-            statusDiv.textContent = statusText;
-            statusDiv.className = statusClass;
-            
-            document.getElementById('paymentInfoRow').style.display = 'block';
+            if (paymentInfoRowEl) paymentInfoRowEl.style.display = 'block';
         } else {
-            document.getElementById('paymentInfoRow').style.display = 'none';
+            if (paymentInfoRowEl) paymentInfoRowEl.style.display = 'none';
         }
         
         // عرض العناصر
@@ -1320,12 +1342,13 @@ if (isset($_GET['id'])) {
     // تحديث اختيار العنصر
     function updateItemSelection(index, isSelected, quantity, item) {
         if (isSelected && parseFloat(quantity) > 0) {
+            const conditionEl = document.querySelector(`.item-condition[data-index="${index}"]`);
             selectedItems[index] = {
                 product_id: item.product_id,
                 invoice_item_id: item.invoice_item_id,
                 quantity: parseFloat(quantity),
                 unit_price: item.unit_price,
-                condition: document.querySelector(`.item-condition[data-index="${index}"]`).value
+                condition: conditionEl ? conditionEl.value : 'new'
             };
         } else {
             delete selectedItems[index];
@@ -1339,22 +1362,35 @@ if (isset($_GET['id'])) {
         Object.values(selectedItems).forEach(item => {
             total += item.quantity * item.unit_price;
         });
-        totalReturnAmount.textContent = formatCurrency(total) + ' ج.م';
+        if (totalReturnAmount) {
+            totalReturnAmount.textContent = formatCurrency(total) + ' ج.م';
+        }
         
         // تحديث الإجمالي لكل صف
         Object.keys(selectedItems).forEach(index => {
             const item = selectedItems[index];
-            const row = document.querySelector(`.item-checkbox[data-index="${index}"]`).closest('tr');
-            const totalCell = row.querySelector('.item-total');
-            totalCell.textContent = formatCurrency(item.quantity * item.unit_price) + ' ج.م';
+            const checkbox = document.querySelector(`.item-checkbox[data-index="${index}"]`);
+            if (checkbox) {
+                const row = checkbox.closest('tr');
+                if (row) {
+                    const totalCell = row.querySelector('.item-total');
+                    if (totalCell) {
+                        totalCell.textContent = formatCurrency(item.quantity * item.unit_price) + ' ج.م';
+                    }
+                }
+            }
         });
         
         // إعادة تعيين الخلايا غير المحددة
         document.querySelectorAll('.item-checkbox').forEach(cb => {
             if (!cb.checked) {
                 const row = cb.closest('tr');
-                const totalCell = row.querySelector('.item-total');
-                totalCell.textContent = '0.00 ج.م';
+                if (row) {
+                    const totalCell = row.querySelector('.item-total');
+                    if (totalCell) {
+                        totalCell.textContent = '0.00 ج.م';
+                    }
+                }
             }
         });
     }
@@ -1375,7 +1411,10 @@ if (isset($_GET['id'])) {
         e.preventDefault();
         
         if (Object.keys(selectedItems).length === 0) {
-            document.getElementById('itemsError').textContent = 'يرجى اختيار عنصر واحد على الأقل للإرجاع';
+            const itemsErrorEl = document.getElementById('itemsError');
+            if (itemsErrorEl) {
+                itemsErrorEl.textContent = 'يرجى اختيار عنصر واحد على الأقل للإرجاع';
+            }
             return;
         }
         
@@ -1417,8 +1456,8 @@ if (addReturnModalElement && typeof bootstrap !== 'undefined') {
             invoiceNumberInput.classList.remove('is-invalid');
             invoiceData = null;
             selectedItems = {};
-            invoiceItemsTable.innerHTML = '';
-            totalReturnAmount.textContent = '0.00';
+            if (invoiceItemsTable) invoiceItemsTable.innerHTML = '';
+            if (totalReturnAmount) totalReturnAmount.textContent = '0.00';
         });
     }
     
