@@ -31,66 +31,67 @@ $basePath = getBasePath();
             <h2 class="mb-4">
                 <i class="bi bi-arrow-counterclockwise me-2"></i>إنشاء طلب مرتجع
             </h2>
-            
-            <?php if ($error): ?>
+
+<?php if ($error): ?>
                 <div class="alert alert-danger alert-dismissible fade show" role="alert">
                     <i class="bi bi-exclamation-triangle me-2"></i><?php echo htmlspecialchars($error); ?>
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            <?php endif; ?>
-            
-            <?php if ($success): ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($success): ?>
                 <div class="alert alert-success alert-dismissible fade show" role="alert">
                     <i class="bi bi-check-circle me-2"></i><?php echo htmlspecialchars($success); ?>
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            <?php endif; ?>
-            
+    </div>
+<?php endif; ?>
+
             <div class="card shadow-sm">
                 <div class="card-header bg-primary text-white">
                     <h5 class="mb-0"><i class="bi bi-cart-arrow-down me-2"></i>نموذج إنشاء طلب مرتجع</h5>
-                </div>
-                <div class="card-body">
+        </div>
+        <div class="card-body">
                     <form id="returnRequestForm">
                         <!-- Step 1: Customer Selection -->
                         <div class="mb-4">
                             <h5 class="mb-3"><i class="bi bi-person me-2"></i>اختيار العميل</h5>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <label for="customerSelect" class="form-label">اختر العميل</label>
-                                    <select class="form-select" id="customerSelect" size="10" style="min-height: 300px;">
-                                        <option value="">جاري التحميل...</option>
-                                    </select>
-                                    <div class="mt-2">
+            <div class="row">
+                <div class="col-md-6">
+                                    <label for="customerSearch" class="form-label">ابحث واختر العميل</label>
+                                    <div class="position-relative">
                                         <input type="text" 
-                                               class="form-control form-control-sm" 
+                                               class="form-control" 
                                                id="customerSearch" 
                                                placeholder="ابحث بالاسم أو رقم الهاتف..."
                                                autocomplete="off">
-                                    </div>
-                                </div>
+                                        <div id="customerDropdown" class="list-group position-absolute w-100 mt-1" 
+                                             style="display: none; max-height: 400px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border: 1px solid #dee2e6; border-radius: 0.375rem;">
+                </div>
+                </div>
+                                    <small class="text-muted">ابدأ الكتابة للبحث أو انقر لعرض جميع العملاء</small>
+            </div>
                                 <div class="col-md-6">
                                     <label class="form-label">العميل المحدد</label>
                                     <div id="selectedCustomer" class="alert alert-info" style="display: none;">
                                         <strong id="selectedCustomerName"></strong><br>
                                         <small id="selectedCustomerInfo"></small>
-                                    </div>
-                                </div>
-                            </div>
+                </div>
+                </div>
+                </div>
                             <input type="hidden" id="customerId" name="customer_id">
-                        </div>
+            </div>
                         
                         <!-- Step 2: Purchase History -->
                         <div class="mb-4" id="purchaseHistorySection" style="display: none;">
                             <h5 class="mb-3"><i class="bi bi-clock-history me-2"></i>سجل المشتريات</h5>
                             <div id="purchaseHistoryLoading" class="text-center" style="display: none;">
-                                <div class="spinner-border text-primary" role="status">
-                                    <span class="visually-hidden">جاري التحميل...</span>
-                                </div>
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">جاري التحميل...</span>
                             </div>
-                            <div id="purchaseHistoryTable" class="table-responsive"></div>
                         </div>
-                        
+                            <div id="purchaseHistoryTable" class="table-responsive"></div>
+                    </div>
+                    
                         <!-- Step 3: Return Items Selection -->
                         <div class="mb-4" id="returnItemsSection" style="display: none;">
                             <h5 class="mb-3"><i class="bi bi-list-check me-2"></i>المنتجات المراد إرجاعها</h5>
@@ -139,9 +140,9 @@ $basePath = getBasePath();
                                     id="submitReturnRequest"
                                     disabled>
                                 <i class="bi bi-send me-2"></i>إرسال طلب المرتجع
-                            </button>
-                        </div>
-                    </form>
+                        </button>
+                </div>
+            </form>
                 </div>
             </div>
         </div>
@@ -160,33 +161,43 @@ document.addEventListener('DOMContentLoaded', function() {
     loadCustomers();
 });
 
-// Customer Search Filter
-let customerSearchTimeout;
-document.getElementById('customerSearch').addEventListener('input', function() {
-    clearTimeout(customerSearchTimeout);
-    const searchTerm = this.value.trim().toLowerCase();
-    
-    customerSearchTimeout = setTimeout(() => {
-        filterCustomers(searchTerm);
-    }, 200);
+const customerSearchInput = document.getElementById('customerSearch');
+const customerDropdown = document.getElementById('customerDropdown');
+
+// Customer Search - Show dropdown on focus or input
+customerSearchInput.addEventListener('focus', function() {
+    if (allCustomers.length > 0) {
+        displayCustomerDropdown(allCustomers);
+    } else {
+        loadCustomers();
+    }
 });
 
-// Customer Select Change
-document.getElementById('customerSelect').addEventListener('change', function() {
-    const selectedOption = this.options[this.selectedIndex];
-    if (selectedOption && selectedOption.value) {
-        const customerId = parseInt(selectedOption.value);
-        const customer = allCustomers.find(c => c.id === customerId);
-        if (customer) {
-            selectCustomer(customer.id, customer.name, customer.debt, customer.credit);
-        }
+customerSearchInput.addEventListener('input', function() {
+    const searchTerm = this.value.trim().toLowerCase();
+    
+    if (searchTerm.length === 0) {
+        displayCustomerDropdown(allCustomers);
+        return;
+    }
+    
+    const filtered = allCustomers.filter(customer => {
+        const nameMatch = customer.name.toLowerCase().includes(searchTerm);
+        const phoneMatch = customer.phone && customer.phone.toLowerCase().includes(searchTerm);
+        return nameMatch || phoneMatch;
+    });
+    
+    displayCustomerDropdown(filtered);
+});
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(event) {
+    if (!customerSearchInput.contains(event.target) && !customerDropdown.contains(event.target)) {
+        customerDropdown.style.display = 'none';
     }
 });
 
 function loadCustomers() {
-    const select = document.getElementById('customerSelect');
-    select.innerHTML = '<option value="">جاري التحميل...</option>';
-    
     fetch(basePath + '/api/return_requests.php?action=get_customers', {
         credentials: 'same-origin',
         headers: {
@@ -197,54 +208,56 @@ function loadCustomers() {
     .then(data => {
         if (data.success) {
             allCustomers = data.customers;
-            displayCustomers(data.customers);
+            if (customerSearchInput === document.activeElement || customerSearchInput.value.trim() !== '') {
+                displayCustomerDropdown(data.customers);
+            }
         } else {
-            select.innerHTML = '<option value="">خطأ في تحميل العملاء</option>';
             console.error('Error fetching customers:', data.message);
         }
     })
     .catch(error => {
-        select.innerHTML = '<option value="">حدث خطأ في الاتصال</option>';
         console.error('Error:', error);
     });
 }
 
-function displayCustomers(customers) {
-    const select = document.getElementById('customerSelect');
+function displayCustomerDropdown(customers) {
+    if (!customerDropdown) return;
     
     if (customers.length === 0) {
-        select.innerHTML = '<option value="">لا توجد عملاء</option>';
+        customerDropdown.innerHTML = '<div class="list-group-item text-muted">لا توجد نتائج</div>';
+        customerDropdown.style.display = 'block';
         return;
     }
     
-    let html = '<option value="">-- اختر عميل --</option>';
+    let html = '';
     customers.forEach(customer => {
         const balanceText = customer.debt > 0 
-            ? `[دين: ${parseFloat(customer.debt).toFixed(2)}]`
+            ? `<span class="badge bg-danger">دين: ${parseFloat(customer.debt).toFixed(2)} ج.م</span>`
             : customer.credit > 0 
-                ? `[رصيد: ${parseFloat(customer.credit).toFixed(2)}]`
-                : '[صفر]';
+                ? `<span class="badge bg-success">رصيد: ${parseFloat(customer.credit).toFixed(2)} ج.م</span>`
+                : '<span class="badge bg-secondary">صفر</span>';
         
-        const displayText = `${customer.name} ${balanceText}${customer.phone ? ' - ' + customer.phone : ''}`;
-        html += `<option value="${customer.id}">${displayText}</option>`;
+        const phoneText = customer.phone ? `<br><small class="text-muted"><i class="bi bi-telephone"></i> ${customer.phone}</small>` : '';
+        
+        html += `
+            <a href="#" class="list-group-item list-group-item-action" 
+               onclick="selectCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}', ${customer.debt}, ${customer.credit}); return false;"
+               style="cursor: pointer;">
+                <div class="d-flex w-100 justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <h6 class="mb-1">${customer.name}</h6>
+                        ${phoneText}
+                    </div>
+                    <div class="ms-2">
+                        ${balanceText}
+                    </div>
+                </div>
+            </a>
+        `;
     });
     
-    select.innerHTML = html;
-}
-
-function filterCustomers(searchTerm) {
-    if (!searchTerm) {
-        displayCustomers(allCustomers);
-        return;
-    }
-    
-    const filtered = allCustomers.filter(customer => {
-        const nameMatch = customer.name.toLowerCase().includes(searchTerm);
-        const phoneMatch = customer.phone && customer.phone.includes(searchTerm);
-        return nameMatch || phoneMatch;
-    });
-    
-    displayCustomers(filtered);
+    customerDropdown.innerHTML = html;
+    customerDropdown.style.display = 'block';
 }
 
 function selectCustomer(customerId, customerName, debt, credit) {
@@ -256,9 +269,9 @@ function selectCustomer(customerId, customerName, debt, credit) {
     
     if (!customerIdInput || !selectedDiv || !nameDiv || !infoDiv) {
         console.error('Required elements not found');
-        return;
-    }
-    
+            return;
+        }
+        
     customerIdInput.value = customerId;
     
     nameDiv.textContent = customerName;
@@ -297,7 +310,7 @@ function loadPurchaseHistory(customerId) {
         if (data.success) {
             purchaseHistory = data.purchase_history;
             displayPurchaseHistory(purchaseHistory);
-        } else {
+                } else {
             tableDiv.innerHTML = '<div class="alert alert-warning">' + (data.message || 'لا توجد مشتريات') + '</div>';
         }
     })
@@ -372,9 +385,9 @@ function addToReturnItems(invoiceItemId, productId, productName, maxQuantity, un
     
     const quantity = prompt(`أدخل الكمية المراد إرجاعها (الحد الأقصى: ${parseFloat(maxQuantity).toFixed(2)})`);
     if (!quantity || parseFloat(quantity) <= 0) {
-        return;
-    }
-    
+            return;
+        }
+        
     const qty = parseFloat(quantity);
     if (qty > maxQuantity + 0.0001) {
         alert(`الكمية المدخلة (${qty.toFixed(2)}) تتجاوز الكمية المتاحة (${parseFloat(maxQuantity).toFixed(2)})`);
@@ -431,9 +444,9 @@ function updateReturnItemsTable() {
                 <td>
                     <button class="btn btn-sm btn-danger" onclick="removeReturnItem(${index})">
                         <i class="bi bi-trash"></i>
-                    </button>
-                </td>
-            </tr>
+                        </button>
+                                </td>
+                            </tr>
         `;
     });
     
