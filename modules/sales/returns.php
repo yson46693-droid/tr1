@@ -57,13 +57,17 @@ $basePath = getBasePath();
                             <h5 class="mb-3"><i class="bi bi-person me-2"></i>اختيار العميل</h5>
                             <div class="row">
                                 <div class="col-md-6">
-                                    <label for="customerSearch" class="form-label">البحث عن العميل</label>
-                                    <input type="text" 
-                                           class="form-control" 
-                                           id="customerSearch" 
-                                           placeholder="ابحث بالاسم أو رقم الهاتف..."
-                                           autocomplete="off">
-                                    <div id="customerDropdown" class="list-group mt-2" style="display: none; max-height: 300px; overflow-y: auto; position: absolute; z-index: 1000; width: 100%;"></div>
+                                    <label for="customerSelect" class="form-label">اختر العميل</label>
+                                    <select class="form-select" id="customerSelect" size="10" style="min-height: 300px;">
+                                        <option value="">جاري التحميل...</option>
+                                    </select>
+                                    <div class="mt-2">
+                                        <input type="text" 
+                                               class="form-control form-control-sm" 
+                                               id="customerSearch" 
+                                               placeholder="ابحث بالاسم أو رقم الهاتف..."
+                                               autocomplete="off">
+                                    </div>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">العميل المحدد</label>
@@ -149,27 +153,41 @@ const basePath = '<?php echo $basePath; ?>';
 let selectedCustomerId = null;
 let purchaseHistory = [];
 let selectedReturnItems = [];
+let allCustomers = [];
 
-// Customer Search
+// Load customers on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadCustomers();
+});
+
+// Customer Search Filter
 let customerSearchTimeout;
 document.getElementById('customerSearch').addEventListener('input', function() {
     clearTimeout(customerSearchTimeout);
-    const searchTerm = this.value.trim();
-    
-    if (searchTerm.length < 2) {
-        document.getElementById('customerDropdown').style.display = 'none';
-        return;
-    }
+    const searchTerm = this.value.trim().toLowerCase();
     
     customerSearchTimeout = setTimeout(() => {
-        fetchCustomers(searchTerm);
-    }, 300);
+        filterCustomers(searchTerm);
+    }, 200);
 });
 
-function fetchCustomers(search = '') {
-    const url = basePath + '/api/return_requests.php?action=get_customers' + (search ? '&search=' + encodeURIComponent(search) : '');
+// Customer Select Change
+document.getElementById('customerSelect').addEventListener('change', function() {
+    const selectedOption = this.options[this.selectedIndex];
+    if (selectedOption && selectedOption.value) {
+        const customerId = parseInt(selectedOption.value);
+        const customer = allCustomers.find(c => c.id === customerId);
+        if (customer) {
+            selectCustomer(customer.id, customer.name, customer.debt, customer.credit);
+        }
+    }
+});
+
+function loadCustomers() {
+    const select = document.getElementById('customerSelect');
+    select.innerHTML = '<option value="">جاري التحميل...</option>';
     
-    fetch(url, {
+    fetch(basePath + '/api/return_requests.php?action=get_customers', {
         credentials: 'same-origin',
         headers: {
             'Accept': 'application/json'
@@ -178,57 +196,70 @@ function fetchCustomers(search = '') {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            displayCustomerDropdown(data.customers);
+            allCustomers = data.customers;
+            displayCustomers(data.customers);
         } else {
+            select.innerHTML = '<option value="">خطأ في تحميل العملاء</option>';
             console.error('Error fetching customers:', data.message);
         }
     })
     .catch(error => {
+        select.innerHTML = '<option value="">حدث خطأ في الاتصال</option>';
         console.error('Error:', error);
     });
 }
 
-function displayCustomerDropdown(customers) {
-    const dropdown = document.getElementById('customerDropdown');
+function displayCustomers(customers) {
+    const select = document.getElementById('customerSelect');
     
     if (customers.length === 0) {
-        dropdown.innerHTML = '<div class="list-group-item">لا توجد نتائج</div>';
-        dropdown.style.display = 'block';
+        select.innerHTML = '<option value="">لا توجد عملاء</option>';
         return;
     }
     
-    let html = '';
+    let html = '<option value="">-- اختر عميل --</option>';
     customers.forEach(customer => {
         const balanceText = customer.debt > 0 
-            ? `دين: ${parseFloat(customer.debt).toFixed(2)} ج.م`
+            ? `[دين: ${parseFloat(customer.debt).toFixed(2)}]`
             : customer.credit > 0 
-                ? `رصيد دائن: ${parseFloat(customer.credit).toFixed(2)} ج.م`
-                : 'صفر';
+                ? `[رصيد: ${parseFloat(customer.credit).toFixed(2)}]`
+                : '[صفر]';
         
-        html += `
-            <a href="#" class="list-group-item list-group-item-action" onclick="selectCustomer(${customer.id}, '${customer.name.replace(/'/g, "\\'")}', ${customer.debt}, ${customer.credit}); return false;">
-                <div class="d-flex w-100 justify-content-between">
-                    <h6 class="mb-1">${customer.name}</h6>
-                    <small>${balanceText}</small>
-                </div>
-                ${customer.phone ? '<p class="mb-1 small text-muted">' + customer.phone + '</p>' : ''}
-            </a>
-        `;
+        const displayText = `${customer.name} ${balanceText}${customer.phone ? ' - ' + customer.phone : ''}`;
+        html += `<option value="${customer.id}">${displayText}</option>`;
     });
     
-    dropdown.innerHTML = html;
-    dropdown.style.display = 'block';
+    select.innerHTML = html;
+}
+
+function filterCustomers(searchTerm) {
+    if (!searchTerm) {
+        displayCustomers(allCustomers);
+        return;
+    }
+    
+    const filtered = allCustomers.filter(customer => {
+        const nameMatch = customer.name.toLowerCase().includes(searchTerm);
+        const phoneMatch = customer.phone && customer.phone.includes(searchTerm);
+        return nameMatch || phoneMatch;
+    });
+    
+    displayCustomers(filtered);
 }
 
 function selectCustomer(customerId, customerName, debt, credit) {
     selectedCustomerId = customerId;
-    document.getElementById('customerId').value = customerId;
-    document.getElementById('customerSearch').value = customerName;
-    document.getElementById('customerDropdown').style.display = 'none';
-    
+    const customerIdInput = document.getElementById('customerId');
     const selectedDiv = document.getElementById('selectedCustomer');
     const nameDiv = document.getElementById('selectedCustomerName');
     const infoDiv = document.getElementById('selectedCustomerInfo');
+    
+    if (!customerIdInput || !selectedDiv || !nameDiv || !infoDiv) {
+        console.error('Required elements not found');
+        return;
+    }
+    
+    customerIdInput.value = customerId;
     
     nameDiv.textContent = customerName;
     const balanceText = debt > 0 
@@ -466,13 +497,4 @@ document.getElementById('submitReturnRequest').addEventListener('click', functio
     });
 });
 
-// Close dropdown when clicking outside
-document.addEventListener('click', function(event) {
-    const dropdown = document.getElementById('customerDropdown');
-    const searchInput = document.getElementById('customerSearch');
-    
-    if (!dropdown.contains(event.target) && event.target !== searchInput) {
-        dropdown.style.display = 'none';
-    }
-});
 </script>
