@@ -884,31 +884,6 @@ $monthName = date('F', mktime(0, 0, 0, $selectedMonth, 1));
     </div>
 <?php endif; ?>
 
-<!-- بطاقات الملخص (Grid 4 أعمدة) -->
-<div class="summary-cards">
-    <div class="summary-card">
-        <div class="summary-card-title">إجمالي الساعات</div>
-        <div class="summary-card-value"><?php echo number_format($monthStats['total_hours'], 2); ?></div>
-        <div class="summary-card-description">ساعة</div>
-    </div>
-    <div class="summary-card">
-        <div class="summary-card-title">ساعات العمل المسجلة</div>
-        <div class="summary-card-value"><?php echo number_format($monthStats['recorded_hours'], 2); ?></div>
-        <div class="summary-card-description">ساعة</div>
-    </div>
-    <div class="summary-card">
-        <div class="summary-card-title">الراتب الحالي</div>
-        <div class="summary-card-value"><?php echo formatCurrency($monthStats['total_salary']); ?></div>
-        <div class="summary-card-description">
-            <?php if ($currentUser['role'] === 'sales' && $collectionsBonus > 0): ?>
-                يتضمن نسبة التحصيلات (<?php echo formatCurrency($collectionsBonus); ?>)
-            <?php else: ?>
-                قبل خصم السلفات
-            <?php endif; ?>
-        </div>
-    </div>
-    
-</div>
 
 <!-- جدول تفاصيل الراتب -->
 <div class="salary-details-table">
@@ -1007,7 +982,7 @@ $monthName = date('F', mktime(0, 0, 0, $selectedMonth, 1));
         
         <div class="alert alert-info">
             <i class="bi bi-info-circle me-2"></i>
-            سيتم خصم المبلغ من راتبك القادم بعد الموافقة
+            سيتم خصم المبلغ من راتبك الحالي بعد الموافقة
         </div>
         
         <div class="text-center">
