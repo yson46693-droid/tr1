@@ -2065,15 +2065,35 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
                         $hourlyRate = cleanFinancialValue($salary['hourly_rate'] ?? $salary['current_hourly_rate'] ?? 0);
                         $userRole = $salary['role'] ?? 'production';
                         
-                        // حساب نسبة التحصيلات
+                        // حساب نسبة التحصيلات - إعادة الحساب دائماً للمندوبين للتأكد من الدقة
                         $collectionsBonus = cleanFinancialValue($salary['collections_bonus'] ?? 0);
                         $collectionsAmount = cleanFinancialValue($salary['collections_amount'] ?? 0);
+                        
+                        // إذا كان مندوب مبيعات، أعد حساب مكافأة التحصيلات من التحصيلات الفعلية
+                        if ($userRole === 'sales') {
+                            $recalculatedCollectionsAmount = calculateSalesCollections($userId, $selectedMonth, $selectedYear);
+                            $recalculatedCollectionsBonus = round($recalculatedCollectionsAmount * 0.02, 2);
+                            
+                            // استخدم القيمة المحسوبة حديثاً إذا كانت أكبر من القيمة المحفوظة
+                            if ($recalculatedCollectionsBonus > $collectionsBonus || $collectionsBonus == 0) {
+                                $collectionsBonus = $recalculatedCollectionsBonus;
+                                $collectionsAmount = $recalculatedCollectionsAmount;
+                            }
+                        }
                         
                         // الحصول على القيم المالية
                         $baseAmount = cleanFinancialValue($salary['base_amount'] ?? 0);
                         $bonus = cleanFinancialValue($salary['bonus'] ?? 0);
                         $deductions = cleanFinancialValue($salary['deductions'] ?? 0);
                         $totalSalary = cleanFinancialValue($salary['total_amount'] ?? 0);
+                        
+                        // حساب الراتب الإجمالي المتوقع مع نسبة التحصيلات
+                        $expectedTotalWithCollections = $baseAmount + $bonus + $collectionsBonus - $deductions;
+                        
+                        // إذا كان الراتب الإجمالي المحفوظ لا يتضمن نسبة التحصيلات، أضفها
+                        if ($userRole === 'sales' && abs($totalSalary - $expectedTotalWithCollections) > 0.01) {
+                            $totalSalary = $expectedTotalWithCollections;
+                        }
                         ?>
                         <div class="detail-row">
                             <span class="detail-label"><?php echo ($userRole === 'sales') ? 'الراتب الشهري' : 'سعر الساعة'; ?>:</span>
@@ -2097,7 +2117,7 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
                             <span class="detail-label">الراتب الأساسي:</span>
                             <span class="detail-value"><?php echo formatCurrency($baseAmount); ?></span>
                         </div>
-                        <?php if ($userRole === 'sales' && $collectionsBonus > 0): ?>
+                        <?php if ($userRole === 'sales'): ?>
                         <div class="detail-row">
                             <span class="detail-label">نسبة التحصيلات:</span>
                             <span class="detail-value text-info">
@@ -2105,6 +2125,10 @@ $pageTitle = ($view === 'advances') ? 'السلف' : (($view === 'pending') ? '�
                                 <?php if ($collectionsAmount > 0): ?>
                                     <small class="text-muted d-block" style="font-size: 11px; margin-top: 2px;">
                                         (من <?php echo formatCurrency($collectionsAmount); ?>)
+                                    </small>
+                                <?php else: ?>
+                                    <small class="text-muted d-block" style="font-size: 11px; margin-top: 2px;">
+                                        (لا توجد تحصيلات)
                                     </small>
                                 <?php endif; ?>
                             </span>
