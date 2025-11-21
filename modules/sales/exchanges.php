@@ -46,6 +46,13 @@ $basePath = getBasePath();
                 </div>
             <?php endif; ?>
             
+            <!-- Dynamic Success Message -->
+            <div id="dynamicSuccessAlert" class="alert alert-success alert-dismissible fade show" role="alert" style="display: none;">
+                <i class="bi bi-check-circle-fill me-2"></i>
+                <span id="successMessageText"></span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            
             <div class="card shadow-sm">
                 <div class="card-header bg-primary text-white">
                     <h5 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i>نموذج إنشاء استبدال</h5>
@@ -169,6 +176,27 @@ $basePath = getBasePath();
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Requests Table -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-clock-history me-2"></i>طلبات المرتجع والاستبدال الأخيرة
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="recentRequestsLoading" class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">جاري التحميل...</span>
+                        </div>
+                    </div>
+                    <div id="recentRequestsTable" class="table-responsive"></div>
                 </div>
             </div>
         </div>
@@ -641,8 +669,29 @@ document.getElementById('submitExchangeRequest').addEventListener('click', funct
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('تم إنشاء الاستبدال بنجاح!\nرقم الاستبدال: ' + data.exchange_number + '\n' + (data.balance_note || ''));
-            location.reload();
+            // إظهار رسالة النجاح
+            const successMessage = 'تم إنشاء طلب الاستبدال بنجاح!<br>رقم الاستبدال: <strong>' + data.exchange_number + '</strong>' + (data.balance_note ? '<br>' + data.balance_note : '') + '<br>تم إرساله للموافقة';
+            const successAlert = document.getElementById('dynamicSuccessAlert');
+            const successText = document.getElementById('successMessageText');
+            
+            if (successAlert && successText) {
+                successText.innerHTML = successMessage;
+                successAlert.style.display = 'block';
+                
+                // التمرير إلى أعلى الصفحة لرؤية الرسالة
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                
+                // الانتظار 3 ثوانٍ ثم إعادة تحميل الصفحة
+                setTimeout(function() {
+                    location.reload();
+                }, 3000);
+            } else {
+                // Fallback: استخدام alert إذا لم يتم العثور على العناصر
+                alert('تم إنشاء الاستبدال بنجاح!\nرقم الاستبدال: ' + data.exchange_number + '\n' + (data.balance_note || ''));
+                setTimeout(function() {
+                    location.reload();
+                }, 2000);
+            }
         } else {
             btn.disabled = false;
             btn.innerHTML = originalHTML;
@@ -662,8 +711,135 @@ document.addEventListener('click', function(event) {
     const dropdown = document.getElementById('customerDropdown');
     const searchInput = document.getElementById('customerSearch');
     
-    if (!dropdown.contains(event.target) && event.target !== searchInput) {
+    if (dropdown && searchInput && !dropdown.contains(event.target) && event.target !== searchInput) {
         dropdown.style.display = 'none';
     }
 });
+
+// Load recent requests on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadRecentRequests();
+});
+
+function loadRecentRequests() {
+    const loadingDiv = document.getElementById('recentRequestsLoading');
+    const tableDiv = document.getElementById('recentRequestsTable');
+    
+    if (!loadingDiv || !tableDiv) {
+        return;
+    }
+    
+    loadingDiv.style.display = 'block';
+    tableDiv.innerHTML = '';
+    
+    fetch(basePath + '/api/return_requests.php?action=get_recent_requests&limit=20', {
+        credentials: 'same-origin',
+        headers: {
+            'Accept': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        loadingDiv.style.display = 'none';
+        
+        if (data.success && data.data) {
+            displayRecentRequests(data.data);
+        } else {
+            tableDiv.innerHTML = '<div class="alert alert-warning">لا توجد طلبات</div>';
+        }
+    })
+    .catch(error => {
+        loadingDiv.style.display = 'none';
+        tableDiv.innerHTML = '<div class="alert alert-danger">حدث خطأ أثناء تحميل الطلبات</div>';
+        console.error('Error:', error);
+    });
+}
+
+function displayRecentRequests(data) {
+    const tableDiv = document.getElementById('recentRequestsTable');
+    
+    const allRequests = [];
+    
+    // Add return requests
+    if (data.returns && data.returns.length > 0) {
+        data.returns.forEach(req => {
+            allRequests.push(req);
+        });
+    }
+    
+    // Add exchange requests
+    if (data.exchanges && data.exchanges.length > 0) {
+        data.exchanges.forEach(req => {
+            allRequests.push(req);
+        });
+    }
+    
+    // Sort by created_at descending
+    allRequests.sort((a, b) => {
+        return new Date(b.created_at) - new Date(a.created_at);
+    });
+    
+    if (allRequests.length === 0) {
+        tableDiv.innerHTML = '<div class="alert alert-info">لا توجد طلبات حتى الآن</div>';
+        return;
+    }
+    
+    let html = `
+        <table class="table table-bordered table-hover table-striped">
+            <thead class="table-light">
+                <tr>
+                    <th>نوع الطلب</th>
+                    <th>رقم الطلب</th>
+                    <th>التاريخ</th>
+                    <th>العميل</th>
+                    <th>المبلغ</th>
+                    <th>الحالة</th>
+                    <th>الملاحظات</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    allRequests.forEach(req => {
+        const isReturn = req.type === 'return';
+        const requestNumber = isReturn ? req.return_number : req.exchange_number;
+        const requestDate = isReturn ? req.return_date : req.exchange_date;
+        const amount = isReturn ? req.refund_amount : req.difference_amount;
+        
+        const statusBadge = getStatusBadge(req.status, req.status_label);
+        const typeLabel = isReturn ? '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-counterclockwise"></i> مرتجع</span>' : '<span class="badge bg-info"><i class="bi bi-arrow-left-right"></i> استبدال</span>';
+        
+        html += `
+            <tr>
+                <td>${typeLabel}</td>
+                <td><strong>${requestNumber}</strong></td>
+                <td>${requestDate}</td>
+                <td>${req.customer_name || 'غير معروف'}</td>
+                <td>${parseFloat(amount).toFixed(2)} ج.م</td>
+                <td>${statusBadge}</td>
+                <td><small class="text-muted">${req.notes || '-'}</small></td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    tableDiv.innerHTML = html;
+}
+
+function getStatusBadge(status, label) {
+    const statusColors = {
+        'pending': 'warning',
+        'approved': 'success',
+        'rejected': 'danger',
+        'completed': 'primary',
+        'processed': 'info'
+    };
+    
+    const color = statusColors[status] || 'secondary';
+    return `<span class="badge bg-${color}">${label || status}</span>`;
+}
 </script>

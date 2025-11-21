@@ -73,7 +73,6 @@ try {
 
 // Get base path for API calls
 $basePath = getBasePath();
-$dashboardUrl = getDashboardUrl('sales');
 ?>
 
 <div class="container-fluid">
@@ -230,7 +229,6 @@ $dashboardUrl = getDashboardUrl('sales');
 
 <script>
 const basePath = '<?php echo $basePath; ?>';
-const dashboardUrl = '<?php echo htmlspecialchars($dashboardUrl, ENT_QUOTES, 'UTF-8'); ?>';
 let selectedCustomerId = null;
 let purchaseHistory = [];
 let selectedReturnItems = [];
@@ -648,5 +646,133 @@ document.getElementById('submitReturnRequest').addEventListener('click', functio
         alert('حدث خطأ في الاتصال بالخادم. يرجى المحاولة مرة أخرى.');
     });
 });
+
+// Load recent requests on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadRecentRequests();
+});
+
+function loadRecentRequests() {
+    const loadingDiv = document.getElementById('recentRequestsLoading');
+    const tableDiv = document.getElementById('recentRequestsTable');
+    
+    if (!loadingDiv || !tableDiv) {
+        return;
+    }
+    
+    loadingDiv.style.display = 'block';
+    tableDiv.innerHTML = '';
+    
+    fetch(basePath + '/api/return_requests.php?action=get_recent_requests&limit=20', {
+        credentials: 'same-origin',
+        headers: {
+            'Accept': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        loadingDiv.style.display = 'none';
+        
+        if (data.success && data.data) {
+            displayRecentRequests(data.data);
+        } else {
+            tableDiv.innerHTML = '<div class="alert alert-warning">لا توجد طلبات</div>';
+        }
+    })
+    .catch(error => {
+        loadingDiv.style.display = 'none';
+        tableDiv.innerHTML = '<div class="alert alert-danger">حدث خطأ أثناء تحميل الطلبات</div>';
+        console.error('Error:', error);
+    });
+}
+
+function displayRecentRequests(data) {
+    const tableDiv = document.getElementById('recentRequestsTable');
+    
+    const allRequests = [];
+    
+    // Add return requests
+    if (data.returns && data.returns.length > 0) {
+        data.returns.forEach(req => {
+            allRequests.push(req);
+        });
+    }
+    
+    // Add exchange requests
+    if (data.exchanges && data.exchanges.length > 0) {
+        data.exchanges.forEach(req => {
+            allRequests.push(req);
+        });
+    }
+    
+    // Sort by created_at descending
+    allRequests.sort((a, b) => {
+        return new Date(b.created_at) - new Date(a.created_at);
+    });
+    
+    if (allRequests.length === 0) {
+        tableDiv.innerHTML = '<div class="alert alert-info">لا توجد طلبات حتى الآن</div>';
+        return;
+    }
+    
+    let html = `
+        <table class="table table-bordered table-hover table-striped">
+            <thead class="table-light">
+                <tr>
+                    <th>نوع الطلب</th>
+                    <th>رقم الطلب</th>
+                    <th>التاريخ</th>
+                    <th>العميل</th>
+                    <th>المبلغ</th>
+                    <th>الحالة</th>
+                    <th>الملاحظات</th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    allRequests.forEach(req => {
+        const isReturn = req.type === 'return';
+        const requestNumber = isReturn ? req.return_number : req.exchange_number;
+        const requestDate = isReturn ? req.return_date : req.exchange_date;
+        const amount = isReturn ? req.refund_amount : req.difference_amount;
+        const amountLabel = isReturn ? 'مبلغ المرتجع' : 'الفرق';
+        
+        const statusBadge = getStatusBadge(req.status, req.status_label);
+        const typeLabel = isReturn ? '<span class="badge bg-warning text-dark"><i class="bi bi-arrow-counterclockwise"></i> مرتجع</span>' : '<span class="badge bg-info"><i class="bi bi-arrow-left-right"></i> استبدال</span>';
+        
+        html += `
+            <tr>
+                <td>${typeLabel}</td>
+                <td><strong>${requestNumber}</strong></td>
+                <td>${requestDate}</td>
+                <td>${req.customer_name || 'غير معروف'}</td>
+                <td>${parseFloat(amount).toFixed(2)} ج.م</td>
+                <td>${statusBadge}</td>
+                <td><small class="text-muted">${req.notes || '-'}</small></td>
+            </tr>
+        `;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    tableDiv.innerHTML = html;
+}
+
+function getStatusBadge(status, label) {
+    const statusColors = {
+        'pending': 'warning',
+        'approved': 'success',
+        'rejected': 'danger',
+        'completed': 'primary',
+        'processed': 'info'
+    };
+    
+    const color = statusColors[status] || 'secondary';
+    return `<span class="badge bg-${color}">${label || status}</span>`;
+}
 
 </script>

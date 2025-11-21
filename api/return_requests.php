@@ -638,3 +638,158 @@ function handleGetReturnDetails(): void
     ]);
 }
 
+/**
+ * Get recent return and exchange requests for current sales rep
+ */
+function handleGetRecentRequests(): void
+{
+    $currentUser = getCurrentUser();
+    if (!$currentUser) {
+        returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
+    }
+    
+    $db = db();
+    
+    // Get sales rep ID (if sales rep, use their ID; if manager/accountant, get all)
+    $salesRepId = null;
+    if ($currentUser['role'] === 'sales') {
+        $salesRepId = (int)$currentUser['id'];
+    }
+    
+    $limit = isset($_GET['limit']) ? min(50, max(1, (int)$_GET['limit'])) : 20;
+    
+    $result = [
+        'returns' => [],
+        'exchanges' => []
+    ];
+    
+    // Get recent return requests
+    $returnsSql = "SELECT 
+                        r.id,
+                        r.return_number,
+                        r.return_date,
+                        r.status,
+                        r.refund_amount,
+                        r.notes,
+                        c.name as customer_name,
+                        i.invoice_number,
+                        r.created_at
+                    FROM returns r
+                    LEFT JOIN customers c ON r.customer_id = c.id
+                    LEFT JOIN invoices i ON r.invoice_id = i.id
+                    WHERE r.created_by = ?";
+    
+    $params = [$currentUser['id']];
+    
+    if ($salesRepId) {
+        $returnsSql .= " AND r.sales_rep_id = ?";
+        $params[] = $salesRepId;
+    }
+    
+    $returnsSql .= " ORDER BY r.created_at DESC LIMIT ?";
+    $params[] = $limit;
+    
+    $returns = $db->query($returnsSql, $params);
+    
+    foreach ($returns as $return) {
+        $statusLabel = getReturnStatusLabel($return['status']);
+        $result['returns'][] = [
+            'id' => (int)$return['id'],
+            'return_number' => $return['return_number'],
+            'return_date' => $return['return_date'],
+            'status' => $return['status'],
+            'status_label' => $statusLabel,
+            'refund_amount' => (float)$return['refund_amount'],
+            'customer_name' => $return['customer_name'] ?? 'غير معروف',
+            'invoice_number' => $return['invoice_number'] ?? '-',
+            'notes' => $return['notes'] ?? '',
+            'created_at' => $return['created_at'],
+            'type' => 'return'
+        ];
+    }
+    
+    // Get recent exchange requests
+    // Check which exchange table exists
+    $exchangesTableExists = $db->queryOne("SHOW TABLES LIKE 'exchanges'");
+    $productExchangesTableExists = $db->queryOne("SHOW TABLES LIKE 'product_exchanges'");
+    
+    if (!empty($exchangesTableExists) || !empty($productExchangesTableExists)) {
+        $tableName = !empty($exchangesTableExists) ? 'exchanges' : 'product_exchanges';
+        $exchangeDateCol = ($tableName === 'exchanges') ? 'exchange_date' : 'exchange_date';
+        $originalTotalCol = ($tableName === 'exchanges') ? 'original_total' : 'original_total';
+        
+        $exchangesSql = "SELECT 
+                            e.id,
+                            e.exchange_number,
+                            e.{$exchangeDateCol} as exchange_date,
+                            e.status,
+                            e.{$originalTotalCol} as original_total,
+                            e.new_total,
+                            e.difference_amount,
+                            e.notes,
+                            c.name as customer_name,
+                            e.created_at
+                        FROM {$tableName} e
+                        LEFT JOIN customers c ON e.customer_id = c.id
+                        WHERE e.created_by = ?";
+        
+        $exParams = [$currentUser['id']];
+        
+        if ($salesRepId) {
+            $exchangesSql .= " AND e.sales_rep_id = ?";
+            $exParams[] = $salesRepId;
+        }
+        
+        $exchangesSql .= " ORDER BY e.created_at DESC LIMIT ?";
+        $exParams[] = $limit;
+        
+        $exchanges = $db->query($exchangesSql, $exParams);
+        
+        foreach ($exchanges as $exchange) {
+            $statusLabel = getExchangeStatusLabel($exchange['status']);
+            $result['exchanges'][] = [
+                'id' => (int)$exchange['id'],
+                'exchange_number' => $exchange['exchange_number'],
+                'exchange_date' => $exchange['exchange_date'],
+                'status' => $exchange['status'],
+                'status_label' => $statusLabel,
+                'original_total' => (float)($exchange['original_total'] ?? 0),
+                'new_total' => (float)($exchange['new_total'] ?? 0),
+                'difference_amount' => (float)($exchange['difference_amount'] ?? 0),
+                'customer_name' => $exchange['customer_name'] ?? 'غير معروف',
+                'notes' => $exchange['notes'] ?? '',
+                'created_at' => $exchange['created_at'],
+                'type' => 'exchange'
+            ];
+        }
+    }
+    
+    returnJson([
+        'success' => true,
+        'data' => $result
+    ]);
+}
+
+function getReturnStatusLabel($status): string
+{
+    $labels = [
+        'pending' => 'قيد الانتظار',
+        'approved' => 'موافق عليه',
+        'rejected' => 'مرفوض',
+        'completed' => 'مكتمل',
+        'processed' => 'تم المعالجة'
+    ];
+    return $labels[$status] ?? $status;
+}
+
+function getExchangeStatusLabel($status): string
+{
+    $labels = [
+        'pending' => 'قيد الانتظار',
+        'approved' => 'موافق عليه',
+        'rejected' => 'مرفوض',
+        'completed' => 'مكتمل'
+    ];
+    return $labels[$status] ?? $status;
+}
+
