@@ -205,6 +205,27 @@ $dashboardUrl = getDashboardUrl('sales');
             </div>
         </div>
     </div>
+    
+    <!-- Recent Requests Table -->
+    <div class="row mt-5">
+        <div class="col-12">
+            <div class="card shadow-sm">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">
+                        <i class="bi bi-clock-history me-2"></i>طلبات المرتجع والاستبدال الأخيرة
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="recentRequestsLoading" class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">جاري التحميل...</span>
+                        </div>
+                    </div>
+                    <div id="recentRequestsTable" class="table-responsive"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -603,16 +624,16 @@ document.getElementById('submitReturnRequest').addEventListener('click', functio
                 // التمرير إلى أعلى الصفحة لرؤية الرسالة
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 
-                // الانتظار 3 ثوانٍ ثم التحويل إلى الداشبورد
+                // الانتظار 3 ثوانٍ ثم إعادة تحميل الصفحة
                 setTimeout(function() {
-                    window.location.href = dashboardUrl;
+                    location.reload();
                 }, 3000);
             } else {
                 // Fallback: استخدام alert إذا لم يتم العثور على العناصر
                 alert('تم إنشاء طلب المرتجع بنجاح!\nرقم المرتجع: ' + data.return_number + '\nتم إرساله للموافقة');
                 setTimeout(function() {
-                    window.location.href = dashboardUrl;
-                }, 1000);
+                    location.reload();
+                }, 2000);
             }
         } else {
             btn.disabled = false;

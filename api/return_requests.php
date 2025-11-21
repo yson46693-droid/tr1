@@ -53,6 +53,13 @@ try {
             handleGetReturnDetails();
             break;
             
+        case 'get_recent_requests':
+            if ($method !== 'GET') {
+                returnJson(['success' => false, 'message' => 'يجب استخدام طلب GET لهذا الإجراء'], 405);
+            }
+            handleGetRecentRequests();
+            break;
+            
         default:
             returnJson(['success' => false, 'message' => 'إجراء غير مدعوم'], 400);
     }
