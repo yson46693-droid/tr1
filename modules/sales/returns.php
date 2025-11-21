@@ -73,6 +73,7 @@ try {
 
 // Get base path for API calls
 $basePath = getBasePath();
+$dashboardUrl = getDashboardUrl('sales');
 ?>
 
 <div class="container-fluid">
@@ -95,6 +96,13 @@ $basePath = getBasePath();
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     </div>
 <?php endif; ?>
+
+            <!-- Dynamic Success Message -->
+            <div id="dynamicSuccessAlert" class="alert alert-success alert-dismissible fade show" role="alert" style="display: none;">
+                <i class="bi bi-check-circle-fill me-2"></i>
+                <span id="successMessageText"></span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
 
             <div class="card shadow-sm">
                 <div class="card-header bg-primary text-white">
@@ -201,6 +209,7 @@ $basePath = getBasePath();
 
 <script>
 const basePath = '<?php echo $basePath; ?>';
+const dashboardUrl = '<?php echo htmlspecialchars($dashboardUrl, ENT_QUOTES, 'UTF-8'); ?>';
 let selectedCustomerId = null;
 let purchaseHistory = [];
 let selectedReturnItems = [];
@@ -582,9 +591,29 @@ document.getElementById('submitReturnRequest').addEventListener('click', functio
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            alert('تم إنشاء طلب المرتجع بنجاح!\nرقم المرتجع: ' + data.return_number + '\nتم إرساله للموافقة');
-            // Reset form
-            location.reload();
+            // إظهار رسالة النجاح
+            const successMessage = 'تم إنشاء طلب المرتجع بنجاح!<br>رقم المرتجع: <strong>' + data.return_number + '</strong><br>تم إرساله للموافقة';
+            const successAlert = document.getElementById('dynamicSuccessAlert');
+            const successText = document.getElementById('successMessageText');
+            
+            if (successAlert && successText) {
+                successText.innerHTML = successMessage;
+                successAlert.style.display = 'block';
+                
+                // التمرير إلى أعلى الصفحة لرؤية الرسالة
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                
+                // الانتظار 3 ثوانٍ ثم التحويل إلى الداشبورد
+                setTimeout(function() {
+                    window.location.href = dashboardUrl;
+                }, 3000);
+            } else {
+                // Fallback: استخدام alert إذا لم يتم العثور على العناصر
+                alert('تم إنشاء طلب المرتجع بنجاح!\nرقم المرتجع: ' + data.return_number + '\nتم إرساله للموافقة');
+                setTimeout(function() {
+                    window.location.href = dashboardUrl;
+                }, 1000);
+            }
         } else {
             btn.disabled = false;
             btn.innerHTML = originalHTML;
