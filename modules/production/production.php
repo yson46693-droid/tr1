@@ -6208,8 +6208,21 @@ function renderTemplateSuppliers(details) {
         if (!component) {
             return 'generic';
         }
+        const key = (component.key || '').toString().toLowerCase();
+        const name = ((component.name || component.label || '').toString().toLowerCase());
+        
+        // يجب التحقق من الشمع أولاً لتجنب تعارضه مع العسل (مثل "شمع عسل")
+        // هذا يجب أن يكون قبل أي فحص آخر
+        if (key.startsWith('beeswax') || name.includes('شمع') || key.includes('beeswax') || key.includes('wax')) {
+            return 'beeswax';
+        }
+        
         const type = (component.type || '').toString().toLowerCase();
         if (type) {
+            // إذا كان النوع محدداً وكان شمع، لا تغيره
+            if (type === 'beeswax') {
+                return 'beeswax';
+            }
             if (requiresHoneyVariety(component) && !HONEY_COMPONENT_TYPES.includes(type)) {
                 return 'honey_general';
             }
@@ -6217,13 +6230,6 @@ function renderTemplateSuppliers(details) {
         }
         if (requiresHoneyVariety(component)) {
             return 'honey_general';
-        }
-        const key = (component.key || '').toString().toLowerCase();
-        const name = ((component.name || component.label || '').toString().toLowerCase());
-        
-        // يجب التحقق من الشمع أولاً لتجنب تعارضه مع العسل (مثل "شمع عسل")
-        if (key.startsWith('beeswax') || name.includes('شمع') || key.includes('beeswax') || key.includes('wax')) {
-            return 'beeswax';
         }
         
         if (key.startsWith('pack_')) return 'packaging';
@@ -6430,9 +6436,18 @@ function renderTemplateSuppliers(details) {
     const honeyComponentEntries = components
         .filter(component => {
             const canonicalType = determineComponentType(component);
-            const honeyVarietyRequired = requiresHoneyVariety(component);
+            // يجب استثناء مكونات الشمع من مجموعة العسل لتجنب التضارب
+            if (canonicalType === 'beeswax') {
+                return false;
+            }
             const componentName = ((component.name || component.label || '').toString().toLowerCase());
             const componentKeyLower = ((component.key || component.name || '').toString().toLowerCase());
+            // استثناء مكونات الشمع من مجموعة العسل
+            const isBeeswax = componentName.includes('شمع') || componentKeyLower.includes('beeswax') || componentKeyLower.includes('wax');
+            if (isBeeswax) {
+                return false;
+            }
+            const honeyVarietyRequired = requiresHoneyVariety(component);
             const isHoneyByNameOrKey = componentName.includes('عسل') || componentKeyLower.includes('honey');
             
             return (
@@ -6485,7 +6500,8 @@ function renderTemplateSuppliers(details) {
         let canonicalType = determineComponentType(component);
         const componentKey = resolveComponentKey(component);
         const honeyVarietyRequired = requiresHoneyVariety(component);
-        if (honeyVarietyRequired && !HONEY_COMPONENT_TYPES.includes(canonicalType)) {
+        // لا تغير النوع إلى honey_general إذا كان المكون شمع
+        if (honeyVarietyRequired && canonicalType !== 'beeswax' && !HONEY_COMPONENT_TYPES.includes(canonicalType)) {
             canonicalType = 'honey_general';
         }
         // فحص شامل لتحديد ما إذا كان المكوّن عسل أو شمع
