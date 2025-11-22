@@ -6449,6 +6449,32 @@ function renderTemplateSuppliers(details) {
         processedKeys: new Set()
     };
 
+    // تجميع مكونات الشمع في بطاقة منفصلة
+    const beeswaxComponentEntries = components
+        .filter(component => {
+            const canonicalType = determineComponentType(component);
+            const componentName = ((component.name || component.label || '').toString().toLowerCase());
+            const componentKeyLower = ((component.key || component.name || '').toString().toLowerCase());
+            const isBeeswaxByNameOrKey = componentName.includes('شمع') || componentKeyLower.includes('beeswax') || componentKeyLower.includes('wax');
+            
+            return (
+                canonicalType === 'beeswax'
+                || isBeeswaxByNameOrKey
+            );
+        })
+        .map(component => ({
+            component,
+            key: resolveComponentKey(component)
+        }));
+
+    const beeswaxGroup = {
+        entries: beeswaxComponentEntries,
+        baseEntry: beeswaxComponentEntries[0] || null,
+        extraEntries: beeswaxComponentEntries.slice(1),
+        renderAggregated: beeswaxComponentEntries.length > 0,
+        processedKeys: new Set()
+    };
+
     components.forEach(function(component) {
         let canonicalType = determineComponentType(component);
         const componentKey = resolveComponentKey(component);
@@ -6469,6 +6495,10 @@ function renderTemplateSuppliers(details) {
             || canonicalType === 'honey_general'
             || isHoneyByNameOrKey;
 
+        // فحص شامل لتحديد ما إذا كان المكوّن شمع
+        const isBeeswaxByNameOrKey = componentName.includes('شمع') || componentKeyLower.includes('beeswax') || componentKeyLower.includes('wax');
+        const isBeeswaxType = canonicalType === 'beeswax' || isBeeswaxByNameOrKey;
+
         // تجميع جميع مكوّنات العسل في بطاقة واحدة فقط
         if (isHoneyType) {
             // إذا كان هناك مكوّنات عسل وتم بالفعل عرض بطاقة العسل
@@ -6484,15 +6514,37 @@ function renderTemplateSuppliers(details) {
             }
         }
 
+        // تجميع جميع مكوّنات الشمع في بطاقة واحدة فقط
+        if (isBeeswaxType) {
+            // إذا كان هناك مكوّنات شمع وتم بالفعل عرض بطاقة الشمع
+            if (beeswaxGroup.baseEntry && componentKey !== beeswaxGroup.baseEntry.key) {
+                return; // تخطي المكوّنات الإضافية
+            }
+            // إذا كان هذا هو المكوّن الأول من الشمع، تأكد من أنه لم يتم عرضه من قبل
+            if (beeswaxGroup.baseEntry && componentKey === beeswaxGroup.baseEntry.key) {
+                if (beeswaxGroup.processedKeys.has(componentKey)) {
+                    return; // تم عرضه بالفعل
+                }
+                beeswaxGroup.processedKeys.add(componentKey);
+            }
+        }
+
         const isAggregatedHoneyCard = isHoneyType
             && honeyGroup.baseEntry
             && componentKey === honeyGroup.baseEntry.key
             && honeyGroup.renderAggregated;
 
+        const isAggregatedBeeswaxCard = isBeeswaxType
+            && beeswaxGroup.baseEntry
+            && componentKey === beeswaxGroup.baseEntry.key
+            && beeswaxGroup.renderAggregated;
+
         const aggregatedEntries = isAggregatedHoneyCard ? honeyGroup.entries : [];
         const extraHoneyEntries = isAggregatedHoneyCard ? honeyGroup.extraEntries : [];
+        const aggregatedBeeswaxEntries = isAggregatedBeeswaxCard ? beeswaxGroup.entries : [];
+        const extraBeeswaxEntries = isAggregatedBeeswaxCard ? beeswaxGroup.extraEntries : [];
 
-        const effectiveType = isAggregatedHoneyCard ? 'honey_main' : canonicalType;
+        const effectiveType = isAggregatedHoneyCard ? 'honey_main' : (isAggregatedBeeswaxCard ? 'beeswax' : canonicalType);
         const safeTypeClass = effectiveType.replace(/[^a-z0-9_-]/g, '') || 'generic';
 
         const col = document.createElement('div');
@@ -6502,7 +6554,7 @@ function renderTemplateSuppliers(details) {
         card.className = `component-card component-type-${safeTypeClass}`;
         card.style.setProperty('--component-accent', accentColors[effectiveType] || accentColors.default);
 
-        if (!isHoneyType) {
+        if (!isHoneyType && !isBeeswaxType) {
             const header = document.createElement('div');
             header.className = 'component-card-header';
 
@@ -6538,7 +6590,7 @@ function renderTemplateSuppliers(details) {
             }
         } else {
             card.classList.add('component-card-compact');
-            // إضافة عنوان للمكوّنات المجمعة
+            // إضافة عنوان للمكوّنات المجمعة - العسل
             if (isAggregatedHoneyCard && aggregatedEntries.length > 0) {
                 const header = document.createElement('div');
                 header.className = 'component-card-header mb-2';
@@ -6563,6 +6615,31 @@ function renderTemplateSuppliers(details) {
                 meta.innerHTML = '<i class="bi bi-stars me-2"></i><span>' + metaList + '</span>';
                 card.appendChild(meta);
             }
+            // إضافة عنوان للمكوّنات المجمعة - الشمع
+            if (isAggregatedBeeswaxCard && aggregatedBeeswaxEntries.length > 0) {
+                const header = document.createElement('div');
+                header.className = 'component-card-header mb-2';
+                const title = document.createElement('span');
+                title.className = 'component-card-title';
+                if (aggregatedBeeswaxEntries.length === 1) {
+                    title.textContent = aggregatedBeeswaxEntries[0].component.name || aggregatedBeeswaxEntries[0].component.label || 'مكوّن شمع';
+                } else {
+                    title.textContent = 'مواد الشمع (' + aggregatedBeeswaxEntries.length + ' مكوّن)';
+                }
+                header.appendChild(title);
+                card.appendChild(header);
+                
+                // إضافة معلومات المكوّنات
+                const meta = document.createElement('div');
+                meta.className = 'component-card-meta mb-2';
+                const metaList = aggregatedBeeswaxEntries.map(entry => {
+                    const name = entry.component.name || entry.component.label || 'مكوّن';
+                    const qty = entry.component.quantity || entry.component.amount || '';
+                    return name + (qty ? ' (' + qty + ')' : '');
+                }).join('، ');
+                meta.innerHTML = '<i class="bi bi-hexagon me-2"></i><span>' + metaList + '</span>';
+                card.appendChild(meta);
+            }
         }
 
         const controlLabel = document.createElement('label');
@@ -6572,6 +6649,11 @@ function renderTemplateSuppliers(details) {
             controlLabel.textContent = aggregatedEntries.length > 1 
                 ? 'مورد العسل (سيتم تطبيقه على جميع مكوّنات العسل)'
                 : 'مورد العسل';
+        } else if (isBeeswaxType) {
+            // لمكوّنات الشمع، استخدم دائماً "مورد الشمع"
+            controlLabel.textContent = aggregatedBeeswaxEntries.length > 1 
+                ? 'مورد الشمع (سيتم تطبيقه على جميع مكوّنات الشمع)'
+                : 'مورد الشمع';
         } else {
             const typeLabel = typeLabelsMap[effectiveType] || 'المادة';
             controlLabel.textContent = 'مورد ' + typeLabel;
@@ -6600,6 +6682,12 @@ function renderTemplateSuppliers(details) {
             // تأكد من أن الموردين المفلترين هم فقط موردين العسل
             const allSuppliers = window.productionSuppliers || [];
             suppliersList = allSuppliers.filter(supplier => supplier.type === 'honey');
+        } else if (isBeeswaxType) {
+            // لمكوّنات الشمع، استخدم موردين الشمع فقط حتى لو كان عددهم 0
+            suppliersList = suppliersForComponent;
+            // تأكد من أن الموردين المفلترين هم فقط موردين الشمع
+            const allSuppliers = window.productionSuppliers || [];
+            suppliersList = allSuppliers.filter(supplier => supplier.type === 'beeswax');
         } else {
             // للمكوّنات الأخرى، استخدم الموردين المفلترين حسب نوع المكون فقط
             // إذا لم يتم العثور على موردين محددين، لا تستخدم fallback لجميع الموردين
