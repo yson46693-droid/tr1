@@ -76,13 +76,25 @@ if (!empty($advance['deducted_from_salary_id'])) {
             $otherDeductions = max(0, $salaryDetails['deductions'] - $advanceAmount);
         }
         
-        // حساب الراتب الإجمالي قبل خصم السلفة
-        $baseAmount = $salaryDetails['base_amount'];
-        $bonus = $salaryDetails['bonus'];
-        $collectionsBonus = $salaryDetails['collections_bonus'];
+        // استخدام نفس دالة حساب الراتب من salary_calculator.php لضمان الاتساق
+        // إنشاء نسخة من salaryDetails بدون السلفة لحساب الراتب الإجمالي قبل خصم السلفة
+        $salaryRecordForCalculation = $salaryDetails;
+        $salaryRecordForCalculation['deductions'] = $otherDeductions; // استخدام الخصومات الأخرى فقط (بدون السلفة)
         
-        // الراتب الإجمالي قبل خصم السلفة
-        $totalBeforeAdvance = $baseAmount + $bonus + $collectionsBonus - $otherDeductions;
+        // حساب الراتب الإجمالي قبل خصم السلفة باستخدام نفس الدالة
+        $salaryCalculation = calculateTotalSalaryWithCollections(
+            $salaryRecordForCalculation, 
+            $advance['user_id'], 
+            $month, 
+            $year, 
+            $advance['role']
+        );
+        
+        $totalBeforeAdvance = $salaryCalculation['total_salary'];
+        $collectionsBonus = $salaryCalculation['collections_bonus'];
+        
+        // تحديث collections_bonus بالقيمة المحسوبة
+        $salaryDetails['collections_bonus'] = $collectionsBonus;
         
         // الراتب الإجمالي بعد خصم السلفة
         $totalAfterAdvance = max(0, $totalBeforeAdvance - $advanceAmount);

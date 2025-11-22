@@ -1957,3 +1957,67 @@ function salaryAdvanceApplyDeduction(array $advance, array $salaryData, ?Databas
     return ['success' => true];
 }
 
+/**
+ * حساب الراتب الإجمالي بشكل صحيح مع نسبة التحصيلات
+ * تستخدم نفس المنطق المستخدم في صفحة "مرتبي"
+ */
+function calculateTotalSalaryWithCollections($salaryRecord, $userId, $month, $year, $role) {
+    $baseAmount = cleanFinancialValue($salaryRecord['base_amount'] ?? 0);
+    $bonus = cleanFinancialValue($salaryRecord['bonus'] ?? 0);
+    $deductions = cleanFinancialValue($salaryRecord['deductions'] ?? 0);
+    $totalSalaryBase = cleanFinancialValue($salaryRecord['total_amount'] ?? 0);
+    
+    // حساب نسبة التحصيلات للمندوبين
+    $collectionsBonus = 0;
+    if ($role === 'sales') {
+        $collectionsAmount = calculateSalesCollections($userId, $month, $year);
+        $collectionsBonus = round($collectionsAmount * 0.02, 2);
+        
+        // إذا كان الراتب محفوظاً، تحقق من وجود نسبة التحصيلات المحفوظة
+        if (isset($salaryRecord['collections_bonus'])) {
+            $savedCollectionsBonus = cleanFinancialValue($salaryRecord['collections_bonus'] ?? 0);
+            // استخدم القيمة المحسوبة حديثاً إذا كانت أكبر من القيمة المحفوظة
+            if ($collectionsBonus > $savedCollectionsBonus || $savedCollectionsBonus == 0) {
+                // استخدم القيمة المحسوبة حديثاً
+            } else {
+                $collectionsBonus = $savedCollectionsBonus;
+            }
+        }
+    }
+    
+    // حساب الراتب الإجمالي - دائماً احسبه من المكونات لضمان الدقة
+    // الراتب الإجمالي = الراتب الأساسي + المكافآت + نسبة التحصيلات - الخصومات
+    $totalSalary = $baseAmount + $bonus + $collectionsBonus - $deductions;
+    
+    // إذا كان الراتب الإجمالي المحفوظ ($totalSalaryBase) أكبر من الراتب المحسوب من المكونات
+    // فهذا يعني أن هناك مكونات إضافية (مثل سلفات مخصومة)، لذا استخدم القيمة المحفوظة
+    // لكن تأكد من تضمين نسبة التحصيلات إذا لم تكن مضمنة
+    if ($role === 'sales' && $collectionsBonus > 0) {
+        // حساب الراتب المتوقع بدون نسبة التحصيلات
+        $expectedTotalWithoutCollections = $baseAmount + $bonus - $deductions;
+        
+        // إذا كان الراتب الإجمالي المحفوظ يساوي الراتب المتوقع بدون نسبة التحصيلات
+        // فهذا يعني أن نسبة التحصيلات غير مضمنة، لذا أضفها
+        if (abs($totalSalaryBase - $expectedTotalWithoutCollections) < 0.01) {
+            // نسبة التحصيلات غير مضمنة، أضفها
+            $totalSalary = $totalSalaryBase + $collectionsBonus;
+        } else {
+            // نسبة التحصيلات مضمنة أو هناك خصومات إضافية (مثل سلفات)
+            // استخدم الراتب المحسوب من المكونات
+            $totalSalary = $baseAmount + $bonus + $collectionsBonus - $deductions;
+        }
+    } else {
+        // للمستخدمين الآخرين أو إذا لم تكن هناك نسبة تحصيلات
+        // استخدم الراتب المحسوب من المكونات
+        $totalSalary = $baseAmount + $bonus - $deductions;
+    }
+    
+    return [
+        'total_salary' => cleanFinancialValue($totalSalary),
+        'collections_bonus' => $collectionsBonus,
+        'base_amount' => $baseAmount,
+        'bonus' => $bonus,
+        'deductions' => $deductions
+    ];
+}
+
