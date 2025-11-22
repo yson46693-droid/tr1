@@ -66,32 +66,56 @@ if (!empty($advance['deducted_from_salary_id'])) {
         $month = $salaryDetails['month'] ?? date('n');
         $year = $salaryDetails['year'] ?? date('Y');
         
-        // حساب الخصومات الأخرى (بدون السلفة)
-        // إذا كان هناك عمود advances_deduction، استخدمه لفصل السلفة عن الخصومات الأخرى
-        if ($salaryDetails['advances_deduction'] > 0) {
-            // السلفة موجودة في عمود منفصل
-            $otherDeductions = $salaryDetails['deductions'] - $salaryDetails['advances_deduction'];
-        } else {
-            // السلفة موجودة في deductions، اطرحها
-            $otherDeductions = max(0, $salaryDetails['deductions'] - $advanceAmount);
+        // حساب نسبة التحصيلات إذا كان مندوب مبيعات
+        $collectionsBonus = $salaryDetails['collections_bonus'] ?? 0;
+        if ($advance['role'] === 'sales') {
+            $collectionsAmount = calculateSalesCollections($advance['user_id'], $month, $year);
+            $recalculatedCollectionsBonus = round($collectionsAmount * 0.02, 2);
+            
+            // استخدم القيمة المحسوبة حديثاً إذا كانت أكبر من القيمة المحفوظة
+            if ($recalculatedCollectionsBonus > $collectionsBonus || $collectionsBonus == 0) {
+                $collectionsBonus = $recalculatedCollectionsBonus;
+            }
         }
         
-        // استخدام نفس دالة حساب الراتب من salary_calculator.php لضمان الاتساق
-        // إنشاء نسخة من salaryDetails بدون السلفة لحساب الراتب الإجمالي قبل خصم السلفة
-        $salaryRecordForCalculation = $salaryDetails;
-        $salaryRecordForCalculation['deductions'] = $otherDeductions; // استخدام الخصومات الأخرى فقط (بدون السلفة)
+        // حساب الخصومات الأخرى (بدون السلفة)
+        // إذا كان هناك عمود advances_deduction، استخدمه لفصل السلفة عن الخصومات الأخرى
+        $totalDeductions = $salaryDetails['deductions'] ?? 0;
+        if ($salaryDetails['advances_deduction'] > 0) {
+            // السلفة موجودة في عمود منفصل
+            $otherDeductions = max(0, $totalDeductions - $salaryDetails['advances_deduction']);
+        } else {
+            // السلفة موجودة في deductions، اطرحها
+            $otherDeductions = max(0, $totalDeductions - $advanceAmount);
+        }
         
-        // حساب الراتب الإجمالي قبل خصم السلفة باستخدام نفس الدالة
-        $salaryCalculation = calculateTotalSalaryWithCollections(
-            $salaryRecordForCalculation, 
-            $advance['user_id'], 
-            $month, 
-            $year, 
-            $advance['role']
-        );
+        // حساب الراتب الإجمالي قبل خصم السلفة مباشرة من المكونات
+        // الراتب الإجمالي = الراتب الأساسي + المكافآت + نسبة التحصيلات - الخصومات الأخرى (بدون السلفة)
+        $baseAmount = $salaryDetails['base_amount'];
+        $bonus = $salaryDetails['bonus'] ?? 0;
         
-        $totalBeforeAdvance = $salaryCalculation['total_salary'];
-        $collectionsBonus = $salaryCalculation['collections_bonus'];
+        // حساب الراتب الإجمالي قبل خصم السلفة
+        $totalBeforeAdvance = $baseAmount + $bonus + $collectionsBonus - $otherDeductions;
+        
+        // التحقق من صحة الحساب: إذا كان total_amount في قاعدة البيانات بعد خصم السلفة
+        // فإن total_amount + advanceAmount يجب أن يساوي totalBeforeAdvance (تقريباً)
+        // إذا لم يكن كذلك، قد يكون هناك خطأ في حساب otherDeductions
+        $savedTotalAmount = $salaryDetails['total_amount'];
+        $expectedTotalAfterAdvance = $totalBeforeAdvance - $advanceAmount;
+        
+        // إذا كان الفرق كبيراً (أكثر من 0.01)، قد يكون هناك خطأ في حساب الخصومات
+        // في هذه الحالة، أعد حساب otherDeductions من total_amount
+        if (abs($savedTotalAmount - $expectedTotalAfterAdvance) > 0.01) {
+            // قد يكون total_amount محسوباً بشكل مختلف
+            // أعد حساب otherDeductions من total_amount
+            $reconstructedTotalBeforeAdvance = $savedTotalAmount + $advanceAmount;
+            $reconstructedOtherDeductions = $baseAmount + $bonus + $collectionsBonus - $reconstructedTotalBeforeAdvance;
+            
+            if ($reconstructedOtherDeductions >= 0) {
+                $otherDeductions = $reconstructedOtherDeductions;
+                $totalBeforeAdvance = $reconstructedTotalBeforeAdvance;
+            }
+        }
         
         // تحديث collections_bonus بالقيمة المحسوبة
         $salaryDetails['collections_bonus'] = $collectionsBonus;
