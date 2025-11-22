@@ -2071,29 +2071,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('القالب غير موجود');
                 }
                 
-                // التأكد من وجود product_name في القالب
-                if (empty($template['product_name'])) {
-                    // محاولة جلب اسم المنتج من جدول products إذا كان product_id موجوداً
+                // التأكد من وجود product_name في القالب - محاولة من مصادر متعددة
+                if (empty($template['product_name']) || trim($template['product_name']) === '') {
+                    // 1. محاولة جلب اسم المنتج من جدول products إذا كان product_id موجوداً
                     if (!empty($template['product_id'])) {
                         $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$template['product_id']]);
-                        if ($product && !empty($product['name'])) {
-                            $template['product_name'] = $product['name'];
+                        if ($product && !empty($product['name']) && trim($product['name']) !== '') {
+                            $template['product_name'] = trim($product['name']);
                         }
                     }
                     
-                    // إذا لم يتم العثور على اسم المنتج، استخدم اسم القالب كبديل
-                    if (empty($template['product_name'])) {
-                        // البحث في unified_product_templates إذا كان template_type = 'unified'
-                        if ($templateType === 'unified') {
-                            $unifiedTemplate = $db->queryOne(
-                                "SELECT product_name FROM unified_product_templates WHERE id = ?",
-                                [$templateId]
-                            );
-                            if ($unifiedTemplate && !empty($unifiedTemplate['product_name'])) {
-                                $template['product_name'] = $unifiedTemplate['product_name'];
-                            }
+                    // 2. إذا كان template_type = 'unified'، جلب من unified_product_templates مباشرة
+                    if ((empty($template['product_name']) || trim($template['product_name']) === '') && $templateType === 'unified') {
+                        $unifiedTemplate = $db->queryOne(
+                            "SELECT product_name FROM unified_product_templates WHERE id = ?",
+                            [$templateId]
+                        );
+                        if ($unifiedTemplate && !empty($unifiedTemplate['product_name']) && trim($unifiedTemplate['product_name']) !== '') {
+                            $template['product_name'] = trim($unifiedTemplate['product_name']);
                         }
                     }
+                    
+                    // 3. إذا كان template_type = 'legacy' أو غير محدد، جلب من product_templates مباشرة
+                    if ((empty($template['product_name']) || trim($template['product_name']) === '') && $templateType !== 'unified') {
+                        $legacyTemplate = $db->queryOne(
+                            "SELECT product_name FROM product_templates WHERE id = ?",
+                            [$templateId]
+                        );
+                        if ($legacyTemplate && !empty($legacyTemplate['product_name']) && trim($legacyTemplate['product_name']) !== '') {
+                            $template['product_name'] = trim($legacyTemplate['product_name']);
+                        }
+                    }
+                    
+                    // 4. إذا لم يتم العثور على product_name، استخدم اسم القالب من details_json كبديل
+                    if ((empty($template['product_name']) || trim($template['product_name']) === '') && !empty($template['details_json'])) {
+                        try {
+                            $decodedDetails = json_decode((string)$template['details_json'], true);
+                            if (json_last_error() === JSON_ERROR_NONE && is_array($decodedDetails)) {
+                                if (!empty($decodedDetails['product_name']) && trim($decodedDetails['product_name']) !== '') {
+                                    $template['product_name'] = trim($decodedDetails['product_name']);
+                                }
+                            }
+                        } catch (Exception $e) {
+                            error_log('Error parsing template details_json: ' . $e->getMessage());
+                        }
+                    }
+                }
+                
+                // تنظيف product_name من أي مسافات زائدة
+                if (!empty($template['product_name'])) {
+                    $template['product_name'] = trim($template['product_name']);
+                }
+                
+                // التحقق النهائي من وجود product_name قبل المتابعة
+                if (empty($template['product_name']) || trim($template['product_name']) === '') {
+                    error_log("Template product_name is empty - Template ID: {$templateId}, Type: {$templateType}");
+                    throw new Exception('يجب تحديد اسم المنتج الحقيقي في قالب الإنتاج قبل إنشاء المنتج. يرجى مراجعة بيانات القالب.');
                 }
 
                 // الحصول على المواد الخام للتحقق من العسل واستخراج مورد العسل
