@@ -53,13 +53,19 @@ switch ($role) {
                 'badge' => null
             ],
             [
+                'title' => 'قارئ أرقام التشغيلات',
+                'icon' => 'bi-upc-scan',
+                'url' => $baseUrl . 'manager.php?page=batch_reader',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'batch_reader'),
+                'badge' => null
+            ],
+            [
                 'title' => 'نقطة البيع',
                 'icon' => 'bi-cart4',
                 'url' => $baseUrl . 'manager.php?page=pos',
                 'active' => ($currentPage === 'manager.php' && $currentPageParam === 'pos'),
                 'badge' => null
             ],
-
             [
                 'title' => 'خزنة الشركة',
                 'icon' => 'bi-bank',
@@ -75,12 +81,13 @@ switch ($role) {
                 'badge' => null
             ],
             [
-                'title' => isset($lang['menu_reports']) ? $lang['menu_reports'] : 'التقارير',
-                'icon' => 'bi-file-earmark-text',
-                'url' => $baseUrl . 'manager.php?page=reports',
-                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'reports'),
+                'title' => isset($lang['menu_returns_exchanges']) ? $lang['menu_returns_exchanges'] : 'المرتجعات والاستبدال',
+                'icon' => 'bi-arrow-left-right',
+                'url' => $baseUrl . 'manager.php?page=returns',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'returns'),
                 'badge' => null
             ],
+        
             [
                 'title' => isset($lang['menu_warehouse_transfers']) ? $lang['menu_warehouse_transfers'] : 'نقل المخازن',
                 'icon' => 'bi-arrow-left-right',
@@ -97,13 +104,6 @@ switch ($role) {
             ],
             
             [
-                'title' => 'قوالب المنتجات',
-                'icon' => 'bi-file-earmark-text',
-                'url' => $baseUrl . 'manager.php?page=product_templates',
-                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'product_templates'),
-                'badge' => null
-            ],
-            [
                 'title' => 'مخزن أدوات التعبئة',
                 'icon' => 'bi-box-seam',
                 'url' => $baseUrl . 'manager.php?page=packaging_warehouse',
@@ -118,10 +118,10 @@ switch ($role) {
                 'badge' => null
             ],
             [
-                'title' => isset($lang['menu_returns_exchanges']) ? $lang['menu_returns_exchanges'] : 'المرتجعات والاستبدال',
-                'icon' => 'bi-arrow-left-right',
-                'url' => $baseUrl . 'manager.php?page=returns',
-                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'returns'),
+                'title' => 'قوالب المنتجات',
+                'icon' => 'bi-file-earmark-text',
+                'url' => $baseUrl . 'manager.php?page=product_templates',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'product_templates'),
                 'badge' => null
             ],
             ['divider' => true, 'title' => isset($lang['listing']) ? $lang['listing'] : 'القوائم'],
@@ -170,12 +170,13 @@ switch ($role) {
             ],
             ['divider' => true, 'title' => 'أدوات'],
             [
-                'title' => 'قارئ أرقام التشغيلات',
-                'icon' => 'bi-upc-scan',
-                'url' => $baseUrl . 'manager.php?page=batch_reader',
-                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'batch_reader'),
+                'title' => isset($lang['menu_reports']) ? $lang['menu_reports'] : 'التقارير',
+                'icon' => 'bi-file-earmark-text',
+                'url' => $baseUrl . 'manager.php?page=reports',
+                'active' => ($currentPage === 'manager.php' && $currentPageParam === 'reports'),
                 'badge' => null
             ],
+
             [
                 'title' => isset($lang['menu_security']) ? $lang['menu_security'] : 'الأمان',
                 'icon' => 'bi-lock',
