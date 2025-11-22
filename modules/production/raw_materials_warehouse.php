@@ -2791,6 +2791,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new Exception(sprintf('الكمية المطلوبة (%.3f كجم) تتجاوز المتاح (%.3f كجم)', $quantity, $availableQuantity));
                     }
                     
+                    // التحقق من وجود عمود converted_to_tahini_quantity وإضافته إذا لم يكن موجوداً
+                    try {
+                        $convertedColumnCheck = $db->queryOne("SHOW COLUMNS FROM sesame_stock LIKE 'converted_to_tahini_quantity'");
+                        if (empty($convertedColumnCheck)) {
+                            $db->execute("ALTER TABLE sesame_stock ADD COLUMN converted_to_tahini_quantity decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'إجمالي كمية التحويل إلى طحينة بالكيلوجرام' AFTER quantity");
+                            error_log("Added converted_to_tahini_quantity column to sesame_stock during conversion");
+                        }
+                    } catch (Exception $colError) {
+                        error_log("Error checking/adding converted_to_tahini_quantity column: " . $colError->getMessage());
+                        throw new Exception('فشل في التحقق من بنية جدول السمسم. يرجى المحاولة لاحقاً.');
+                    }
+                    
                     // حساب كمية الطحينة بعد خصم نسبة الإهلاك 0.2%
                     $wastageRate = 0.002; // 0.2%
                     $tahiniQuantity = $quantity * (1 - $wastageRate);
