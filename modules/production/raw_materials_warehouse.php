@@ -1592,11 +1592,24 @@ if (!function_exists('ensureTahiniStockTable')) {
                 return false;
             }
             
-            // التحقق من وجود الجدول
+            // التحقق من وجود الجدول والأعمدة المطلوبة
             $tahiniStockCheck = $db->queryOne("SHOW TABLES LIKE 'tahini_stock'");
             if (!empty($tahiniStockCheck)) {
-                $ready = true;
-                return $ready;
+                // التحقق من وجود الأعمدة الأساسية
+                try {
+                    $columnsCheck = $db->queryOne("SHOW COLUMNS FROM tahini_stock LIKE 'supplier_id'");
+                    if (!empty($columnsCheck)) {
+                        $ready = true;
+                        return $ready;
+                    } else {
+                        error_log("ensureTahiniStockTable: Table exists but required columns are missing");
+                        $ready = false;
+                        // سنحاول إعادة إنشاء الجدول لاحقاً
+                    }
+                } catch (Exception $colError) {
+                    error_log("ensureTahiniStockTable: Error checking existing table columns: " . $colError->getMessage());
+                    $ready = false;
+                }
             }
             
             // التحقق من وجود جدول suppliers أولاً
@@ -2678,9 +2691,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$sesameStockTableReady) {
                 $sesameStockTableReady = ensureSesameStockTable(true);
             }
-            if (!$tahiniStockTableReady) {
-                $tahiniStockTableReady = function_exists('ensureTahiniStockTable') ? ensureTahiniStockTable(true) : false;
-            }
+            // إعادة محاولة إنشاء/التحقق من جدول الطحينة عند التحويل
+            $tahiniStockTableReady = ensureTahiniStockTable(true);
             
             if (!$sesameStockTableReady) {
                 $error = 'لا يمكن الوصول إلى جدول مخزون السمسم. يرجى المحاولة لاحقاً أو التواصل مع الدعم.';
