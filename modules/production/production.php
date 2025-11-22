@@ -4417,11 +4417,14 @@ $lang = isset($translations) ? $translations : [];
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
                 <div>
-                    <h4 class="mb-1"><i class="bi bi-calendar-month me-2"></i>ملخص الشهر الحالي</h4>
+                    <h4 class="mb-1"><i class="bi bi-calendar-month me-2"></i>ملخص الشهر الحالي (تراكمي)</h4>
                     <p class="text-muted mb-0">
                         <?php echo htmlspecialchars($monthRangeLabelStart); ?>
                         إلى
                         <?php echo htmlspecialchars($monthRangeLabelEnd); ?>
+                        <?php if ($productionReportsMonthEnd === $productionReportsTodayDate): ?>
+                            <span class="badge bg-info text-white ms-2">حتى اليوم</span>
+                        <?php endif; ?>
                     </p>
                 </div>
                 <span class="badge bg-light text-primary border border-primary-subtle">
@@ -4467,6 +4470,64 @@ $lang = isset($translations) ? $translations : [];
             </div>
         </div>
     </div>
+    
+    <!-- ملخص اليوم الحالي -->
+    <?php if ($productionReportsTodayDate === $productionReportsMonthEnd && $selectedReportDay === $productionReportsTodayDate): ?>
+        <?php
+        $todayReports = getConsumptionSummary($productionReportsTodayDate, $productionReportsTodayDate);
+        $todayPackagingTotals = productionPageAggregateTotals($todayReports['packaging']['items'] ?? []);
+        $todayRawTotals = productionPageAggregateTotals($todayReports['raw']['items'] ?? []);
+        $todayNet = round($todayPackagingTotals['net'] + $todayRawTotals['net'], 3);
+        $todayMovements = productionPageSumMovements($todayReports['packaging']['items'] ?? [])
+            + productionPageSumMovements($todayReports['raw']['items'] ?? []);
+        ?>
+        <div class="card production-report-card shadow-sm mb-4 border-info">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+                    <div>
+                        <h4 class="mb-1"><i class="bi bi-calendar-day me-2 text-info"></i>تفاصيل اليوم الحالي</h4>
+                        <p class="text-muted mb-0">
+                            <?php echo htmlspecialchars(function_exists('formatDate') ? formatDate($productionReportsTodayDate) : $productionReportsTodayDate); ?>
+                            <span class="badge bg-info text-white ms-2">لحظي</span>
+                        </p>
+                    </div>
+                    <span class="badge bg-info text-white">
+                        <?php echo date('H:i'); ?>
+                    </span>
+                </div>
+                <div class="production-summary-grid mt-3">
+                    <?php if ($showPackagingReports): ?>
+                        <div class="summary-card border-info">
+                            <span class="summary-label">استهلاك التعبئة اليوم</span>
+                            <span class="summary-value text-info">
+                                <?php echo number_format((float)($todayPackagingTotals['total_out'] ?? 0), 3); ?>
+                            </span>
+                        </div>
+                    <?php endif; ?>
+                    <?php if ($showRawReports): ?>
+                        <div class="summary-card border-info">
+                            <span class="summary-label">استهلاك المواد الخام اليوم</span>
+                            <span class="summary-value text-info">
+                                <?php echo number_format((float)($todayRawTotals['total_out'] ?? 0), 3); ?>
+                            </span>
+                        </div>
+                    <?php endif; ?>
+                    <div class="summary-card border-info">
+                        <span class="summary-label">الصافي اليوم</span>
+                        <span class="summary-value text-info">
+                            <?php echo number_format($todayNet, 3); ?>
+                        </span>
+                    </div>
+                    <div class="summary-card border-info">
+                        <span class="summary-label">حركات اليوم</span>
+                        <span class="summary-value text-info">
+                            <?php echo number_format($todayMovements); ?>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
 
     <div class="card production-report-card shadow-sm mb-4">
         <div class="card-header bg-warning text-dark d-flex flex-wrap justify-content-between align-items-center gap-2">
