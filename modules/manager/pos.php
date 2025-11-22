@@ -19,28 +19,17 @@ $db = db();
 
 $basePosUrl = getRelativeUrl('manager.php?page=pos');
 $section = $_GET['section'] ?? 'local';
-$allowedSections = ['local', 'shipping'];
+$allowedSections = ['local'];
 if (!in_array($section, $allowedSections, true)) {
     $section = 'local';
 }
 
 $localPosUrl = $basePosUrl . '&section=local';
-$shippingPosUrl = $basePosUrl . '&section=shipping';
+$shippingPosUrl = getRelativeUrl('manager.php?page=shipping_orders');
 ?>
 
 <!-- Hero Section -->
 <div class="manager-pos-hero mb-4">
-    <div class="card border-0 shadow-sm overflow-hidden">
-        <div class="card-body p-4 p-lg-5" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-            <div class="row align-items-center">
-                <div class="col-lg-8 mb-3 mb-lg-0">
-                    <h2 class="text-white mb-2 fw-bold">
-                        <i class="bi bi-shop-window me-2"></i>نقطة البيع للمدير
-                    </h2>
-                    <p class="text-white-50 mb-0 fs-5">
-                        إدارة المبيعات المحلية وطلبات شركات الشحن من مكان واحد
-                    </p>
-                </div>
                 <div class="col-lg-4 text-lg-end">
                     <div class="d-flex flex-column flex-lg-row gap-3 justify-content-lg-end">
                         <a href="<?php echo htmlspecialchars($localPosUrl); ?>" 
@@ -52,7 +41,7 @@ $shippingPosUrl = $basePosUrl . '&section=shipping';
                             </span>
                         </a>
                         <a href="<?php echo htmlspecialchars($shippingPosUrl); ?>" 
-                           class="btn btn-light btn-lg shadow-sm pos-hero-btn <?php echo $section === 'shipping' ? 'active' : ''; ?>"
+                           class="btn btn-light btn-lg shadow-sm pos-hero-btn"
                            style="min-width: 200px; position: relative; overflow: hidden;">
                             <span class="position-relative z-index-1 d-flex align-items-center justify-content-center">
                                 <i class="bi bi-truck me-2 fs-5"></i>
@@ -75,7 +64,7 @@ $shippingPosUrl = $basePosUrl . '&section=shipping';
             </a>
         </li>
         <li class="nav-item">
-            <a class="nav-link <?php echo $section === 'shipping' ? 'active' : ''; ?>" href="<?php echo htmlspecialchars($shippingPosUrl); ?>">
+            <a class="nav-link" href="<?php echo htmlspecialchars($shippingPosUrl); ?>">
                 <i class="bi bi-truck me-1"></i>طلبات شركات الشحن
             </a>
         </li>
@@ -84,20 +73,11 @@ $shippingPosUrl = $basePosUrl . '&section=shipping';
 
 <div class="manager-pos-section">
     <?php
-    if ($section === 'shipping') {
-        $shippingModule = __DIR__ . '/shipping_orders.php';
-        if (file_exists($shippingModule)) {
-            include $shippingModule;
-        } else {
-            echo '<div class="alert alert-warning">صفحة طلبات شركات الشحن غير متاحة حالياً</div>';
-        }
+    $localModule = __DIR__ . '/../accountant/pos.php';
+    if (file_exists($localModule)) {
+        include $localModule;
     } else {
-        $localModule = __DIR__ . '/../accountant/pos.php';
-        if (file_exists($localModule)) {
-            include $localModule;
-        } else {
-            echo '<div class="alert alert-warning">صفحة نقطة البيع المحلية غير متاحة حالياً</div>';
-        }
+        echo '<div class="alert alert-warning">صفحة نقطة البيع المحلية غير متاحة حالياً</div>';
     }
     ?>
 </div>

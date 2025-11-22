@@ -724,6 +724,17 @@ $pageTitle = isset($lang['manager_dashboard']) ? $lang['manager_dashboard'] : '�
                 }
                 ?>
                 
+            <?php elseif ($page === 'shipping_orders'): ?>
+                <!-- صفحة طلبات شركات الشحن -->
+                <?php 
+                $modulePath = __DIR__ . '/../modules/manager/shipping_orders.php';
+                if (file_exists($modulePath)) {
+                    include $modulePath;
+                } else {
+                    echo '<div class="alert alert-warning">صفحة طلبات شركات الشحن غير متاحة حالياً</div>';
+                }
+                ?>
+                
             <?php elseif ($page === 'returns'): ?>
                 <!-- صفحة المرتجعات والاستبدال - حساب المدير -->
                 <?php 
