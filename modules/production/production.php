@@ -2460,10 +2460,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $materialType = 'honey_filtered';
                     }
 
-                    $isHoneyName = (mb_stripos($rawName, 'عسل') !== false) || (stripos($rawName, 'honey') !== false);
+                    // يجب التحقق من الشمع أولاً لتجنب تعارضه مع العسل (مثل "شمع عسل")
+                    $isBeeswaxName = (mb_stripos($rawName, 'شمع') !== false) || (stripos($rawName, 'beeswax') !== false) || (stripos($rawName, 'wax') !== false);
+                    $isHoneyName = !$isBeeswaxName && ((mb_stripos($rawName, 'عسل') !== false) || (stripos($rawName, 'honey') !== false));
                     $isTahiniName = (mb_stripos($rawName, 'طحينة') !== false) || (stripos($rawName, 'tahini') !== false);
                     if (!in_array($materialType, ['honey_raw', 'honey_filtered', 'olive_oil', 'beeswax', 'derivatives', 'nuts', 'tahini'], true)) {
-                        if ($isHoneyName) {
+                        if ($isBeeswaxName) {
+                            $materialType = 'beeswax';
+                        } elseif ($isHoneyName) {
                             $hasRawKeyword = (mb_stripos($rawName, 'خام') !== false) || (stripos($rawName, 'raw') !== false);
                             $hasFilteredKeyword = (mb_stripos($rawName, 'مصفى') !== false) || (stripos($rawName, 'filtered') !== false);
                             if ($hasRawKeyword && !$hasFilteredKeyword) {
@@ -2497,7 +2501,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
 
-                    if (in_array($materialType, ['honey_raw', 'honey_filtered', 'honey', 'honey_general', 'honey_main'], true) || $isHoneyName) {
+                    // يجب استثناء مكونات الشمع من معالجة العسل
+                    if (!$isBeeswaxName && (in_array($materialType, ['honey_raw', 'honey_filtered', 'honey', 'honey_general', 'honey_main'], true) || $isHoneyName)) {
                         // تحديث material_type بناءً على حالة العسل المختارة
                         if ($selectedHoneyState === 'raw') {
                             $materialType = 'honey_raw';
@@ -2597,7 +2602,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $honeyStockTableCheck = $db->queryOne("SHOW TABLES LIKE 'honey_stock'");
                 foreach ($materialsConsumption['raw'] as $rawItem) {
                     $materialType = $rawItem['material_type'] ?? '';
-                    if (!in_array($materialType, ['honey_raw', 'honey_filtered'], true)) {
+                    $materialName = $rawItem['material_name'] ?? '';
+                    
+                    // يجب استثناء مكونات الشمع من التحقق من مخزون العسل
+                    $isBeeswax = $materialType === 'beeswax' 
+                        || (mb_stripos($materialName, 'شمع') !== false) 
+                        || (stripos($materialName, 'beeswax') !== false) 
+                        || (stripos($materialName, 'wax') !== false);
+                    
+                    if ($isBeeswax || !in_array($materialType, ['honey_raw', 'honey_filtered'], true)) {
+                        continue;
+                    }
+                    
+                    // استثناء "شمع عسل" من التحقق من مخزون العسل
+                    $honeyVariety = $rawItem['honey_variety'] ?? '';
+                    if (!empty($honeyVariety) && (mb_stripos($honeyVariety, 'شمع') !== false)) {
                         continue;
                     }
                     
