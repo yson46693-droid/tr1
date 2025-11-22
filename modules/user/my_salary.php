@@ -983,7 +983,7 @@ $monthName = date('F', mktime(0, 0, 0, $selectedMonth, 1));
         </thead>
         <tbody>
             <tr>
-                <td><?php echo ($currentUser['role'] === 'sales') ? 'الراتب الشهري' : 'سعر الساعة'; ?></td>
+                <td><?php echo ($currentUser['role'] === 'sales') ? 'سعر الساعه' : 'سعر الساعة'; ?></td>
                 <td><?php echo formatCurrency($hourlyRate); ?></td>
             </tr>
             <?php if ($currentUser['role'] !== 'sales'): ?>
