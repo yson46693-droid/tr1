@@ -5,6 +5,13 @@
  */
 
 define('ACCESS_ALLOWED', true);
+define('IS_API_REQUEST', true); // علامة لتحديد أن هذا طلب API
+
+// تعيين header للـ JSON قبل أي شيء آخر لتجنب أي redirect
+header('Content-Type: application/json; charset=utf-8');
+
+// منع أي output غير متوقع
+ob_start();
 
 require_once __DIR__ . '/../includes/config.php';
 require_once __DIR__ . '/../includes/db.php';
@@ -13,7 +20,8 @@ require_once __DIR__ . '/../includes/approval_system.php';
 require_once __DIR__ . '/../includes/path_helper.php';
 require_once __DIR__ . '/../includes/product_name_helper.php';
 
-header('Content-Type: application/json; charset=utf-8');
+// تنظيف أي output غير متوقع
+ob_clean();
 
 $action = $_GET['action'] ?? $_POST['action'] ?? null;
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -22,7 +30,21 @@ if (!$action) {
     returnJson(['success' => false, 'message' => 'الإجراء غير معروف'], 400);
 }
 
-requireRole(['sales', 'manager', 'accountant']);
+// التحقق من تسجيل الدخول أولاً (بدون redirect)
+if (!isLoggedIn()) {
+    returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
+}
+
+// التحقق من الدور مباشرة (بدون استخدام requireRole لتجنب redirect)
+$currentUser = getCurrentUser();
+if (!$currentUser) {
+    returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
+}
+
+$allowedRoles = ['sales', 'manager', 'accountant'];
+if (!in_array($currentUser['role'] ?? '', $allowedRoles, true)) {
+    returnJson(['success' => false, 'message' => 'ليس لديك صلاحية للوصول إلى هذه الصفحة'], 403);
+}
 
 try {
     switch ($action) {
@@ -72,8 +94,25 @@ try {
 
 function returnJson(array $data, int $status = 200): void
 {
+    // تنظيف أي output سابق
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+    
+    // التأكد من أن header JSON تم تعيينه
+    header('Content-Type: application/json; charset=utf-8', true);
+    
+    // منع أي output إضافي
     http_response_code($status);
+    
+    // إخراج JSON فقط
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    
+    // إنهاء التنفيذ
+    if (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    
     exit;
 }
 
@@ -82,7 +121,8 @@ function returnJson(array $data, int $status = 200): void
  */
 function handleGetCustomers(): void
 {
-    $currentUser = getCurrentUser();
+    global $currentUser;
+    
     if (!$currentUser) {
         returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
     }
@@ -144,15 +184,16 @@ function handleGetCustomers(): void
  */
 function handleGetPurchaseHistory(): void
 {
+    global $currentUser;
+    
+    if (!$currentUser) {
+        returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
+    }
+    
     $customerId = isset($_GET['customer_id']) ? (int)$_GET['customer_id'] : 0;
     
     if ($customerId <= 0) {
         returnJson(['success' => false, 'message' => 'معرف العميل غير صالح'], 422);
-    }
-    
-    $currentUser = getCurrentUser();
-    if (!$currentUser) {
-        returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
     }
     
     $db = db();
@@ -293,14 +334,31 @@ function handleGetPurchaseHistory(): void
         
         // تجميع حسب المنتج
         if (!isset($productsMap[$productId])) {
+            // محاولة جلب اسم المنتج الحقيقي من جدول products أولاً
+            $productName = null;
+            if ($productId > 0) {
+                try {
+                    $productRow = $db->queryOne(
+                        "SELECT name FROM products WHERE id = ?",
+                        [$productId]
+                    );
+                    if ($productRow && !empty($productRow['name'])) {
+                        $productName = trim($productRow['name']);
+                    }
+                } catch (Throwable $e) {
+                    // في حالة الخطأ، نستخدم الاسم من الاستعلام الأصلي
+                }
+            }
+            
             // استخدام resolveProductName للحصول على الاسم الحقيقي
-            $productName = resolveProductName([
-                $item['product_name'] ?? null
-            ], 'غير معروف');
+            $finalProductName = resolveProductName([
+                $item['product_name'] ?? null,
+                $productName
+            ], 'اسم المنتج غير متوفر');
             
             $productsMap[$productId] = [
                 'product_id' => $productId,
-                'product_name' => $productName,
+                'product_name' => $finalProductName,
                 'unit' => $item['unit'] ?? '',
                 'quantity_purchased' => 0.0,
                 'quantity_returned' => 0.0,
@@ -344,10 +402,16 @@ function handleGetPurchaseHistory(): void
             // استخدام أول invoice_item_id من المنتج
             $firstInvoiceItemId = !empty($product['invoice_item_ids']) ? $product['invoice_item_ids'][0] : 0;
             
-            // الحصول على اسم المنتج الحقيقي من finished_products إذا كان متوفراً
-            $realProductName = $product['product_name'];
-            if (isPlaceholderProductName($realProductName) && $productId > 0) {
-                // محاولة جلب اسم المنتج من finished_products
+            // جمع جميع الأسماء المرشحة للحصول على الاسم الحقيقي
+            $nameCandidates = [];
+            
+            // 1. الاسم الحالي من productsMap
+            if (!empty($product['product_name']) && !isPlaceholderProductName($product['product_name'])) {
+                $nameCandidates[] = $product['product_name'];
+            }
+            
+            // 2. محاولة جلب اسم المنتج من finished_products
+            if ($productId > 0 && !empty($product['invoice_item_ids'])) {
                 try {
                     $finishedProduct = $db->queryOne(
                         "SELECT fp.product_name 
@@ -363,15 +427,53 @@ function handleGetPurchaseHistory(): void
                     );
                     
                     if ($finishedProduct && !empty($finishedProduct['product_name'])) {
-                        $realProductName = trim($finishedProduct['product_name']);
+                        $nameCandidates[] = trim($finishedProduct['product_name']);
                     }
                 } catch (Throwable $e) {
-                    // في حالة الخطأ، نستخدم الاسم الموجود
+                    // في حالة الخطأ، نتخطى هذا المصدر
+                }
+            }
+            
+            // 3. محاولة جلب اسم المنتج مباشرة من جدول products (فقط إذا لم نجد اسماً صالحاً بعد)
+            if (empty($nameCandidates) && $productId > 0) {
+                try {
+                    $productRow = $db->queryOne(
+                        "SELECT name FROM products WHERE id = ?",
+                        [$productId]
+                    );
+                    if ($productRow && !empty($productRow['name'])) {
+                        $nameFromTable = trim($productRow['name']);
+                        if (!isPlaceholderProductName($nameFromTable)) {
+                            $nameCandidates[] = $nameFromTable;
+                        }
+                    }
+                } catch (Throwable $e) {
+                    // في حالة الخطأ، نتخطى هذا المصدر
                 }
             }
             
             // استخدام resolveProductName للتأكد من الحصول على الاسم الحقيقي
-            $finalProductName = resolveProductName([$realProductName], 'اسم المنتج غير متوفر');
+            // استخدام الاسم من productsMap كقيمة افتراضية إذا لم نجد أي اسم صالح
+            if (empty($nameCandidates) && !empty($product['product_name'])) {
+                $nameCandidates[] = $product['product_name'];
+            }
+            
+            $finalProductName = resolveProductName($nameCandidates, 'اسم المنتج غير متوفر');
+            
+            // إذا كان الاسم النهائي لا يزال "غير معروف" أو placeholder، حاول مرة أخرى من جدول products
+            if (isPlaceholderProductName($finalProductName) && $productId > 0) {
+                try {
+                    $productRow = $db->queryOne(
+                        "SELECT name FROM products WHERE id = ?",
+                        [$productId]
+                    );
+                    if ($productRow && !empty($productRow['name'])) {
+                        $finalProductName = trim($productRow['name']);
+                    }
+                } catch (Throwable $e) {
+                    // في حالة الخطأ، نستخدم الاسم الحالي
+                }
+            }
             
             $result[] = [
                 'invoice_item_id' => $firstInvoiceItemId, // للتوافق مع الكود الحالي
@@ -398,7 +500,8 @@ function handleGetPurchaseHistory(): void
  */
 function handleCreateReturnRequest(): void
 {
-    $currentUser = getCurrentUser();
+    global $currentUser;
+    
     if (!$currentUser) {
         returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
     }
@@ -682,7 +785,8 @@ function handleCreateReturnRequest(): void
  */
 function handleGetReturnDetails(): void
 {
-    $currentUser = getCurrentUser();
+    global $currentUser;
+    
     if (!$currentUser) {
         returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
     }
@@ -760,7 +864,8 @@ function handleGetReturnDetails(): void
  */
 function handleGetRecentRequests(): void
 {
-    $currentUser = getCurrentUser();
+    global $currentUser;
+    
     if (!$currentUser) {
         returnJson(['success' => false, 'message' => 'انتهت جلسة العمل، يرجى إعادة تسجيل الدخول'], 401);
     }

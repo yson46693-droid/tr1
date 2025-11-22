@@ -672,7 +672,27 @@ document.getElementById('submitReturnRequest').addEventListener('click', functio
             notes: notes
         })
     })
-    .then(response => response.json())
+    .then(response => {
+        // التحقق من نوع المحتوى أولاً
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            return response.text().then(text => {
+                console.error('Expected JSON but got:', contentType, text.substring(0, 500));
+                throw new Error('استجابة غير صحيحة من الخادم. يرجى المحاولة مرة أخرى.');
+            });
+        }
+        
+        // التحقق من حالة الاستجابة
+        if (!response.ok) {
+            return response.json().then(errorData => {
+                throw new Error(errorData.message || 'خطأ في الطلب: ' + response.status);
+            }).catch(() => {
+                throw new Error('حدث خطأ في الطلب: ' + response.status);
+            });
+        }
+        
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
             // إظهار رسالة النجاح
@@ -721,7 +741,23 @@ document.getElementById('submitReturnRequest').addEventListener('click', functio
         console.error('Error:', error);
         btn.disabled = false;
         btn.innerHTML = originalHTML;
-        alert('حدث خطأ في الاتصال بالخادم. يرجى المحاولة مرة أخرى.');
+        
+        // إظهار رسالة الخطأ في الصفحة
+        const errorAlert = document.getElementById('dynamicErrorAlert');
+        const errorText = document.getElementById('errorMessageText');
+        
+        let errorMessage = 'حدث خطأ في الاتصال بالخادم. يرجى المحاولة مرة أخرى.';
+        if (error.message) {
+            errorMessage = error.message;
+        }
+        
+        if (errorAlert && errorText) {
+            errorText.textContent = errorMessage;
+            errorAlert.style.display = 'block';
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+            alert(errorMessage);
+        }
     });
 });
 
