@@ -5551,6 +5551,7 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
             selectEl.appendChild(option);
 
             // التحقق من تطابق نوع العسل المحدد مسبقاً في القالب (مطابقة مرنة)
+            // نوع العسل محدد تلقائياً من بيانات القالب ولا يجب أن يقوم المستخدم بتحديده
             if (!matchedOption && defaultValue !== '') {
                 const varietyLower = normalizedVariety.toLocaleLowerCase('ar');
                 // المطابقة الدقيقة
@@ -5591,10 +5592,18 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
     }
 
     // اختيار نوع العسل تلقائياً إذا كان محدداً في القالب
+    // نوع العسل محدد تلقائياً من بيانات القالب ولا يجب أن يقوم المستخدم بتحديده
     if (matchedOption) {
         matchedOption.selected = true;
         selectEl.value = matchedOption.value;
         placeholderOption.selected = false;
+        // إذا كان نوع العسل محدداً من القالب، قم بتعطيل الحقل لمنع المستخدم من تغييره
+        if (defaultValue !== '') {
+            selectEl.disabled = true;
+            selectEl.style.backgroundColor = '#e9ecef';
+            selectEl.style.cursor = 'not-allowed';
+            selectEl.title = 'نوع العسل محدد تلقائياً من بيانات القالب';
+        }
         // إذا تم تحديد نوع العسل تلقائياً من القالب، قم بتشغيل حدث change
         selectEl.dispatchEvent(new Event('change', { bubbles: true }));
     } else if (defaultValue !== '' && entries.length > 0) {
@@ -6354,12 +6363,10 @@ function renderTemplateSuppliers(details) {
             honeySelect.name = 'material_honey_varieties[' + componentKey + ']';
             honeySelect.dataset.role = 'honey-variety';
             honeySelect.required = true;
-            honeySelect.disabled = true;
-            // تحديد نوع العسل من القالب المحدد مسبقاً
-            // استخراج نوع العسل من component.name أو component.material_name إذا كان يحتوي على " - "
-            let defaultHoneyVariety = component.honey_variety || component.variety || component.material_type || '';
+            // تحديد نوع العسل من القالب المحدد مسبقاً - يجب أن يكون محدد تلقائياً من بيانات القالب
+            let defaultHoneyVariety = component.honey_variety || component.variety || '';
             
-            // إذا لم يكن نوع العسل محدداً مباشرة، استخرجه من اسم المادة
+            // إذا لم يكن نوع العسل محدداً مباشرة في component، استخرجه من اسم المادة كحل بديل
             if (!defaultHoneyVariety) {
                 const materialName = component.name || component.material_name || component.label || '';
                 
@@ -6385,6 +6392,15 @@ function renderTemplateSuppliers(details) {
             }
             
             honeySelect.dataset.defaultValue = defaultHoneyVariety;
+            
+            // إذا كان نوع العسل محدداً من القالب، اجعل الحقل غير قابل للتعديل (readonly)
+            if (defaultHoneyVariety) {
+                honeySelect.disabled = true;
+                honeySelect.style.backgroundColor = '#e9ecef';
+                honeySelect.style.cursor = 'not-allowed';
+            } else {
+                honeySelect.disabled = true; // معطل حتى يتم اختيار المورد
+            }
 
             const honeyPlaceholder = document.createElement('option');
             honeyPlaceholder.value = '';
