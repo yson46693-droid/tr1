@@ -5851,6 +5851,78 @@ document.addEventListener('DOMContentLoaded', function() {
             reportsButton.click();
         }
     }
+
+    // إصلاح نموذج الفلترة في قسم التقارير
+    const reportsForm = document.querySelector('#productionReportsSection form[method="get"]');
+    if (reportsForm) {
+        // التأكد من أن section=reports موجود دائماً
+        let sectionInput = reportsForm.querySelector('input[name="section"]');
+        if (!sectionInput) {
+            sectionInput = document.createElement('input');
+            sectionInput.type = 'hidden';
+            sectionInput.name = 'section';
+            sectionInput.value = 'reports';
+            reportsForm.appendChild(sectionInput);
+        }
+        
+        // التأكد من أن page=production موجود دائماً
+        let pageInput = reportsForm.querySelector('input[name="page"]');
+        if (!pageInput) {
+            pageInput = document.createElement('input');
+            pageInput.type = 'hidden';
+            pageInput.name = 'page';
+            pageInput.value = 'production';
+            reportsForm.appendChild(pageInput);
+        }
+        
+        reportsForm.addEventListener('submit', function(e) {
+            // التأكد من أن جميع الحقول موجودة وقيمها صحيحة
+            const reportDay = reportsForm.querySelector('input[name="report_day"]');
+            const reportType = reportsForm.querySelector('select[name="report_type"]');
+            const supplyCategory = reportsForm.querySelector('select[name="supply_category"]');
+            const reportQuery = reportsForm.querySelector('input[name="report_query"]');
+            
+            // التأكد من أن section=reports موجود دائماً
+            if (sectionInput) {
+                sectionInput.value = 'reports';
+            }
+            
+            // التأكد من أن page=production موجود دائماً
+            if (pageInput) {
+                pageInput.value = 'production';
+            }
+            
+            // التحقق من صحة التاريخ
+            if (reportDay && reportDay.value) {
+                const selectedDate = new Date(reportDay.value);
+                const minDate = new Date(reportDay.min);
+                const maxDate = new Date(reportDay.max);
+                
+                if (selectedDate < minDate || selectedDate > maxDate) {
+                    e.preventDefault();
+                    alert('يرجى اختيار تاريخ صحيح ضمن النطاق المسموح');
+                    reportDay.focus();
+                    return false;
+                }
+            }
+            
+            // التأكد من أن النموذج يرسل البيانات بشكل صحيح
+            // لا نمنع الإرسال الافتراضي، فقط نتأكد من أن البيانات صحيحة
+        });
+        
+        // إضافة event listener لأزرار الفلترة للتأكد من عملها
+        const filterButtons = reportsForm.querySelectorAll('button[type="submit"]');
+        filterButtons.forEach(function(button) {
+            button.addEventListener('click', function(e) {
+                // التأكد من أن النموذج جاهز للإرسال
+                if (!reportsForm.checkValidity()) {
+                    e.preventDefault();
+                    reportsForm.reportValidity();
+                    return false;
+                }
+            });
+        });
+    }
 });
 
 document.addEventListener('DOMContentLoaded', function() {
