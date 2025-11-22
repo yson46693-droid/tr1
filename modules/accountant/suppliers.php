@@ -608,7 +608,8 @@ if (isset($_GET['edit'])) {
                             'nuts' => 'مكسرات',
                             'olive_oil' => 'زيت زيتون',
                             'derivatives' => 'مشتقات',
-                            'beeswax' => 'شمع عسل'
+                            'beeswax' => 'شمع عسل',
+                            'sesame' => 'مورد سمسم'
                         ];
                         foreach ($suppliers as $index => $supplier):
                             $supplierId = isset($supplier['id']) ? (int)$supplier['id'] : 0;
