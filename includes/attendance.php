@@ -656,17 +656,23 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
     
     // معالجة منطق التأخير إذا كان هناك تأخير
     if ($delayMinutes > 0) {
-        // الحصول على عداد التأخيرات الحالي
-        $currentDelayCount = (int)$db->queryOne(
-            "SELECT delay_count FROM users WHERE id = ?",
-            [$userId]
+        // حساب عدد حالات التأخير الفعلية من جدول attendance_records للشهر الحالي
+        // نستخدم COUNT(DISTINCT date) لحساب عدد الأيام المختلفة التي سجل فيها المستخدم حضور متأخر
+        $currentMonth = date('Y-m');
+        $actualDelayCount = (int)$db->queryOne(
+            "SELECT COUNT(DISTINCT date) as delay_count
+             FROM attendance_records 
+             WHERE user_id = ? 
+             AND DATE_FORMAT(date, '%Y-%m') = ?
+             AND delay_minutes > 0
+             AND check_in_time IS NOT NULL",
+            [$userId, $currentMonth]
         )['delay_count'] ?? 0;
         
-        // زيادة عداد التأخيرات بمقدار 1
-        $newDelayCount = $currentDelayCount + 1;
+        // تحديث عداد التأخيرات في جدول users (للاستخدام في التقارير)
         $db->execute(
             "UPDATE users SET delay_count = ? WHERE id = ?",
-            [$newDelayCount, $userId]
+            [$actualDelayCount, $userId]
         );
         
         // الحصول على معلومات المستخدم
@@ -674,8 +680,8 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
         $userName = $user['full_name'] ?? $user['username'];
         $role = $user['role'] ?? 'unknown';
         
-        // إرسال إشعار للموظف بعدد التأخيرات الحالية
-        $delayMessage = "تم تسجيل حضورك مع تأخير {$delayMinutes} دقيقة. عدد حالات التأخير الحالية لهذا الشهر: {$newDelayCount}";
+        // إرسال إشعار للموظف بعدد التأخيرات الحالية (من الحساب الفعلي)
+        $delayMessage = "تم تسجيل حضورك مع تأخير {$delayMinutes} دقيقة. عدد حالات التأخير الحالية لهذا الشهر: {$actualDelayCount}";
         
         createNotification(
             $userId,
@@ -687,7 +693,7 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
         );
         
         // إذا وصل عداد التأخيرات إلى 3 أو أكثر، إرسال إشعار للمدير
-        if ($newDelayCount >= 3) {
+        if ($actualDelayCount >= 3) {
             // الحصول على جميع المديرين
             $managers = $db->query(
                 "SELECT id FROM users WHERE role = 'manager' AND status = 'active'"
@@ -695,7 +701,7 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
             
             foreach ($managers as $manager) {
                 $managerId = (int)$manager['id'];
-                $managerMessage = "تنبيه: الموظف {$userName} ({$role}) قد تجاوز 3 حالات حضور متأخر خلال الشهر الحالي. إجمالي حالات التأخير: {$newDelayCount}";
+                $managerMessage = "تنبيه: الموظف {$userName} ({$role}) قد تجاوز 3 حالات حضور متأخر خلال الشهر الحالي. إجمالي حالات التأخير: {$actualDelayCount}";
                 
                 createNotification(
                     $managerId,
@@ -707,10 +713,10 @@ function recordAttendanceCheckIn($userId, $photoBase64 = null) {
                 );
             }
             
-            error_log("Delay count alert sent to managers for user {$userId} with {$newDelayCount} delays");
+            error_log("Delay count alert sent to managers for user {$userId} with {$actualDelayCount} delays");
         }
         
-        error_log("User {$userId} check-in delay: {$delayMinutes} minutes, total delay count: {$newDelayCount}");
+        error_log("User {$userId} check-in delay: {$delayMinutes} minutes, total delay count: {$actualDelayCount}");
     } else {
         // الحصول على معلومات المستخدم (في حالة عدم وجود تأخير)
         $user = $db->queryOne("SELECT username, full_name, role FROM users WHERE id = ?", [$userId]);
