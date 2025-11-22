@@ -2449,6 +2449,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $isHoneyName = (mb_stripos($rawName, 'عسل') !== false) || (stripos($rawName, 'honey') !== false);
+                    $isTahiniName = (mb_stripos($rawName, 'طحينة') !== false) || (stripos($rawName, 'tahini') !== false);
                     if (!in_array($materialType, ['honey_raw', 'honey_filtered', 'olive_oil', 'beeswax', 'derivatives', 'nuts', 'tahini'], true)) {
                         if ($isHoneyName) {
                             $hasRawKeyword = (mb_stripos($rawName, 'خام') !== false) || (stripos($rawName, 'raw') !== false);
@@ -2460,6 +2461,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             } else {
                                 $materialType = 'honey_filtered';
                             }
+                        } elseif ($isTahiniName) {
+                            $materialType = 'tahini';
                         } else {
                             $materialType = 'raw_general';
                         }

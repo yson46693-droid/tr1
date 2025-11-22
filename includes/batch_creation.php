@@ -423,6 +423,10 @@ function batchCreationDeductTypedStock(PDO $pdo, array $material, float $unitsMu
         case 'derivatives':
             batchCreationConsumeSimpleStock($pdo, 'derivatives_stock', 'weight', $totalRequired, $supplierId, $materialName, $unit);
             break;
+        case 'tahini':
+            // للطحينة، نستخدم tahini_stock مع supplier_id من السمسم
+            batchCreationConsumeSimpleStock($pdo, 'tahini_stock', 'quantity', $totalRequired, $supplierId, $materialName, $unit);
+            break;
         case 'nuts':
             // التحقق أولاً إذا كانت المادة خلطة مكسرات (mixed_nuts)
             $isMixedNuts = false;
