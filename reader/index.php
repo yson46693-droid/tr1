@@ -527,7 +527,7 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
         <form id="scannerForm" autocomplete="off">
             <label for="batchInput">رقم التشغيلة أو الباركود</label>
             <div class="input-group">
-                <input type="text" id="batchInput" name="batch" placeholder="قم بمسح الباركود أو إدخال رقم التشغيلة يدويًا" required autofocus>
+                <input type="text" id="batchInput" name="batch" placeholder="قم بمسح الباركود (أرقام فقط) أو إدخال رقم التشغيلة يدويًا" required autofocus inputmode="numeric" pattern="[0-9]*">
                 <button type="submit" id="scanButton">
                     <span>قراءة التفاصيل</span>
                 </button>
@@ -922,6 +922,7 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
 
         function stopAdvancedDetection() {
             stopZxingDetection();
+            // تم تعطيل OCR - لا نحتاج لإيقافه
             if (ocrInterval) {
                 clearInterval(ocrInterval);
                 ocrInterval = null;
@@ -1014,8 +1015,10 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
         }
 
         function normalizeBarcodeValue(value) {
-            const cleaned = (value || '').replace(/[^0-9A-Z\-]/gi, '').trim();
-            return cleaned.length >= 4 ? cleaned.toUpperCase() : '';
+            // قبول الأرقام فقط (رقم التشغيلة)
+            const cleaned = (value || '').replace(/[^0-9]/g, '').trim();
+            // يجب أن يكون رقم التشغيلة على الأقل 4 أرقام
+            return cleaned.length >= 4 ? cleaned : '';
         }
 
         function completeDetection(candidate) {
@@ -1285,8 +1288,9 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 return lastAdvancedDetectionResult;
             }
             advancedDetectionActive = true;
+            // استخدام ZXing فقط لقراءة الباركودات (لا نستخدم OCR لأنه يقرأ النصوص)
             const zxingReady = await startZxingDetection();
-            const ocrReady = await startOcrDetection();
+            const ocrReady = false; // تم تعطيل OCR لأنه يقرأ النصوص وليس فقط الباركودات
             lastAdvancedDetectionResult = { zxingReady, ocrReady };
             return lastAdvancedDetectionResult;
         }
@@ -1304,7 +1308,7 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                 }
             }
             const advancedResults = await startAdvancedDetection();
-            if (advancedResults.zxingReady || advancedResults.ocrReady) {
+            if (advancedResults.zxingReady) {
                 cameraError.style.display = 'none';
             }
             return advancedResults;
@@ -1361,8 +1365,8 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
                     stopAdvancedDetection();
                 }
 
-                if (!barcodeReady && !zxingReady && !ocrReady) {
-                    cameraError.textContent = 'تعذر تشغيل آلية قراءة الباركود أو التعرف على النص. يرجى التأكد من اتصالك بالإنترنت أو استخدام الإدخال اليدوي.';
+                if (!barcodeReady && !zxingReady) {
+                    cameraError.textContent = 'تعذر تشغيل آلية قراءة الباركود. يرجى التأكد من اتصالك بالإنترنت أو استخدام الإدخال اليدوي.';
                     cameraError.style.display = 'block';
                 }
 
@@ -1380,11 +1384,34 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
             }
         }
 
+        // التحقق من أن الإدخال يحتوي على أرقام فقط
+        if (batchInput) {
+            batchInput.addEventListener('input', (e) => {
+                // السماح فقط بالأرقام
+                e.target.value = e.target.value.replace(/[^0-9]/g, '');
+            });
+            
+            batchInput.addEventListener('paste', (e) => {
+                e.preventDefault();
+                const pastedText = (e.clipboardData || window.clipboardData).getData('text');
+                const numbersOnly = pastedText.replace(/[^0-9]/g, '');
+                e.target.value = numbersOnly;
+            });
+        }
+
         form.addEventListener('submit', async (event) => {
             event.preventDefault();
-            const batchNumber = batchInput.value.trim();
+            let batchNumber = batchInput.value.trim();
+            // التأكد من أن القيمة تحتوي على أرقام فقط
+            batchNumber = batchNumber.replace(/[^0-9]/g, '');
+            
             if (!batchNumber) {
-                renderError('يرجى إدخال رقم التشغيلة أو مسح الباركود.');
+                renderError('يرجى إدخال رقم التشغيلة أو مسح الباركود (أرقام فقط).');
+                return;
+            }
+            
+            if (batchNumber.length < 4) {
+                renderError('رقم التشغيلة يجب أن يكون على الأقل 4 أرقام.');
                 return;
             }
 
@@ -1458,7 +1485,7 @@ $_SESSION['reader_session_id'] = $_SESSION['reader_session_id'] ?? bin2hex(rando
 
                 if (scanning) {
                     const advancedResults = await startAdvancedDetection();
-                    if (!advancedResults.zxingReady && !advancedResults.ocrReady) {
+                    if (!advancedResults.zxingReady) {
                         cameraError.textContent = 'تعذر تشغيل وضع الدقة العالية. تأكد من اتصال الإنترنت ثم حاول مرة أخرى.';
                         cameraError.style.display = 'block';
                     } else {
