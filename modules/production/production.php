@@ -5680,17 +5680,22 @@ function populateHoneyVarietyOptions(selectEl, supplierId, component) {
     } else if (entries.length === 0) {
         // إذا لم يكن نوع العسل متوفراً في المخزون لكنه موجود في القالب، أضفه مع تحذير
         if (defaultValue !== '') {
-            const warningOption = document.createElement('option');
-            warningOption.value = defaultValue;
-            warningOption.dataset.raw = 0;
-            warningOption.dataset.filtered = 0;
-            warningOption.textContent = `${defaultValue} — (غير متوفر في المخزون الحالي - يرجى إضافة المخزون أولاً)`;
-            warningOption.style.color = '#dc3545';
-            selectEl.appendChild(warningOption);
-            warningOption.selected = true;
+            // إضافة نوع العسل من القالب حتى لو لم يكن متوفراً في المخزون
+            const fallbackOption = document.createElement('option');
+            fallbackOption.value = defaultValue;
+            fallbackOption.dataset.raw = 0;
+            fallbackOption.dataset.filtered = 0;
+            fallbackOption.textContent = `${defaultValue} — (القيمة المعرّفة في القالب)`;
+            fallbackOption.selected = true;
+            selectEl.appendChild(fallbackOption);
             selectEl.value = defaultValue;
-            selectEl.disabled = false;
             placeholderOption.selected = false;
+            // تعطيل الحقل لأنه محدد من القالب
+            selectEl.disabled = true;
+            selectEl.style.backgroundColor = '#e9ecef';
+            selectEl.style.cursor = 'not-allowed';
+            selectEl.title = 'نوع العسل محدد تلقائياً من بيانات القالب';
+            selectEl.dispatchEvent(new Event('change', { bubbles: true }));
         } else {
             selectEl.disabled = true;
         }
@@ -6812,13 +6817,33 @@ document.getElementById('createFromTemplateForm')?.addEventListener('submit', fu
 
     const honeyVarietyFields = document.querySelectorAll('#templateSuppliersContainer [data-role="honey-variety"]');
     for (let field of honeyVarietyFields) {
+        // إذا كان الحقل معطلاً، تحقق من أن له قيمة (محدد من القالب)
         if (field.disabled) {
-            e.preventDefault();
-            alert('يرجى اختيار مورد العسل بعد تحديد النوع');
-            field.focus();
-            return false;
+            // إذا كان الحقل معطلاً ولديه قيمة، فهذا يعني أنه محدد تلقائياً من القالب - هذا جيد
+            if (field.value && field.value.trim()) {
+                continue; // الحقل معطل لكن له قيمة من القالب - هذا صحيح
+            }
+            // إذا كان الحقل معطلاً وليس له قيمة، تحقق من أن المورد محدد
+            const componentCard = field.closest('.component-card');
+            if (componentCard) {
+                const supplierSelect = componentCard.querySelector('select[name^="material_suppliers"]');
+                if (!supplierSelect || !supplierSelect.value || supplierSelect.value.trim() === '') {
+                    e.preventDefault();
+                    alert('يرجى اختيار مورد العسل أولاً');
+                    if (supplierSelect) {
+                        supplierSelect.focus();
+                    }
+                    return false;
+                }
+                // إذا كان المورد محدد لكن نوع العسل غير محدد، هذا خطأ
+                e.preventDefault();
+                alert('يرجى تحديد نوع العسل لدى المورد المختار');
+                field.focus();
+                return false;
+            }
         }
-        if (!field.value || !field.value.trim()) {
+        // إذا كان الحقل غير معطل، تحقق من أن له قيمة
+        if (!field.disabled && (!field.value || !field.value.trim())) {
             e.preventDefault();
             alert('يرجى إدخال نوع العسل لدى المورد المختار');
             field.focus();
