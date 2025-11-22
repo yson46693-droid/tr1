@@ -2540,12 +2540,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
         
+        // إضافة كمية إلى مشتق موجود
+        elseif ($action === 'add_derivative_quantity') {
+            $stockId = intval($_POST['stock_id'] ?? 0);
+            $weight = floatval($_POST['weight'] ?? 0);
+            $notes = trim($_POST['notes'] ?? '');
+            
+            if ($stockId <= 0) {
+                $error = 'معرف السجل غير صحيح';
+            } elseif ($weight <= 0) {
+                $error = 'يجب إدخال وزن صحيح';
+            } else {
+                try {
+                    // جلب بيانات السجل الحالي
+                    $stock = $db->queryOne("
+                        SELECT ds.*, s.name as supplier_name
+                        FROM derivatives_stock ds
+                        LEFT JOIN suppliers s ON ds.supplier_id = s.id
+                        WHERE ds.id = ?", [$stockId]);
+                    
+                    if (!$stock) {
+                        $error = 'سجل المشتق غير موجود';
+                    } else {
+                        // إضافة الكمية إلى الوزن الحالي
+                        $newWeight = floatval($stock['weight']) + $weight;
+                        $db->execute("UPDATE derivatives_stock SET weight = ?, updated_at = NOW() WHERE id = ?", [$newWeight, $stockId]);
+                        
+                        $supplierId = (int)($stock['supplier_id'] ?? 0);
+                        $derivativeType = $stock['derivative_type'] ?? '';
+                        $supplierName = $stock['supplier_name'] ?? null;
+                        
+                        // تسجيل في سجل التدقيق
+                        logAudit($currentUser['id'], 'add_derivative_quantity', 'derivatives_stock', $stockId, null, [
+                            'type' => $derivativeType,
+                            'added_weight' => $weight,
+                            'new_total_weight' => $newWeight
+                        ]);
+                        
+                        // تسجيل في سجل التوريدات
+                        $additionDetails = sprintf('إضافة %.2f كجم إلى المشتق الموجود (نوع: %s)', $weight, $derivativeType);
+                        if ($notes !== '') {
+                            $additionDetails .= ' | ' . $notes;
+                        }
+                        
+                        recordProductionSupplyLog([
+                            'material_category' => 'derivatives',
+                            'material_label' => 'مشتق - ' . $derivativeType,
+                            'stock_source' => 'derivatives_stock',
+                            'stock_id' => $stockId,
+                            'supplier_id' => $supplierId,
+                            'supplier_name' => $supplierName,
+                            'quantity' => $weight,
+                            'unit' => 'كجم',
+                            'details' => $additionDetails,
+                            'recorded_by' => $currentUser['id'] ?? null,
+                        ]);
+                        
+                        preventDuplicateSubmission(
+                            sprintf('تم إضافة %.2f كجم بنجاح. الوزن الإجمالي: %.2f كجم', $weight, $newWeight),
+                            ['page' => 'raw_materials_warehouse', 'section' => 'derivatives'],
+                            null,
+                            $dashboardSlug
+                        );
+                    }
+                } catch (Exception $e) {
+                    error_log('Error adding derivative quantity: ' . $e->getMessage());
+                    $error = 'حدث خطأ أثناء إضافة الكمية: ' . $e->getMessage();
+                }
+            }
+        }
+        
         // عمليات المشتقات
         elseif ($action === 'add_derivative') {
             $supplierId = intval($_POST['supplier_id'] ?? 0);
             $derivativeType = trim($_POST['derivative_type'] ?? '');
+            $derivativeTypeNew = trim($_POST['derivative_type_new'] ?? '');
             $weight = floatval($_POST['weight'] ?? 0);
             $supplyStockId = null;
+            
+            // إذا تم اختيار "إضافة نوع جديد"، استخدم القيمة من الحقل النصي
+            if ($derivativeType === '__new__' || $derivativeType === '') {
+                if (!empty($derivativeTypeNew)) {
+                    $derivativeType = $derivativeTypeNew;
+                }
+            }
             
             if ($supplierId <= 0) {
                 $error = 'يجب اختيار المورد';
@@ -4886,11 +4964,19 @@ if ($section === 'honey') {
                                             </td>
                                             <td class="text-center"><strong class="text-info"><?php echo number_format($stock['weight'], 2); ?></strong></td>
                                             <td class="text-center">
-                                                <button class="btn btn-sm btn-danger"
-                                                        onclick="openDerivativeDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name']); ?>', '<?php echo htmlspecialchars($stock['derivative_type']); ?>', <?php echo $stock['weight']; ?>)"
-                                                        <?php echo $stock['weight'] <= 0 ? 'disabled' : ''; ?>>
-                                                    <i class="bi bi-exclamation-triangle"></i> تسجيل تالف
-                                                </button>
+                                                <div class="btn-group" role="group">
+                                                    <button class="btn btn-sm btn-success"
+                                                            onclick="openAddDerivativeQuantityModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($stock['derivative_type'], ENT_QUOTES); ?>', <?php echo $stock['weight']; ?>)"
+                                                            title="إضافة كمية">
+                                                        <i class="bi bi-plus-circle"></i> إضافة
+                                                    </button>
+                                                    <button class="btn btn-sm btn-danger"
+                                                            onclick="openDerivativeDamageModal(<?php echo $stock['id']; ?>, '<?php echo htmlspecialchars($stock['supplier_name'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($stock['derivative_type'], ENT_QUOTES); ?>', <?php echo $stock['weight']; ?>)"
+                                                            <?php echo $stock['weight'] <= 0 ? 'disabled' : ''; ?>
+                                                            title="تسجيل تالف">
+                                                        <i class="bi bi-exclamation-triangle"></i> تالف
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -4911,7 +4997,7 @@ if ($section === 'honey') {
                     <h5 class="modal-title">إضافة مشتق</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST">
+                <form method="POST" id="addDerivativeForm">
                     <input type="hidden" name="action" value="add_derivative">
                     <input type="hidden" name="submit_token" value="">
                     <div class="modal-body scrollable-modal-body">
@@ -4958,6 +5044,51 @@ if ($section === 'honey') {
         </div>
     </div>
     
+<!-- Modal إضافة كمية إلى مشتق موجود -->
+<div class="modal fade" id="addDerivativeQuantityModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>إضافة كمية إلى المشتق</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST">
+                <input type="hidden" name="action" value="add_derivative_quantity">
+                <input type="hidden" name="stock_id" id="add_derivative_stock_id">
+                <input type="hidden" name="submit_token" value="<?php echo uniqid('tok_', true); ?>">
+                <div class="modal-body scrollable-modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">المورد</label>
+                        <input type="text" class="form-control" id="add_derivative_supplier" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">نوع المشتق</label>
+                        <input type="text" class="form-control" id="add_derivative_type" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية الحالية</label>
+                        <input type="text" class="form-control" id="add_derivative_current" readonly>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">الكمية المضافة (كجم) <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control" name="weight" id="add_derivative_weight" step="0.01" min="0.01" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">ملاحظات</label>
+                        <textarea class="form-control" name="notes" rows="3" placeholder="ملاحظات إضافية (اختياري)"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-check-circle me-1"></i>إضافة
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Modal تسجيل تالف للمشتقات -->
 <div class="modal fade" id="damageDerivativeModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-scrollable">
@@ -5007,6 +5138,17 @@ if ($section === 'honey') {
 </div>
 
 <script>
+    function openAddDerivativeQuantityModal(id, supplier, derivativeType, currentWeight) {
+        const weight = parseFloat(currentWeight) || 0;
+        document.getElementById('add_derivative_stock_id').value = id;
+        document.getElementById('add_derivative_supplier').value = supplier;
+        document.getElementById('add_derivative_type').value = derivativeType;
+        document.getElementById('add_derivative_current').value = weight.toFixed(2) + ' كجم';
+        document.getElementById('add_derivative_weight').value = '';
+        document.getElementById('add_derivative_weight').focus();
+        new bootstrap.Modal(document.getElementById('addDerivativeQuantityModal')).show();
+    }
+    
     function openDerivativeDamageModal(id, supplier, derivativeType, quantity) {
         const qty = parseFloat(quantity) || 0;
         document.getElementById('damage_derivative_stock_id').value = id;
@@ -5026,22 +5168,43 @@ if ($section === 'honey') {
     document.addEventListener('DOMContentLoaded', function() {
         const derivativeTypeSelect = document.getElementById('derivative_type_select');
         const derivativeTypeNew = document.getElementById('derivative_type_new');
+        const addDerivativeModal = document.getElementById('addDerivativeModal');
+        
+        // دالة لإعادة تعيين الحالة
+        function resetDerivativeForm() {
+            if (derivativeTypeSelect) {
+                derivativeTypeSelect.value = '';
+                derivativeTypeSelect.setAttribute('required', 'required');
+            }
+            if (derivativeTypeNew) {
+                derivativeTypeNew.style.display = 'none';
+                derivativeTypeNew.value = '';
+                derivativeTypeNew.removeAttribute('required');
+            }
+        }
+        
+        // إعادة تعيين النموذج عند فتح النافذة
+        if (addDerivativeModal) {
+            addDerivativeModal.addEventListener('show.bs.modal', function() {
+                resetDerivativeForm();
+            });
+        }
         
         if (derivativeTypeSelect && derivativeTypeNew) {
             derivativeTypeSelect.addEventListener('change', function() {
                 if (this.value === '__new__') {
                     derivativeTypeNew.style.display = 'block';
-                    derivativeTypeNew.required = true;
+                    derivativeTypeNew.setAttribute('required', 'required');
                     derivativeTypeNew.focus();
                 } else {
                     derivativeTypeNew.style.display = 'none';
-                    derivativeTypeNew.required = false;
+                    derivativeTypeNew.removeAttribute('required');
                     derivativeTypeNew.value = '';
                 }
             });
             
             // عند إرسال النموذج، استخدم القيمة من الحقل النصي إذا تم اختيار "إضافة نوع جديد"
-            const addDerivativeForm = derivativeTypeSelect.closest('form');
+            const addDerivativeForm = document.getElementById('addDerivativeForm');
             if (addDerivativeForm) {
                 addDerivativeForm.addEventListener('submit', function(e) {
                     if (derivativeTypeSelect.value === '__new__') {
@@ -5052,8 +5215,12 @@ if ($section === 'honey') {
                             derivativeTypeNew.focus();
                             return false;
                         }
-                        // استبدال القيمة في select بالقيمة الجديدة
-                        derivativeTypeSelect.value = newTypeValue;
+                        // التأكد من أن القيمة في select هي __new__ حتى يقرأ PHP من الحقل النصي
+                        derivativeTypeSelect.value = '__new__';
+                    } else {
+                        // إذا تم اختيار نوع موجود، تأكد من تعطيل الحقل النصي
+                        derivativeTypeNew.removeAttribute('required');
+                        derivativeTypeNew.value = '';
                     }
                 });
             }
