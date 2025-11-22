@@ -6515,10 +6515,12 @@ function renderTemplateSuppliers(details) {
         }
 
         // تجميع جميع مكوّنات الشمع في بطاقة واحدة فقط
+        // تأكد من عرض بطاقة الشمع بشكل منفصل حتى لو كان هناك عسل
         if (isBeeswaxType) {
             // إذا كان هناك مكوّنات شمع وتم بالفعل عرض بطاقة الشمع
+            // تأكد من عرض بطاقة الشمع فقط للمكوّن الأول (baseEntry)
             if (beeswaxGroup.baseEntry && componentKey !== beeswaxGroup.baseEntry.key) {
-                return; // تخطي المكوّنات الإضافية
+                return; // تخطي المكوّنات الإضافية للشمع
             }
             // إذا كان هذا هو المكوّن الأول من الشمع، تأكد من أنه لم يتم عرضه من قبل
             if (beeswaxGroup.baseEntry && componentKey === beeswaxGroup.baseEntry.key) {
@@ -6527,6 +6529,8 @@ function renderTemplateSuppliers(details) {
                 }
                 beeswaxGroup.processedKeys.add(componentKey);
             }
+            // تأكد من أن بطاقة الشمع ستُعرض حتى لو كان هناك عسل أيضاً
+            // هذا يعني أن المكوّن شمع وسيتم عرض بطاقة الشمع له
         }
 
         const isAggregatedHoneyCard = isHoneyType
@@ -6534,10 +6538,19 @@ function renderTemplateSuppliers(details) {
             && componentKey === honeyGroup.baseEntry.key
             && honeyGroup.renderAggregated;
 
+        // تأكد من عرض بطاقة الشمع إذا كان المكوّن شمع وكان هو baseEntry
+        // يجب أن يتم عرض بطاقة الشمع بشكل منفصل حتى لو كان هناك عسل
         const isAggregatedBeeswaxCard = isBeeswaxType
             && beeswaxGroup.baseEntry
             && componentKey === beeswaxGroup.baseEntry.key
             && beeswaxGroup.renderAggregated;
+        
+        // إذا كان المكوّن شمع ولم يكن هناك baseEntry محدد (يجب أن لا يحدث)
+        // لكن للاحتياط، تأكد من عرض بطاقة الشمع إذا كان المكوّن شمع
+        if (isBeeswaxType && !beeswaxGroup.baseEntry && beeswaxComponentEntries.length > 0) {
+            // في هذه الحالة، يجب أن يكون هناك baseEntry، لكن للاحتياط
+            // سيتم معالجة هذا المكوّن كبطاقة شمع عادية
+        }
 
         const aggregatedEntries = isAggregatedHoneyCard ? honeyGroup.entries : [];
         const extraHoneyEntries = isAggregatedHoneyCard ? honeyGroup.extraEntries : [];
@@ -6651,7 +6664,9 @@ function renderTemplateSuppliers(details) {
                 : 'مورد العسل';
         } else if (isBeeswaxType) {
             // لمكوّنات الشمع، استخدم دائماً "مورد الشمع"
-            controlLabel.textContent = aggregatedBeeswaxEntries.length > 1 
+            // تأكد من عرض بطاقة الشمع بشكل منفصل حتى لو كان هناك عسل
+            const beeswaxCount = isAggregatedBeeswaxCard ? aggregatedBeeswaxEntries.length : 1;
+            controlLabel.textContent = beeswaxCount > 1 
                 ? 'مورد الشمع (سيتم تطبيقه على جميع مكوّنات الشمع)'
                 : 'مورد الشمع';
         } else {
@@ -6684,6 +6699,7 @@ function renderTemplateSuppliers(details) {
             suppliersList = allSuppliers.filter(supplier => supplier.type === 'honey');
         } else if (isBeeswaxType) {
             // لمكوّنات الشمع، استخدم موردين الشمع فقط حتى لو كان عددهم 0
+            // تأكد من عرض بطاقة الشمع بشكل منفصل حتى لو كان هناك عسل
             suppliersList = suppliersForComponent;
             // تأكد من أن الموردين المفلترين هم فقط موردين الشمع
             const allSuppliers = window.productionSuppliers || [];
