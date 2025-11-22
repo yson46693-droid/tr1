@@ -39,6 +39,9 @@ if (!$advance) {
     die('طلب السلفة غير موجود');
 }
 
+// تعريف مبلغ السلفة قبل استخدامه
+$advanceAmount = cleanFinancialValue($advance['amount']);
+
 // جلب بيانات الراتب المرتبط بالسلفة
 $salaryData = null;
 $salaryDetails = null;
@@ -81,17 +84,12 @@ if (!empty($advance['deducted_from_salary_id'])) {
         // الراتب الإجمالي قبل خصم السلفة
         $totalBeforeAdvance = $baseAmount + $bonus + $collectionsBonus - $otherDeductions;
         
-        // الراتب الإجمالي بعد خصم السلفة (يجب أن يساوي total_amount في قاعدة البيانات)
-        $totalAfterAdvance = $totalBeforeAdvance - $advanceAmount;
+        // الراتب الإجمالي بعد خصم السلفة
+        $totalAfterAdvance = max(0, $totalBeforeAdvance - $advanceAmount);
         
-        // تحديث total_amount بالقيمة الصحيحة بعد خصم السلفة
-        // إذا كان total_amount في قاعدة البيانات مختلفاً، استخدم القيمة المحسوبة
-        if (abs($salaryDetails['total_amount'] - $totalAfterAdvance) > 0.01) {
-            $salaryDetails['total_amount'] = max(0, $totalAfterAdvance);
-        } else {
-            // القيمة صحيحة، تأكد من أنها ليست سالبة
-            $salaryDetails['total_amount'] = max(0, $salaryDetails['total_amount']);
-        }
+        // تحديث total_amount بالقيمة المحسوبة بعد خصم السلفة
+        // استخدم القيمة المحسوبة دائماً لضمان الدقة
+        $salaryDetails['total_amount'] = $totalAfterAdvance;
         
         // تحديث otherDeductions للعرض
         $salaryDetails['other_deductions'] = $otherDeductions;
@@ -106,7 +104,6 @@ $companyPhone = 'الهاتف: 0000000000';
 $companyEmail = 'info@example.com';
 
 $advanceDate = formatDate($advance['request_date']);
-$advanceAmount = cleanFinancialValue($advance['amount']);
 $advanceStatus = $advance['status'];
 $statusLabels = [
     'pending' => 'قيد الانتظار',
