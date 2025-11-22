@@ -5574,7 +5574,13 @@ function getSuppliersForComponent(component) {
         return allowedTypes.some(allowedType => supplierType === allowedType.toLowerCase());
     });
 
-    // للعسل
+    // يجب التحقق من الشمع أولاً لتجنب تعارضه مع العسل (مثل "شمع عسل")
+    // للشمع
+    if (type === 'beeswax' || key.startsWith('beeswax') || name.includes('شمع') || name.includes('beeswax') || key.includes('wax')) {
+        return filterByTypes(['beeswax']);
+    }
+
+    // للعسل - فقط إذا لم يكن شمع
     if (isHoneyComponent(component)) {
         return filterByTypes(['honey']);
     }
@@ -5587,11 +5593,6 @@ function getSuppliersForComponent(component) {
     // لزيت الزيتون
     if (type === 'olive_oil' || key.startsWith('olive') || name.includes('زيت زيتون') || name.includes('olive oil') || name.includes('olive_oil')) {
         return filterByTypes(['olive_oil']);
-    }
-
-    // للشمع
-    if (type === 'beeswax' || key.startsWith('beeswax') || name.includes('شمع') || name.includes('beeswax')) {
-        return filterByTypes(['beeswax']);
     }
 
     // للمشتقات
@@ -6220,7 +6221,18 @@ function renderTemplateSuppliers(details) {
         const key = (component.key || '').toString().toLowerCase();
         const name = ((component.name || component.label || '').toString().toLowerCase());
         
-        // فحص العسل من الاسم أيضاً
+        // يجب التحقق من الشمع أولاً لتجنب تعارضه مع العسل (مثل "شمع عسل")
+        if (key.startsWith('beeswax') || name.includes('شمع') || key.includes('beeswax') || key.includes('wax')) {
+            return 'beeswax';
+        }
+        
+        if (key.startsWith('pack_')) return 'packaging';
+        if (key.startsWith('raw_')) return 'raw_general';
+        if (key.startsWith('olive')) return 'olive_oil';
+        if (key.startsWith('derivative')) return 'derivatives';
+        if (key.startsWith('nuts')) return 'nuts';
+        
+        // فحص العسل من الاسم أيضاً - فقط إذا لم يكن شمع
         if (key.startsWith('honey_') || name.includes('عسل')) {
             if (name.includes('مصفى') || name.includes('filtered') || key.includes('filtered')) {
                 return 'honey_filtered';
@@ -6231,12 +6243,6 @@ function renderTemplateSuppliers(details) {
             return 'honey_general';
         }
         
-        if (key.startsWith('pack_')) return 'packaging';
-        if (key.startsWith('raw_')) return 'raw_general';
-        if (key.startsWith('olive')) return 'olive_oil';
-        if (key.startsWith('beeswax')) return 'beeswax';
-        if (key.startsWith('derivative')) return 'derivatives';
-        if (key.startsWith('nuts')) return 'nuts';
         return 'generic';
     };
 
@@ -6482,22 +6488,27 @@ function renderTemplateSuppliers(details) {
         if (honeyVarietyRequired && !HONEY_COMPONENT_TYPES.includes(canonicalType)) {
             canonicalType = 'honey_general';
         }
-        // فحص شامل لتحديد ما إذا كان المكوّن عسل
+        // فحص شامل لتحديد ما إذا كان المكوّن عسل أو شمع
         const componentName = ((component.name || component.label || '').toString().toLowerCase());
         const componentKeyLower = (componentKey || '').toString().toLowerCase();
-        const isHoneyByNameOrKey = componentName.includes('عسل') || componentKeyLower.includes('honey');
         
-        const isHoneyType = isHoneyComponent(component)
+        // فحص شامل لتحديد ما إذا كان المكوّن شمع - يجب التحقق من الشمع أولاً لتجنب تعارضه مع العسل
+        const isBeeswaxByNameOrKey = componentName.includes('شمع') || componentKeyLower.includes('beeswax') || componentKeyLower.includes('wax');
+        const isBeeswaxType = canonicalType === 'beeswax' || isBeeswaxByNameOrKey;
+        
+        // فحص شامل لتحديد ما إذا كان المكوّن عسل - لكن فقط إذا لم يكن شمع
+        // إذا كان المكون يحتوي على "شمع"، فلا يجب أن يعامل كعسل حتى لو كان يحتوي على "عسل"
+        const isHoneyByNameOrKey = !isBeeswaxType && (componentName.includes('عسل') || componentKeyLower.includes('honey'));
+        
+        const isHoneyType = !isBeeswaxType && (
+            isHoneyComponent(component)
             || honeyVarietyRequired
             || canonicalType === 'honey_raw'
             || canonicalType === 'honey_filtered'
             || canonicalType === 'honey_main'
             || canonicalType === 'honey_general'
-            || isHoneyByNameOrKey;
-
-        // فحص شامل لتحديد ما إذا كان المكوّن شمع
-        const isBeeswaxByNameOrKey = componentName.includes('شمع') || componentKeyLower.includes('beeswax') || componentKeyLower.includes('wax');
-        const isBeeswaxType = canonicalType === 'beeswax' || isBeeswaxByNameOrKey;
+            || isHoneyByNameOrKey
+        );
 
         // تجميع جميع مكوّنات العسل في بطاقة واحدة فقط
         if (isHoneyType) {
