@@ -234,76 +234,107 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $title = $taskType === 'production' ? 'مهمة إنتاج جديدة' : 'مهمة جديدة';
                 }
 
-                $insertedTaskIds = [];
+                // الحصول على أسماء العمال المختارين
+                $assigneeNames = [];
                 foreach ($assignees as $assignedId) {
-                    $columns = ['title', 'description', 'created_by', 'priority', 'status', 'related_type'];
-                    $values = [$title, $details ?: null, $currentUser['id'], $priority, 'pending', $relatedTypeValue];
-                    $placeholders = ['?', '?', '?', '?', '?', '?'];
-
-                    if ($assignedId > 0) {
-                        $columns[] = 'assigned_to';
-                        $values[] = $assignedId;
-                        $placeholders[] = '?';
-                    }
-
-                    if ($dueDate) {
-                        $columns[] = 'due_date';
-                        $values[] = $dueDate;
-                        $placeholders[] = '?';
-                    }
-
-                    // حفظ اسم المنتج في notes إذا كان موجوداً
-                    $notesValue = $details ?: null;
-                    if ($productName !== '') {
-                        $productInfo = 'المنتج: ' . $productName;
-                        if ($productQuantity !== null) {
-                            $productInfo .= ' - الكمية: ' . $productQuantity;
+                    foreach ($productionUsers as $user) {
+                        if ((int)$user['id'] === $assignedId) {
+                            $assigneeNames[] = $user['full_name'];
+                            break;
                         }
-                        $notesValue = $notesValue ? ($notesValue . "\n\n" . $productInfo) : $productInfo;
                     }
-                    
-                    // تحديث description إذا كان notes يحتوي على معلومات المنتج
-                    if ($notesValue && $notesValue !== $details) {
-                        $columns[] = 'notes';
-                        $values[] = $notesValue;
-                        $placeholders[] = '?';
-                    }
+                }
 
+                // إنشاء مهمة واحدة فقط مع حفظ جميع العمال
+                $columns = ['title', 'description', 'created_by', 'priority', 'status', 'related_type'];
+                $values = [$title, $details ?: null, $currentUser['id'], $priority, 'pending', $relatedTypeValue];
+                $placeholders = ['?', '?', '?', '?', '?', '?'];
+
+                // وضع أول عامل في assigned_to للتوافق مع الكود الحالي
+                $firstAssignee = !empty($assignees) ? (int)$assignees[0] : 0;
+                if ($firstAssignee > 0) {
+                    $columns[] = 'assigned_to';
+                    $values[] = $firstAssignee;
+                    $placeholders[] = '?';
+                }
+
+                if ($dueDate) {
+                    $columns[] = 'due_date';
+                    $values[] = $dueDate;
+                    $placeholders[] = '?';
+                }
+
+                // بناء notes مع معلومات المنتج والعمال
+                $notesParts = [];
+                if ($details) {
+                    $notesParts[] = $details;
+                }
+                
+                if ($productName !== '') {
+                    $productInfo = 'المنتج: ' . $productName;
                     if ($productQuantity !== null) {
-                        $columns[] = 'quantity';
-                        $values[] = $productQuantity;
-                        $placeholders[] = '?';
+                        $productInfo .= ' - الكمية: ' . $productQuantity;
                     }
+                    $notesParts[] = $productInfo;
+                }
+                
+                // حفظ قائمة العمال في notes
+                if (count($assignees) > 1) {
+                    $assigneesInfo = 'العمال المخصصون: ' . implode(', ', $assigneeNames);
+                    $assigneesInfo .= "\n[ASSIGNED_WORKERS_IDS]:" . implode(',', $assignees);
+                    $notesParts[] = $assigneesInfo;
+                } elseif (count($assignees) === 1) {
+                    $assigneesInfo = 'العامل المخصص: ' . ($assigneeNames[0] ?? '');
+                    $assigneesInfo .= "\n[ASSIGNED_WORKERS_IDS]:" . $assignees[0];
+                    $notesParts[] = $assigneesInfo;
+                }
+                
+                $notesValue = !empty($notesParts) ? implode("\n\n", $notesParts) : null;
+                if ($notesValue) {
+                    $columns[] = 'notes';
+                    $values[] = $notesValue;
+                    $placeholders[] = '?';
+                }
 
-                    $sql = "INSERT INTO tasks (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $placeholders) . ")";
-                    $result = $db->execute($sql, $values);
-                    $taskId = $result['insert_id'] ?? 0;
+                if ($productQuantity !== null) {
+                    $columns[] = 'quantity';
+                    $values[] = $productQuantity;
+                    $placeholders[] = '?';
+                }
 
-                    if ($taskId <= 0) {
-                        throw new Exception('تعذر إنشاء المهمة.');
-                    }
+                $sql = "INSERT INTO tasks (" . implode(', ', $columns) . ") VALUES (" . implode(', ', $placeholders) . ")";
+                $result = $db->execute($sql, $values);
+                $taskId = $result['insert_id'] ?? 0;
 
-                    $insertedTaskIds[] = $taskId;
+                if ($taskId <= 0) {
+                    throw new Exception('تعذر إنشاء المهمة.');
+                }
 
-                    logAudit(
-                        $currentUser['id'],
-                        'create_production_task',
-                        'tasks',
-                        $taskId,
-                        null,
-                        [
-                            'task_type' => $taskType,
-                            'assigned_to' => $assignedId,
-                            'priority' => $priority,
-                            'due_date' => $dueDate,
-                            'product_name' => $productName ?: null,
-                            'quantity' => $productQuantity
-                        ]
-                    );
+                logAudit(
+                    $currentUser['id'],
+                    'create_production_task',
+                    'tasks',
+                    $taskId,
+                    null,
+                    [
+                        'task_type' => $taskType,
+                        'assigned_to' => $assignees,
+                        'assigned_count' => count($assignees),
+                        'priority' => $priority,
+                        'due_date' => $dueDate,
+                        'product_name' => $productName ?: null,
+                        'quantity' => $productQuantity
+                    ]
+                );
 
-                    $notificationTitle = 'مهمة جديدة من الإدارة';
-                    $notificationMessage = $title;
+                // إرسال إشعارات لجميع العمال المختارين
+                $notificationTitle = 'مهمة جديدة من الإدارة';
+                $notificationMessage = $title;
+                if (count($assignees) > 1) {
+                    $notificationMessage .= ' (مشتركة مع ' . (count($assignees) - 1) . ' عامل آخر)';
+                }
 
+                foreach ($assignees as $assignedId) {
                     try {
                         createNotification(
                             $assignedId,
@@ -317,13 +348,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                if (!empty($insertedTaskIds)) {
-                    enforceTasksRetentionLimit($db, $tasksRetentionLimit);
-                }
+                enforceTasksRetentionLimit($db, $tasksRetentionLimit);
 
                 $db->commit();
 
-                $success = 'تم إرسال المهمة بنجاح إلى ' . count($insertedTaskIds) . ' من عمال الإنتاج.';
+                $success = 'تم إرسال المهمة بنجاح إلى ' . count($assignees) . ' من عمال الإنتاج.';
             } catch (Exception $e) {
                 $db->rollback();
                 error_log('Manager production task creation error: ' . $e->getMessage());
@@ -453,13 +482,43 @@ $priorityStyles = [
 try {
     $recentTasks = $db->query("
         SELECT t.id, t.title, t.status, t.priority, t.due_date, t.created_at,
-               t.quantity, t.notes, u.full_name AS assigned_name
+               t.quantity, t.notes, u.full_name AS assigned_name, t.assigned_to
         FROM tasks t
         LEFT JOIN users u ON t.assigned_to = u.id
         WHERE t.created_by = ?
         ORDER BY t.created_at DESC
         LIMIT 10
     ", [$currentUser['id']]);
+    
+    // استخراج جميع العمال من notes لكل مهمة
+    foreach ($recentTasks as &$task) {
+        $notes = $task['notes'] ?? '';
+        $allWorkers = [];
+        
+        // محاولة استخراج IDs من notes
+        if (preg_match('/\[ASSIGNED_WORKERS_IDS\]:\s*([0-9,]+)/', $notes, $matches)) {
+            $workerIds = array_filter(array_map('intval', explode(',', $matches[1])));
+            if (!empty($workerIds)) {
+                $placeholders = implode(',', array_fill(0, count($workerIds), '?'));
+                $workers = $db->query(
+                    "SELECT id, full_name FROM users WHERE id IN ($placeholders) ORDER BY full_name",
+                    $workerIds
+                );
+                foreach ($workers as $worker) {
+                    $allWorkers[] = $worker['full_name'];
+                }
+            }
+        }
+        
+        // إذا لم نجد عمال من notes، استخدم assigned_to
+        if (empty($allWorkers) && !empty($task['assigned_name'])) {
+            $allWorkers[] = $task['assigned_name'];
+        }
+        
+        $task['all_workers'] = $allWorkers;
+        $task['workers_count'] = count($allWorkers);
+    }
+    unset($task);
 } catch (Exception $e) {
     error_log('Manager recent tasks error: ' . $e->getMessage());
 }
@@ -692,7 +751,21 @@ try {
                                             <div class="text-muted small">الكمية: <?php echo number_format((float)$task['quantity'], 2); ?></div>
                                         <?php endif; ?>
                                     </td>
-                                    <td><?php echo htmlspecialchars($task['assigned_name'] ?? 'غير محدد'); ?></td>
+                                    <td>
+                                        <?php 
+                                        if (!empty($task['all_workers'])) {
+                                            $workersList = $task['all_workers'];
+                                            if (count($workersList) > 1) {
+                                                echo '<span class="badge bg-info me-1">' . count($workersList) . ' عمال</span><br>';
+                                                echo '<small class="text-muted">' . htmlspecialchars(implode(', ', $workersList)) . '</small>';
+                                            } else {
+                                                echo htmlspecialchars($workersList[0]);
+                                            }
+                                        } else {
+                                            echo htmlspecialchars($task['assigned_name'] ?? 'غير محدد');
+                                        }
+                                        ?>
+                                    </td>
                                     <td>
                                         <?php
                                         $statusKey = $task['status'] ?? '';

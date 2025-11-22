@@ -306,15 +306,33 @@ function tasksHandleAction(string $action, array $input, array $context): array
                     throw new RuntimeException('معرف المهمة غير صحيح');
                 }
 
-                $task = $db->queryOne('SELECT assigned_to, status, title, created_by FROM tasks WHERE id = ?', [$taskId]);
+                $task = $db->queryOne('SELECT assigned_to, status, title, created_by, notes FROM tasks WHERE id = ?', [$taskId]);
                 if (!$task) {
                     throw new RuntimeException('المهمة غير موجودة');
                 }
 
-                // السماح لأي عامل إنتاج بتغيير حالة أي مهمة مخصصة لأي عامل إنتاج
-                // التحقق فقط من أن المهمة مخصصة لعامل إنتاج (وليس للمدير أو المحاسب)
-                $assignedUser = $db->queryOne('SELECT role FROM users WHERE id = ?', [(int) $task['assigned_to']]);
-                if (!$assignedUser || $assignedUser['role'] !== 'production') {
+                // التحقق من أن المهمة مخصصة لعامل إنتاج
+                $isAssignedToProduction = false;
+                
+                // التحقق من assigned_to
+                if (!empty($task['assigned_to'])) {
+                    $assignedUser = $db->queryOne('SELECT role FROM users WHERE id = ?', [(int) $task['assigned_to']]);
+                    if ($assignedUser && $assignedUser['role'] === 'production') {
+                        $isAssignedToProduction = true;
+                    }
+                }
+                
+                // التحقق من notes للعثور على جميع العمال المخصصين
+                if (!$isAssignedToProduction && !empty($task['notes'])) {
+                    if (preg_match('/\[ASSIGNED_WORKERS_IDS\]:\s*([0-9,]+)/', $task['notes'], $matches)) {
+                        $workerIds = array_filter(array_map('intval', explode(',', $matches[1])));
+                        if (in_array((int)$currentUser['id'], $workerIds, true)) {
+                            $isAssignedToProduction = true;
+                        }
+                    }
+                }
+                
+                if (!$isAssignedToProduction) {
                     throw new RuntimeException('هذه المهمة غير مخصصة لعامل إنتاج');
                 }
 
@@ -473,11 +491,8 @@ if ($assignedFilter > 0) {
     $params[] = $assignedFilter;
 }
 
-// إزالة الفلترة - السماح لجميع عمال الإنتاج برؤية جميع المهام
-// if ($isProduction) {
-//     $whereConditions[] = 't.assigned_to = ?';
-//     $params[] = (int) $currentUser['id'];
-// }
+// السماح لجميع عمال الإنتاج برؤية جميع المهام المخصصة لأي عامل إنتاج
+// لا حاجة للفلترة - جميع عمال الإنتاج يرون جميع المهام
 
 $whereClause = $whereConditions ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
 
@@ -508,6 +523,36 @@ LIMIT ? OFFSET ?";
 
 $queryParams = array_merge($params, [$perPage, $offset]);
 $tasks = $db->query($taskSql, $queryParams);
+
+// استخراج جميع العمال من notes لكل مهمة
+foreach ($tasks as &$task) {
+    $notes = $task['notes'] ?? '';
+    $allWorkers = [];
+    
+    // محاولة استخراج IDs من notes
+    if (preg_match('/\[ASSIGNED_WORKERS_IDS\]:\s*([0-9,]+)/', $notes, $matches)) {
+        $workerIds = array_filter(array_map('intval', explode(',', $matches[1])));
+        if (!empty($workerIds)) {
+            $placeholders = implode(',', array_fill(0, count($workerIds), '?'));
+            $workers = $db->query(
+                "SELECT id, full_name FROM users WHERE id IN ($placeholders) ORDER BY full_name",
+                $workerIds
+            );
+            foreach ($workers as $worker) {
+                $allWorkers[] = $worker['full_name'];
+            }
+        }
+    }
+    
+    // إذا لم نجد عمال من notes، استخدم assigned_to
+    if (empty($allWorkers) && !empty($task['assigned_to_name'])) {
+        $allWorkers[] = $task['assigned_to_name'];
+    }
+    
+    $task['all_workers'] = $allWorkers;
+    $task['workers_count'] = count($allWorkers);
+}
+unset($task);
 
 $users = $db->query("SELECT id, full_name FROM users WHERE status = 'active' AND role = 'production' ORDER BY full_name");
 $products = $db->query("SELECT id, name FROM products WHERE status = 'active' ORDER BY name");
@@ -754,7 +799,21 @@ function tasksHtml(string $value): string
                                     </td>
                                     <td><?php echo isset($task['product_name']) && $task['product_name'] !== null ? tasksHtml($task['product_name']) : '<span class="text-muted">-</span>'; ?></td>
                                     <td><?php echo isset($task['quantity']) && $task['quantity'] !== null ? number_format((float) $task['quantity'], 2) . ' قطعة' : '<span class="text-muted">-</span>'; ?></td>
-                                    <td><?php echo isset($task['assigned_to_name']) ? tasksHtml($task['assigned_to_name']) : '<span class="text-muted">غير محدد</span>'; ?></td>
+                                    <td>
+                                        <?php 
+                                        if (!empty($task['all_workers'])) {
+                                            $workersList = $task['all_workers'];
+                                            if (count($workersList) > 1) {
+                                                echo '<span class="badge bg-info me-1">' . count($workersList) . ' عمال</span><br>';
+                                                echo '<small class="text-muted">' . tasksHtml(implode(', ', $workersList)) . '</small>';
+                                            } else {
+                                                echo tasksHtml($workersList[0]);
+                                            }
+                                        } else {
+                                            echo isset($task['assigned_to_name']) ? tasksHtml($task['assigned_to_name']) : '<span class="text-muted">غير محدد</span>';
+                                        }
+                                        ?>
+                                    </td>
                                     <td><span class="badge bg-<?php echo $priorityClass; ?>"><?php echo tasksHtml($priorityLabel); ?></span></td>
                                     <td><span class="badge bg-<?php echo $statusClass; ?>"><?php echo tasksHtml($statusLabel); ?></span></td>
                                     <td>
@@ -772,12 +831,37 @@ function tasksHtml(string $value): string
                                                 // التحقق من أن المهمة مخصصة لعامل إنتاج
                                                 $taskAssignedTo = (int) ($task['assigned_to'] ?? 0);
                                                 $assignedUserRole = null;
+                                                $isTaskForProduction = false;
+                                                
+                                                // التحقق من assigned_to
                                                 if ($taskAssignedTo > 0) {
                                                     $assignedUser = $db->queryOne('SELECT role FROM users WHERE id = ?', [$taskAssignedTo]);
                                                     $assignedUserRole = $assignedUser['role'] ?? null;
+                                                    if ($assignedUserRole === 'production') {
+                                                        $isTaskForProduction = true;
+                                                    }
                                                 }
+                                                
+                                                // التحقق من notes للعثور على جميع العمال المخصصين
+                                                if (!$isTaskForProduction && !empty($task['notes'])) {
+                                                    if (preg_match('/\[ASSIGNED_WORKERS_IDS\]:\s*([0-9,]+)/', $task['notes'], $matches)) {
+                                                        $workerIds = array_filter(array_map('intval', explode(',', $matches[1])));
+                                                        if (!empty($workerIds)) {
+                                                            // التحقق من أن أحد العمال المخصصين هو عامل إنتاج
+                                                            $placeholders = implode(',', array_fill(0, count($workerIds), '?'));
+                                                            $workersCheck = $db->queryOne(
+                                                                "SELECT COUNT(*) as count FROM users WHERE id IN ($placeholders) AND role = 'production'",
+                                                                $workerIds
+                                                            );
+                                                            if ($workersCheck && (int)$workersCheck['count'] > 0) {
+                                                                $isTaskForProduction = true;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
                                                 // السماح لأي عامل إنتاج بتغيير حالة أي مهمة مخصصة لعامل إنتاج
-                                                if ($assignedUserRole === 'production'): 
+                                                if ($isTaskForProduction): 
                                                 ?>
                                                     <?php if ($task['status'] === 'pending'): ?>
                                                         <button type="button" class="btn btn-outline-info" onclick="submitTaskAction('receive_task', <?php echo (int) $task['id']; ?>)">
