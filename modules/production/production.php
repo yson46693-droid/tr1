@@ -2035,25 +2035,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $templateType = trim($_POST['template_type'] ?? 'legacy');
 
-                $template = $db->queryOne(
-                    "SELECT pt.*, pr.id as product_id, pr.name as product_name
-                     FROM product_templates pt
-                     LEFT JOIN products pr ON pt.product_name = pr.name
-                     WHERE pt.id = ?",
-                    [$templateId]
-                );
+                // جلب القالب من الجدول المناسب بناءً على نوع القالب
+                $template = null;
+                
+                if ($templateType === 'unified') {
+                    // القوالب الموحدة من جدول unified_product_templates
+                    $template = $db->queryOne(
+                        "SELECT upt.*, 
+                                'unified' AS template_type,
+                                upt.product_name,
+                                pr.id as product_id,
+                                pr.name as product_name_from_products
+                         FROM unified_product_templates upt
+                         LEFT JOIN products pr ON upt.product_name = pr.name
+                         WHERE upt.id = ?",
+                        [$templateId]
+                    );
+                    
+                    // إذا كان product_name فارغاً، استخدم product_name_from_products
+                    if ($template && empty($template['product_name']) && !empty($template['product_name_from_products'])) {
+                        $template['product_name'] = $template['product_name_from_products'];
+                    }
+                } else {
+                    // القوالب التقليدية من جدول product_templates
+                    $template = $db->queryOne(
+                        "SELECT pt.*, pr.id as product_id, pr.name as product_name
+                         FROM product_templates pt
+                         LEFT JOIN products pr ON pt.product_name = pr.name
+                         WHERE pt.id = ?",
+                        [$templateId]
+                    );
+                }
 
                 if (!$template) {
                     throw new Exception('القالب غير موجود');
                 }
+                
+                // التأكد من وجود product_name في القالب
+                if (empty($template['product_name'])) {
+                    // محاولة جلب اسم المنتج من جدول products إذا كان product_id موجوداً
+                    if (!empty($template['product_id'])) {
+                        $product = $db->queryOne("SELECT name FROM products WHERE id = ?", [$template['product_id']]);
+                        if ($product && !empty($product['name'])) {
+                            $template['product_name'] = $product['name'];
+                        }
+                    }
+                    
+                    // إذا لم يتم العثور على اسم المنتج، استخدم اسم القالب كبديل
+                    if (empty($template['product_name'])) {
+                        // البحث في unified_product_templates إذا كان template_type = 'unified'
+                        if ($templateType === 'unified') {
+                            $unifiedTemplate = $db->queryOne(
+                                "SELECT product_name FROM unified_product_templates WHERE id = ?",
+                                [$templateId]
+                            );
+                            if ($unifiedTemplate && !empty($unifiedTemplate['product_name'])) {
+                                $template['product_name'] = $unifiedTemplate['product_name'];
+                            }
+                        }
+                    }
+                }
 
                 // الحصول على المواد الخام للتحقق من العسل واستخراج مورد العسل
-                $rawMaterialsForCheck = $db->query(
-                    "SELECT id, material_name, quantity_per_unit, unit
-                     FROM product_template_raw_materials
-                     WHERE template_id = ?",
-                    [$templateId]
-                );
+                // استخدام الجدول المناسب بناءً على نوع القالب
+                if ($templateType === 'unified') {
+                    $rawMaterialsForCheck = $db->query(
+                        "SELECT id, material_name, quantity_per_unit, unit, material_type, honey_variety
+                         FROM template_raw_materials
+                         WHERE template_id = ?",
+                        [$templateId]
+                    );
+                } else {
+                    $rawMaterialsForCheck = $db->query(
+                        "SELECT id, material_name, quantity_per_unit, unit
+                         FROM product_template_raw_materials
+                         WHERE template_id = ?",
+                        [$templateId]
+                    );
+                }
                 
                 // استخراج مورد العسل من $materialSuppliers إذا كانت المادة عسل
                 $honeySupplierIdForCheck = null;
