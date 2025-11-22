@@ -36,7 +36,9 @@ $supplyCategoryLabels = [
     'olive_oil' => 'زيت الزيتون',
     'beeswax' => 'شمع العسل',
     'derivatives' => 'المشتقات',
-    'nuts' => 'المكسرات'
+    'nuts' => 'المكسرات',
+    'sesame' => 'السمسم',
+    'tahini' => 'الطحينة'
 ];
 
 // الحصول على رسالة النجاح من session (بعد redirect)

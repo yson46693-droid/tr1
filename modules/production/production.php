@@ -3649,7 +3649,9 @@ $supplyCategoryLabels = [
     'olive_oil' => 'زيت الزيتون',
     'beeswax' => 'شمع العسل',
     'derivatives' => 'المشتقات',
-    'nuts' => 'المكسرات'
+    'nuts' => 'المكسرات',
+    'sesame' => 'السمسم',
+    'tahini' => 'الطحينة'
 ];
 $supplyCategoryParam = isset($_GET['supply_category']) ? trim((string)$_GET['supply_category']) : '';
 if ($supplyCategoryParam !== '' && !array_key_exists($supplyCategoryParam, $supplyCategoryLabels)) {
