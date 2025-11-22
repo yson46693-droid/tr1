@@ -1608,16 +1608,22 @@ if (!function_exists('ensureTahiniStockTable')) {
                 try {
                     $columnsCheck = $db->queryOne("SHOW COLUMNS FROM tahini_stock LIKE 'supplier_id'");
                     if (!empty($columnsCheck)) {
-                        $ready = true;
-                        return $ready;
+                        // التحقق من وجود عمود quantity أيضاً
+                        $quantityCheck = $db->queryOne("SHOW COLUMNS FROM tahini_stock LIKE 'quantity'");
+                        if (!empty($quantityCheck)) {
+                            $ready = true;
+                            return $ready;
+                        } else {
+                            error_log("ensureTahiniStockTable: Table exists but quantity column is missing");
+                            // سنحاول إعادة إنشاء الجدول
+                        }
                     } else {
-                        error_log("ensureTahiniStockTable: Table exists but required columns are missing");
-                        $ready = false;
-                        // سنحاول إعادة إنشاء الجدول لاحقاً
+                        error_log("ensureTahiniStockTable: Table exists but supplier_id column is missing");
+                        // سنحاول إعادة إنشاء الجدول
                     }
                 } catch (Exception $colError) {
                     error_log("ensureTahiniStockTable: Error checking existing table columns: " . $colError->getMessage());
-                    $ready = false;
+                    // سنحاول إعادة إنشاء الجدول
                 }
             }
             
@@ -1675,11 +1681,13 @@ if (!function_exists('ensureTahiniStockTable')) {
                 // التحقق من أن الأعمدة الأساسية موجودة
                 try {
                     $columnsCheck = $db->queryOne("SHOW COLUMNS FROM tahini_stock LIKE 'supplier_id'");
-                    if (!empty($columnsCheck)) {
+                    $quantityCheck = $db->queryOne("SHOW COLUMNS FROM tahini_stock LIKE 'quantity'");
+                    if (!empty($columnsCheck) && !empty($quantityCheck)) {
                         $ready = true;
                         error_log("ensureTahiniStockTable: tahini_stock table created and verified successfully");
+                        return $ready;
                     } else {
-                        error_log("ensureTahiniStockTable: Table exists but required columns are missing");
+                        error_log("ensureTahiniStockTable: Table exists but required columns are missing (supplier_id: " . (!empty($columnsCheck) ? 'exists' : 'missing') . ", quantity: " . (!empty($quantityCheck) ? 'exists' : 'missing') . ")");
                         $ready = false;
                     }
                 } catch (Exception $colError) {
@@ -2704,13 +2712,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (function_exists('ensureTahiniStockTable')) {
                 $tahiniStockTableReady = ensureTahiniStockTable(true);
             } else {
-                $tahiniStockTableReady = false;
+                // محاولة التحقق مباشرة من وجود الجدول
+                try {
+                    $tableCheck = $db->queryOne("SHOW TABLES LIKE 'tahini_stock'");
+                    if (!empty($tableCheck)) {
+                        $columnCheck = $db->queryOne("SHOW COLUMNS FROM tahini_stock LIKE 'supplier_id'");
+                        $tahiniStockTableReady = !empty($columnCheck);
+                    } else {
+                        $tahiniStockTableReady = false;
+                    }
+                } catch (Exception $e) {
+                    error_log("Direct tahini_stock table check failed: " . $e->getMessage());
+                    $tahiniStockTableReady = false;
+                }
             }
             
             if (!$sesameStockTableReady) {
                 $error = 'لا يمكن الوصول إلى جدول مخزون السمسم. يرجى المحاولة لاحقاً أو التواصل مع الدعم.';
             } elseif (!$tahiniStockTableReady) {
-                $error = 'لا يمكن الوصول إلى جدول مخزون الطحينة. يرجى المحاولة لاحقاً أو التواصل مع الدعم.';
+                // محاولة إنشاء الجدول مباشرة إذا فشلت الدالة
+                try {
+                    $suppliersCheck = $db->queryOne("SHOW TABLES LIKE 'suppliers'");
+                    if (!empty($suppliersCheck)) {
+                        try {
+                            $db->execute("
+                                CREATE TABLE IF NOT EXISTS `tahini_stock` (
+                                  `id` int(11) NOT NULL AUTO_INCREMENT,
+                                  `supplier_id` int(11) NOT NULL,
+                                  `quantity` decimal(10,3) NOT NULL DEFAULT 0.000 COMMENT 'الكمية بالكيلوجرام',
+                                  `unit_price` decimal(10,2) DEFAULT NULL COMMENT 'سعر الكيلو',
+                                  `notes` text DEFAULT NULL,
+                                  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                  `updated_at` timestamp NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                                  PRIMARY KEY (`id`),
+                                  KEY `supplier_id_idx` (`supplier_id`)
+                                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                            ");
+                            $verifyCheck = $db->queryOne("SHOW TABLES LIKE 'tahini_stock'");
+                            if (!empty($verifyCheck)) {
+                                $tahiniStockTableReady = true;
+                            }
+                        } catch (Exception $createError) {
+                            error_log("Failed to create tahini_stock table directly: " . $createError->getMessage());
+                        }
+                    }
+                } catch (Exception $e) {
+                    error_log("Error checking/creating tahini_stock table: " . $e->getMessage());
+                }
+                
+                if (!$tahiniStockTableReady) {
+                    $error = 'لا يمكن الوصول إلى جدول مخزون الطحينة. يرجى المحاولة لاحقاً أو التواصل مع الدعم.';
+                }
             }
             
             $sesameStockId = intval($_POST['sesame_stock_id'] ?? 0);
