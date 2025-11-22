@@ -2570,7 +2570,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sesameStockTableReady = ensureSesameStockTable(true);
             }
             if (!$tahiniStockTableReady) {
-                $tahiniStockTableReady = ensureTahiniStockTable(true);
+                $tahiniStockTableReady = function_exists('ensureTahiniStockTable') ? ensureTahiniStockTable(true) : false;
             }
             
             if (!$sesameStockTableReady) {
