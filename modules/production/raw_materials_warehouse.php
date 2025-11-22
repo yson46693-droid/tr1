@@ -1528,6 +1528,7 @@ if (!function_exists('ensureTahiniStockTable')) {
         
         if ($forceRetry) {
             $checked = false;
+            $ready = false;
         }
         
         if ($checked) {
@@ -1538,12 +1539,27 @@ if (!function_exists('ensureTahiniStockTable')) {
         
         try {
             $db = db();
+            if (!$db) {
+                error_log("ensureTahiniStockTable: Database connection failed");
+                return false;
+            }
+            
+            // التحقق من وجود الجدول
             $tahiniStockCheck = $db->queryOne("SHOW TABLES LIKE 'tahini_stock'");
             if (!empty($tahiniStockCheck)) {
                 $ready = true;
                 return $ready;
             }
             
+            // التحقق من وجود جدول suppliers أولاً
+            $suppliersCheck = $db->queryOne("SHOW TABLES LIKE 'suppliers'");
+            if (empty($suppliersCheck)) {
+                error_log("ensureTahiniStockTable: suppliers table does not exist. Cannot create tahini_stock table.");
+                $ready = false;
+                return false;
+            }
+            
+            // إنشاء الجدول
             $db->execute("
                 CREATE TABLE IF NOT EXISTS `tahini_stock` (
                   `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -1559,9 +1575,18 @@ if (!function_exists('ensureTahiniStockTable')) {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
             
-            $ready = true;
+            // التحقق مرة أخرى من أن الجدول تم إنشاؤه
+            $verifyCheck = $db->queryOne("SHOW TABLES LIKE 'tahini_stock'");
+            if (!empty($verifyCheck)) {
+                $ready = true;
+                error_log("ensureTahiniStockTable: tahini_stock table created successfully");
+            } else {
+                error_log("ensureTahiniStockTable: Failed to verify tahini_stock table creation");
+                $ready = false;
+            }
         } catch (Exception $e) {
             error_log("Error ensuring tahini_stock table: " . $e->getMessage());
+            error_log("Error stack trace: " . $e->getTraceAsString());
             $ready = false;
         }
         
